@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=70"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "connaissance"
+version = "2.1.0"
+description = "Personal knowledge base CLI — transcription, summarization, entity organization, synthesis, audit. Built around a local Markdown + SQLite store."
+requires-python = ">=3.10"
+authors = [{ name = "guioum" }]
+license = { text = "MIT" }
+dependencies = [
+    "pyyaml>=6.0",
+    "ruamel.yaml>=0.18",
+]
+
+[project.scripts]
+connaissance = "connaissance.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+"connaissance" = ["prompts/*.md", "config/*.yaml"]

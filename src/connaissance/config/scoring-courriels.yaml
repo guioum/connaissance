@@ -1,0 +1,249 @@
+# Template de configuration du scoring des courriels
+#
+# Ce fichier est copié automatiquement vers ~/Connaissance/.config/scoring-courriels.yaml
+# au premier lancement. C'est la copie utilisateur qui est lue et modifiée, pas ce template.
+#
+# Pour recalibrer :
+#   connaissance emails calibrate --sample 200
+#
+# Les ajustements proposés sont écrits dans
+# ~/Connaissance/.config/scoring-courriels.calibrage.yaml pour révision.
+
+# --- Seuils ---
+seuils:
+  capturer: 0       # score >= ce seuil → capturer
+  ignorer: -1        # score <= ce seuil → ignorer
+  # Entre les deux → zone grise, capturé avec confidence: low
+  # (rare en pratique : ne contient que le score -0 = aucun signal)
+
+# --- Poids des signaux ---
+# Chaque signal ajoute ou retire des points au score total.
+poids:
+  # Signaux négatifs
+  reseau_social: -3
+  adresse_marketing: -2
+  sujet_promotionnel: -2
+  newsletter: -2              # header List-Unsubscribe ou lien unsubscribe
+  courriel_html_only: -2      # NOUVEAU : pas de part text/plain (newsletters HTML pures)
+  noreply: -1                 # adresse noreply/no-reply
+  sous_domaine_marketing: -1
+  expediteur_frequent: -1     # > seuil_frequence messages
+  corps_quasi_vide: -1        # < seuil_corps_min caractères
+  noreply_sans_actionnable: -1  # noreply sans contenu actionnable dans le corps
+  notification_banale: -1     # NOUVEAU : OTP, alerte connexion, vérification email
+  newsletter_corps: -1        # patterns unsubscribe/désinscription dans le body
+  cc_seulement: -1            # user en CC, pas en To (FYI)
+  adresse_generique: -1       # from = info@, support@, notification@, etc.
+
+  # Signaux positifs
+  sujet_actionnable: 3
+  domaine_personnel: 2          # domaine(s) de l'utilisateur
+  courriel_envoye: 2            # dossier Sent/Envoyés
+  piece_jointe_document: 2
+  domaine_gouvernemental: 2
+  corps_actionnable_multiple: 2  # >= 2 signaux dans le corps
+  expediteur_personnel: 1
+  reponse_conversation: 1       # Re:/Fwd:/TR: dans le sujet
+  corps_actionnable_simple: 1    # 1 signal dans le corps
+  corps_substantiel: 0           # DÉSACTIVÉ : se déclenchait sur 94% des messages
+
+# --- Seuils numériques ---
+seuils_numeriques:
+  frequence_expediteur: 100     # au-delà = signal négatif (relevé de 20 à 100)
+  corps_min: 50                 # en dessous = corps quasi-vide
+  corps_substantiel: 200        # au-dessus = signal positif (désactivé, poids=0)
+  corps_preview: 1000           # nb de caractères analysés pour le scoring du corps
+
+# --- Dossiers ignorés ---
+# Ces dossiers mbox ne sont jamais traités.
+dossiers_ignores:
+  - spam
+  - junk
+
+# --- Domaines personnels de l'utilisateur ---
+# Un courriel provenant de ces domaines reçoit le signal domaine_personnel.
+# Permet de capturer systématiquement les courriels de son propre domaine.
+domaines_personnels:
+  - monteillet.com
+  - fmrq.qc.ca             # correspondance professionnelle
+  - connextek.ca            # fournisseur FMRQ
+  - bdc.ca                  # BDC
+  - symbiotic.coop          # CRM FMRQ (CiviCRM)
+  - eversign.com            # signatures de documents
+
+# --- Domaines de réseaux sociaux ---
+# Un courriel provenant de ces domaines reçoit le signal reseau_social.
+domaines_reseaux_sociaux:
+  - facebookmail.com
+  - instagram.com
+  - mail.instagram.com
+  - linkedin.com
+  - twitter.com
+  - x.com
+  - pinterest.com
+  - tiktok.com
+  - snapchat.com
+  - reddit.com
+  - discord.com
+
+# --- Domaines de spam/marketing connus ---
+# Un courriel provenant de ces domaines reçoit le signal adresse_marketing.
+# Basé sur les top domaines ignorés observés dans les archives réelles.
+domaines_marketing:
+  - email.udemy.com
+  - macupdate.com
+  - mailer.netflix.com
+  - members.netflix.com
+  - s.stokesstores.com
+  - email.teamsnap.com
+  - email.bestbuyzonerecompenses.ca
+  # Calibrage 2026-04-06
+  - m.vivino.com                     # promos de vin
+  - campaigns.cineplex.com           # promos cinéma
+  - em5190.alumni-insa-lyon.org      # newsletters alumni INSA
+  - em4722.insa-alumni-lyon.org      # newsletters alumni INSA
+  - sensibo.com                      # rapports IoT
+  - sesbounces.asana.com             # notifications Asana (volume élevé, consultables dans Asana)
+  - asana.com                         # idem (domaine direct)
+  # Calibrage 1 an (2025-04 → 2026-04)
+  - bounces.amazon.ca                 # notifications Amazon (expédié, commandé)
+  - scoutcamp.bounces.google.com      # product updates Google
+  - delivery.monclubsportif.com       # rappels sportifs
+  - bounces.primevideo.com            # notifications Prime Video
+  - m.wealthsimple.com                # marketing Wealthsimple
+  - bounce.contact.bnc.ca             # marketing Banque Nationale (garder telnat@bnc.ca)
+  - govsubscriptions.michigan.gov     # newsletters Michigan DNR
+  # Plateformes d'envoi mass (ESP)
+  - mcsv.net             # MailChimp
+  - mandrillapp.com      # Mandrill (MailChimp transactionnel)
+  - sendgrid.net         # SendGrid
+  - klaviyo.com          # Klaviyo
+  - hubspotemail.net     # HubSpot
+  - mailchimp.com
+  - brevo.com            # ex-Sendinblue
+  - constantcontact.com
+
+# --- Patterns marketing (dans l'adresse expéditeur) ---
+# Regex appliquées sur l'adresse from en minuscules.
+patterns_marketing:
+  - "^(marketing|promo|news|campaign|digest|bulletin|blast|info-lettre)@"
+  - "@(campaigns?|comms?|mailing|newsletter|e\\.)[.\\-]"
+  - "@(mail|message|email|send|notifications?)\\."
+  - "@(?:em|click|link|track|send|mail)\\d+\\."  # sous-domaines numérotés d'envoi mass (em123., click2.)
+
+# --- Patterns de sujet actionnable ---
+# Si le sujet matche un de ces patterns → signal positif fort.
+patterns_sujet_actionnable:
+  - "facture|invoice"
+  - "relevé|statement"
+  - "avis de cotisation|notice of assessment"
+  - "contrat|contract"
+  - "renouvellement|renewal"
+  - "échéance|echeance|deadline|due date"
+  - "remboursement|refund"
+  - "confirmation.*(?:commande|réservation|reservation|achat|vol|billet)"
+  - "rendez-vous|appointment"
+  - "boarding pass|carte d'embarquement"
+  - "documents? à consulter"
+  - "votre (?:commande|réservation|dossier|compte|paiement)"
+  - "(?:action|réponse|mise à jour).*requise"
+  - "\\baction required\\b"
+  - "(?:reçu|receipt|confirmation) (?:de |d')?(?:paiement|achat|transaction)"
+  - "(?:paiement|payment|virement|transfer)"
+  - "feuillet(?:s)? (?:fiscal|fiscaux|T4|T5|RL)"
+  - "(?:relevé|avis|déclaration).*(?:impôt|fiscal|cotisation)"
+  - "(?:ticket|billet|place|entrée).*(?:instruction|important)"
+  - "votre (?:reçu|facture|relevé)"
+
+# --- Patterns de sujet promotionnel ---
+# Si le sujet matche → signal négatif.
+patterns_sujet_promotionnel:
+  - "\\b(?:rabais|discount|% off|% de rabais)\\b"
+  - "\\b(?:solde|sale|promo|promotion)\\b"
+  - "\\b(?:découvrez|discover|explore)\\b.*(?:offre|deal|collection)"
+  - "\\b(?:désabonner|unsubscribe)\\b"
+  - "dernière(?:s)? (?:heure|chance|journée)"
+  - "(?:offre|deal).*(?:exclusive?|limitée?|spéciale?)"
+  - "profitez (?:de |d')"
+  # Digests et bulletins périodiques
+  - "\\b(?:résumé|récapitulatif|bilan).*(?:semaine|mois|journée)"
+  - "\\b(?:weekly|monthly|daily)\\s+(?:digest|recap|roundup|newsletter|summary)"
+  - "\\binfolettre\\b|\\binfo-lettre\\b|\\bbulletin\\s+(?:mensuel|hebdomadaire|périodique)\\b"
+  - "\\b(?:nouveautés|what(?:'s| is) new).*(?:semaine|mois|this week|this month)"
+  - "\\bmise à jour.*(?:de la communauté|produit)|community update\\b"
+
+# --- Patterns actionnables dans le corps ---
+# Cherchés dans les premiers `seuils_numeriques.corps_preview` caractères.
+patterns_corps_actionnable:
+  - "\\d[\\d\\s]*[,.]\\d{2}\\s*\\$"                  # montant en dollars
+  - "\\d[\\d\\s]*[,.]\\d{2}\\s*(?:CAD|USD|EUR)"      # montant avec devise
+  - "(?:numéro|nº|no\\.|#)\\s*(?:de )?\\s*(?:dossier|référence|commande|contrat|police|compte)"
+  - "\\d{4}-\\d{2}-\\d{2}"                            # date ISO
+  - "(?:échéance|deadline|due|avant le|d'ici le)\\s"
+
+# --- Domaines gouvernementaux ---
+# Un courriel provenant d'un domaine se terminant par un de ces suffixes
+# reçoit le signal domaine_gouvernemental.
+suffixes_gouvernementaux:
+  - ".gouv.qc.ca"
+  - ".gc.ca"
+  - ".canada.ca"
+  - ".gov"
+  - ".qc.ca"              # organismes québécois (revenuquebec.ca, oiq.qc.ca, etc.)
+
+# --- Détection expéditeur personnel ---
+# Adresses noreply (exclues du signal expediteur_personnel)
+patterns_noreply:
+  - "(?:noreply|no-reply|donotreply|nepasrepondre|ne-pas-repondre|no_reply)"
+
+# Adresses génériques (exclues du signal expediteur_personnel)
+patterns_generiques:
+  - "^(info|hello|contact|support|admin|sales|news|notification|alert|update|digest|pipe\\d)@"
+  - "^(team|hey|updates?|alerts?|system|automated?|do-not-reply|bounce|mailer|postmaster|webmaster|devops|no_reply)@"
+
+# Sous-domaines marketing (exclues du signal expediteur_personnel, et ajoutent un malus)
+patterns_sous_domaine_marketing:
+  - "@(?:email|mail|message|send|e|campaigns?|comms?|notifications?)\\."
+
+# Pattern qui identifie un expéditeur personnel (prenom.nom@ ou prenom-nom@)
+pattern_expediteur_personnel: "^[a-z]+[.\\-][a-z]+@"
+
+# --- Détection newsletter (List-Unsubscribe) ---
+# Patterns cherchés dans le corps pour détecter les newsletters sans header.
+patterns_newsletter_corps:
+  - "\\bunsubscribe\\b|\\bse désabonner\\b|\\bdésabonnement\\b|\\bdésinscrire\\b"
+  - "\\bmanage\\s+(?:your\\s+)?(?:preferences|subscription|email)\\b"
+  - "\\bgérer\\s+(?:vos\\s+)?(?:préférences|abonnement)\\b"
+  - "\\bopt[- ]?out\\b"
+  - "\\bemail preferences\\b|\\bpréférences courriel\\b"
+  # Footer légal — quasi-exclusifs aux newsletters
+  - "©\\s*20\\d\\d"                                                  # copyright footer
+  - "tous droits réservés|all rights reserved"
+  - "politique de confidentialité|privacy policy"
+  - "voir.*dans.*votre.*navigateur|view.*in.*(?:your.*)?browser"     # lien "voir en ligne"
+  - "vous recevez.*(?:parce que|car vous)|you(?:'re| are) receiving this"  # explication d'envoi
+
+# --- Types MIME de pièces jointes significatives ---
+types_pieces_jointes:
+  - "application/pdf"
+  - "application/msword"
+  - "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+  - "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+# --- Dossiers envoyés ---
+# Les courriels dans ces dossiers reçoivent le signal courriel_envoye.
+dossiers_envoyes:
+  - sent
+  - "sent messages"
+  - envoyés
+  - envoyes
+
+# --- Patterns de sujet notification banale ---
+# Notifications non-actionnables qui n'ont pas de valeur persistante pour une base de connaissances.
+# OTP, alertes de connexion, vérifications d'email → signal négatif notification_banale.
+patterns_sujet_notification_banale:
+  - "\\b(?:code de (?:vérification|sécurité|connexion)|verification code|OTP|one.time)\\b"
+  - "\\b(?:nouvelle connexion|new sign.?in|connexion depuis|sign.?in from|sign.?in alert)\\b"
+  - "\\b(?:réinitiali(?:s|z)er|reset).*(?:mot de passe|password)\\b"
+  - "\\b(?:vérifi(?:ez|er)|confirm(?:ez|er)?).*(?:adresse|courriel|email|compte|account)\\b"
+  - "\\b(?:accès (?:à votre )?compte|your account (?:has been|was)|compte.*(?:activé|vérifié))\\b"

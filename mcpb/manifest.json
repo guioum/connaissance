@@ -1,0 +1,31 @@
+{
+  "$schema": "https://raw.githubusercontent.com/anthropics/mcpb/main/schemas/mcpb-manifest-v0.4.schema.json",
+  "manifest_version": "0.4",
+  "name": "connaissance",
+  "version": "2.1.0",
+  "description": "Personal knowledge base CLI + MCP — transcription, summarization, entity organization, synthesis, audit. 42 tools mapping to the connaissance CLI subcommands. Requires the connaissance CLI installed via uv tool install git+https://github.com/guioum/connaissance.",
+  "author": { "name": "guioum" },
+  "server": {
+    "type": "node",
+    "entry_point": "server/index.js",
+    "mcp_config": {
+      "command": "node",
+      "args": ["${__dirname}/server/index.js"],
+      "env": {
+        "CONNAISSANCE_CLI": "${user_config.cli_path}"
+      }
+    }
+  },
+  "user_config": {
+    "cli_path": {
+      "type": "string",
+      "title": "Chemin vers le binaire connaissance",
+      "description": "Chemin absolu vers le binaire connaissance (laisser vide pour auto-détection dans ~/.local/bin/ ou $PATH). Installer via : uv tool install git+https://github.com/guioum/connaissance",
+      "required": false
+    }
+  },
+  "compatibility": {
+    "claude_desktop": ">=1.0.0",
+    "platforms": ["darwin", "linux"]
+  }
+}

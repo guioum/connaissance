@@ -1,0 +1,80 @@
+# Filtres de transcription — configuration unifiée
+#
+# Ce fichier est copié vers ~/Connaissance/.config/filtres.yaml au premier lancement.
+# Modifier la copie utilisateur, pas ce template.
+
+documents:
+  # Extensions de fichiers à transcrire (OCR)
+  extensions:
+    - .pdf
+    - .png
+    - .jpg
+    - .jpeg
+    - .heic
+    - .webp
+    - .tiff
+    - .doc
+    - .docx
+    - .xls
+    - .xlsx
+    - .ppt
+    - .pptx
+
+  # Dossiers exclus du scan (chemins relatifs à ~/Documents/)
+  # Note : les dossiers racine commençant par "- " sont automatiquement exclus (workflow)
+  dossiers_exclus: []
+
+  # Patterns glob d'exclusion (appliqués sur chaque composant du chemin)
+  patterns_exclus:
+    - "*.app"
+    - "*.framework"
+    - "*.appex"
+    - "*.kext"
+    - "*.bundle"
+    - "*.plugin"
+
+  # Dossiers inclus (prioritaires sur les exclusions)
+  dossiers_inclus: []
+
+  # Dossiers techniques toujours ignorés
+  dossiers_techniques:
+    - .git
+    - node_modules
+    - .Trash
+    - Library
+    - __pycache__
+    - .DS_Store
+    - .Spotlight-V100
+    - .fseventsd
+    - .TemporaryItems
+
+  # Images trop petites (sprites, icônes) — pixels dans chaque dimension
+  min_image_px: 300
+
+  # PDFs nécessitant confirmation manuelle
+  max_pages_auto: 30
+
+courriels:
+  # Dossiers IMAP à ignorer (comparaison case-insensitive sur le nom du mbox)
+  dossiers_ignores:
+    - Spam
+    - Junk
+    - Trash
+    - Drafts
+    - Corbeille
+    - Brouillons
+
+  # Scoring multi-signaux (utilise scoring-courriels.yaml pour les règles)
+  scoring: true
+  scoring_seuil_capturer: 0      # score >= seuil → transcrire
+  scoring_seuil_ignorer: -1      # score <= seuil → ignorer
+
+  # Taille minimale des PJ images (en octets, < seuil = signature/logo)
+  min_attachment_size: 50000
+
+notes:
+  # Dossiers à ignorer dans ~/Notes/
+  dossiers_ignores:
+    - Archives
+    - smart
+    - tags
