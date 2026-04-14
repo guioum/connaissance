@@ -18,7 +18,11 @@ import { existsSync } from "node:fs";
 const execFileAsync = promisify(execFile);
 
 function findCli() {
-  if (process.env.CONNAISSANCE_CLI) return process.env.CONNAISSANCE_CLI;
+  const envVal = process.env.CONNAISSANCE_CLI;
+  // Accept the env var only if it's a real path — ignore empty strings and
+  // unresolved ${user_config.xxx} placeholders (which some MCP hosts pass
+  // literally when the user leaves an optional config field empty).
+  if (envVal && envVal.trim() && !envVal.includes("${")) return envVal;
   const localBin = join(homedir(), ".local", "bin", "connaissance");
   if (existsSync(localBin)) return localBin;
   return "connaissance";
