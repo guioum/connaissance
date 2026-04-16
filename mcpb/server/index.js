@@ -195,11 +195,11 @@ server.registerTool(
   {
     description: "Register a document transcription in tracking.db and inject canonical frontmatter (source, source_hash, transcribed_at).",
     inputSchema: {
-      source: z.string().describe("Absolute path to the original document (PDF, image, etc.)."),
+      source_file: z.string().describe("Absolute path to the original document file (PDF, image, etc.)."),
       transcription: z.string().describe("Absolute path to the generated transcription markdown."),
     },
   },
-  async (args) => runAndFormat("documents", "register", [args.source, args.transcription])
+  async (args) => runAndFormat("documents", "register", [args.source_file, args.transcription])
 );
 
 server.registerTool(
@@ -316,7 +316,7 @@ server.registerTool(
       ...emailsCommonSchema,
       dry_run: z.boolean().default(true).describe("Default dry-run ; pass false to actually archive."),
       only_domain: z.string().optional().describe("Comma-separated domains to limit scope."),
-      only_entity: z.string().optional().describe("Entity path like 'personnes/marie-dubois'."),
+      only_entity: z.string().optional().describe("Entity identifier in type/slug format (e.g., 'personnes/marie-dubois')."),
     },
   },
   async (args) => {
@@ -479,17 +479,16 @@ server.registerTool(
     description:
       "Build LLM requests from prompt templates + transcription content. " +
       "Returns {requests: [{custom_id, system, user, model, max_tokens}]} ready " +
-      "for any generation mode (API batch, API direct, or inline subagent). " +
-      "IMPORTANT: 'ids' must be FILE PATHS of transcriptions (as returned by " +
-      "summarize_plan in the 'path' field), NOT custom_ids or hashes. " +
-      "IMPORTANT: 'mode' controls the request FORMAT, not how the requests will " +
-      "be processed afterwards. Always use 'direct' — even if you plan to process " +
-      "the requests via subagents instead of the API.",
+      "for any generation mode (API batch, API direct, or subagent). " +
+      "'paths' must be FILE PATHS of transcriptions (the 'path' field from " +
+      "summarize_plan), not custom_ids or hashes. " +
+      "'mode' controls the request FORMAT only — always use 'direct', even if " +
+      "you plan to process the requests via subagents.",
     inputSchema: {
-      ids: z.union([z.string(), z.array(z.string())]).optional().describe(
+      paths: z.union([z.string(), z.array(z.string())]).optional().describe(
         "Transcription file paths (e.g., 'Transcriptions/Documents/org/file.md'). " +
         "Pass a comma-separated string or an array of strings. Omit for 'all'. " +
-        "These are the 'path' values from summarize_plan results — NOT custom_ids."
+        "Use the 'path' values from summarize_plan — NOT custom_ids."
       ),
       mode: z.enum(["batch", "direct", "inline"]).default("direct").describe(
         "Request format. Use 'direct' in all cases (including subagent processing). " +
@@ -501,9 +500,9 @@ server.registerTool(
   },
   async (args) => {
     const a = [];
-    let idsVal = args.ids;
-    if (Array.isArray(idsVal)) idsVal = idsVal.join(",");
-    pushFlag(a, "ids", idsVal);
+    let pathsVal = args.paths;
+    if (Array.isArray(pathsVal)) pathsVal = pathsVal.join(",");
+    pushFlag(a, "paths", pathsVal);
     // Normalize "inline" → "direct" (inline is a generation strategy, not a request format)
     const mode = args.mode === "inline" ? "direct" : (args.mode ?? "direct");
     pushFlag(a, "mode", mode);

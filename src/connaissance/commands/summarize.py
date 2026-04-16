@@ -8,7 +8,7 @@ Le serveur MCP externe n'a pas de logique métier — toute la logique vit ici.
 
 Expose :
 - `plan(db=None, source=None) -> SummarizePlan`
-- `prepare(ids, mode="batch", source=None) -> SummarizePrepare`
+- `prepare(paths, mode="batch", source=None) -> SummarizePrepare`
 - `register(custom_id, content, db=None) -> SummarizeRegister`
 """
 
@@ -152,13 +152,13 @@ def plan(db: TrackingDB | None = None, source: str | None = None) -> dict:
     return {"missing": missing}
 
 
-def prepare(ids: list[str] | str = "all", mode: str = "batch",
+def prepare(paths: list[str] | str = "all", mode: str = "batch",
             source: str | None = None, db: TrackingDB | None = None) -> dict:
     """Construire les requêtes pour `mcp__claude_api__submit_batch`.
 
     Parameters
     ----------
-    ids : list[str] | "all"
+    paths : list[str] | "all"
         Liste de chemins relatifs de transcriptions OU "all" pour
         tout résumer les transcriptions manquantes.
     mode : str
@@ -170,11 +170,11 @@ def prepare(ids: list[str] | str = "all", mode: str = "batch",
     -------
     dict conforme au schema SummarizePrepare : `{requests, total, estimated_input_tokens}`.
     """
-    if ids == "all" or ids is None:
+    if paths == "all" or paths is None:
         plan_result = plan(db=db, source=source)
         target_paths = [m["path"] for m in plan_result["missing"]]
     else:
-        target_paths = list(ids)
+        target_paths = list(paths)
 
     requests = []
     total_input_chars = 0

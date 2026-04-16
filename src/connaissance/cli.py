@@ -40,7 +40,7 @@ def _cmd_documents(args) -> Any:
         since, until = _parse_date_range(args)
         return documents.scan(since=since, until=until)
     if args.verb == "register":
-        return documents.register(args.source, args.transcription)
+        return documents.register(args.source_file, args.transcription)
     if args.verb == "register-existing":
         return documents.register_existing_all()
     if args.verb == "suspects":
@@ -133,12 +133,12 @@ def _cmd_summarize(args) -> Any:
     if args.verb == "plan":
         return summarize.plan(source=args.source)
     if args.verb == "prepare":
-        ids_arg: list[str] | str
-        if args.ids:
-            ids_arg = args.ids.split(",")
+        paths_arg: list[str] | str
+        if args.paths:
+            paths_arg = args.paths.split(",")
         else:
-            ids_arg = "all"
-        return summarize.prepare(ids=ids_arg, mode=args.mode, source=args.source)
+            paths_arg = "all"
+        return summarize.prepare(paths=paths_arg, mode=args.mode, source=args.source)
     if args.verb == "register":
         content = sys.stdin.read() if args.stdin else (args.content or "")
         return summarize.register(args.custom_id, content, source_path=args.source_path)
@@ -265,7 +265,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_doc_scan = p_doc_verbs.add_parser("scan")
     add_date_range(p_doc_scan)
     p_doc_reg = p_doc_verbs.add_parser("register")
-    p_doc_reg.add_argument("source")
+    p_doc_reg.add_argument("source_file")
     p_doc_reg.add_argument("transcription")
     p_doc_verbs.add_parser("register-existing")
     p_doc_verbs.add_parser("suspects")
@@ -341,7 +341,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_sum_plan = p_sum_verbs.add_parser("plan")
     p_sum_plan.add_argument("--source", type=str, default=None)
     p_sum_prep = p_sum_verbs.add_parser("prepare")
-    p_sum_prep.add_argument("--ids", type=str, default=None)
+    p_sum_prep.add_argument("--paths", type=str, default=None)
     p_sum_prep.add_argument("--mode", type=str, default="batch")
     p_sum_prep.add_argument("--source", type=str, default=None)
     p_sum_reg = p_sum_verbs.add_parser("register")

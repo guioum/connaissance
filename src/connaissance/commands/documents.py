@@ -460,15 +460,15 @@ def scan(since=None, until=None, db=None) -> dict:
     }
 
 
-def register(source: str, transcription: str, file_hash: str | None = None,
+def register(source_file: str, transcription: str, file_hash: str | None = None,
              db: TrackingDB | None = None) -> dict:
     """Enregistrer un document transcrit (frontmatter + DB)."""
     if db is None:
         db = TrackingDB()
-    register_document(db, source, transcription, file_hash)
+    register_document(db, source_file, transcription, file_hash)
     return {
         "registered": 1,
-        "source": str(source),
+        "source": str(source_file),
         "transcription": str(transcription),
         "frontmatter_injected": True,
     }
