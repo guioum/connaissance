@@ -476,9 +476,9 @@ server.registerTool(
 server.registerTool(
   "connaissance_summarize_prepare",
   {
-    description: "Build LLM requests from prompt templates + transcription content. Returns {requests: [{custom_id, system, user, model, max_tokens}]} ready for mcp__claude_api__submit_batch or query_direct.",
+    description: "Build LLM requests from prompt templates + transcription content. Returns {requests: [{custom_id, system, user, model, max_tokens}]} ready for mcp__claude_api__submit_batch, query_direct, or inline processing by a resume-writer subagent.",
     inputSchema: {
-      ids: z.string().optional().describe("Comma-separated transcription paths, or omit for 'all'."),
+      ids: z.union([z.string(), z.array(z.string())]).optional().describe("Transcription paths. Pass a comma-separated string or an array of strings. Omit for 'all'."),
       mode: z.enum(["batch", "direct"]).default("batch"),
       source: z.enum(["document", "courriel", "note", "fil"]).optional().describe("Override source_type for template selection."),
     },
@@ -486,7 +486,9 @@ server.registerTool(
   },
   async (args) => {
     const a = [];
-    pushFlag(a, "ids", args.ids);
+    let idsVal = args.ids;
+    if (Array.isArray(idsVal)) idsVal = idsVal.join(",");
+    pushFlag(a, "ids", idsVal);
     pushFlag(a, "mode", args.mode);
     pushFlag(a, "source", args.source);
     return runAndFormat("summarize", "prepare", a);
