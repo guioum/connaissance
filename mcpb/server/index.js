@@ -476,10 +476,25 @@ server.registerTool(
 server.registerTool(
   "connaissance_summarize_prepare",
   {
-    description: "Build LLM requests from prompt templates + transcription content. Returns {requests: [{custom_id, system, user, model, max_tokens}]} ready for mcp__claude_api__submit_batch, query_direct, or inline processing by a resume-writer subagent.",
+    description:
+      "Build LLM requests from prompt templates + transcription content. " +
+      "Returns {requests: [{custom_id, system, user, model, max_tokens}]} ready " +
+      "for any generation mode (API batch, API direct, or inline subagent). " +
+      "IMPORTANT: 'ids' must be FILE PATHS of transcriptions (as returned by " +
+      "summarize_plan in the 'path' field), NOT custom_ids or hashes. " +
+      "IMPORTANT: 'mode' controls the request FORMAT, not how the requests will " +
+      "be processed afterwards. Always use 'direct' — even if you plan to process " +
+      "the requests via subagents instead of the API.",
     inputSchema: {
-      ids: z.union([z.string(), z.array(z.string())]).optional().describe("Transcription paths. Pass a comma-separated string or an array of strings. Omit for 'all'."),
-      mode: z.enum(["batch", "direct"]).default("batch"),
+      ids: z.union([z.string(), z.array(z.string())]).optional().describe(
+        "Transcription file paths (e.g., 'Transcriptions/Documents/org/file.md'). " +
+        "Pass a comma-separated string or an array of strings. Omit for 'all'. " +
+        "These are the 'path' values from summarize_plan results — NOT custom_ids."
+      ),
+      mode: z.enum(["batch", "direct", "inline"]).default("direct").describe(
+        "Request format. Use 'direct' in all cases (including subagent processing). " +
+        "'inline' is accepted as an alias for 'direct'. 'batch' adds cache_control headers."
+      ),
       source: z.enum(["document", "courriel", "note", "fil"]).optional().describe("Override source_type for template selection."),
     },
     annotations: { readOnlyHint: true },
@@ -489,7 +504,9 @@ server.registerTool(
     let idsVal = args.ids;
     if (Array.isArray(idsVal)) idsVal = idsVal.join(",");
     pushFlag(a, "ids", idsVal);
-    pushFlag(a, "mode", args.mode);
+    // Normalize "inline" → "direct" (inline is a generation strategy, not a request format)
+    const mode = args.mode === "inline" ? "direct" : (args.mode ?? "direct");
+    pushFlag(a, "mode", mode);
     pushFlag(a, "source", args.source);
     return runAndFormat("summarize", "prepare", a);
   }
