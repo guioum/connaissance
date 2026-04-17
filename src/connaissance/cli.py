@@ -172,6 +172,13 @@ def _cmd_audit(args) -> Any:
     raise SystemExit(f"verbe inconnu : audit {args.verb}")
 
 
+def _cmd_actions(args) -> Any:
+    from connaissance.commands import actions
+    if args.verb == "list":
+        return actions.list_actions(status=args.status, entity=args.entity)
+    raise SystemExit(f"verbe inconnu : actions {args.verb}")
+
+
 def _cmd_scope(args) -> Any:
     from connaissance.commands import scope
     if args.verb == "scan":
@@ -237,6 +244,7 @@ _GROUPS: dict[str, Callable] = {
     "summarize": _cmd_summarize,
     "synthesis": _cmd_synthesis,
     "audit": _cmd_audit,
+    "actions": _cmd_actions,
     "scope": _cmd_scope,
     "config": _cmd_config,
     "manifest": _cmd_manifest,
@@ -371,6 +379,14 @@ def build_parser() -> argparse.ArgumentParser:
     for verb in ("reindex-db", "repair-attachments", "archive-non-documents"):
         vp = p_aud_verbs.add_parser(verb)
         vp.add_argument("--dry-run", action="store_true")
+
+    # actions
+    p_act = sub.add_parser("actions")
+    p_act_verbs = p_act.add_subparsers(dest="verb", required=True)
+    p_act_list = p_act_verbs.add_parser("list")
+    p_act_list.add_argument("--status", type=str, default="all",
+                            choices=["all", "ouverte", "expiree"])
+    p_act_list.add_argument("--entity", type=str, default=None)
 
     # scope
     p_sc = sub.add_parser("scope")

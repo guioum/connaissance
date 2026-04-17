@@ -585,9 +585,9 @@ server.registerTool(
 server.registerTool(
   "connaissance_audit_check",
   {
-    description: "Run deterministic integrity checks : broken links, invalid frontmatter, desynchronized triplets, missing attachments, duplicates, overdue actions.",
+    description: "Run deterministic integrity checks : broken links, invalid frontmatter, desynchronized triplets, missing attachments, duplicates. For overdue actions (business content), use connaissance_actions_list instead.",
     inputSchema: {
-      steps: z.string().optional().describe("Comma-separated subset of: liens_casses, frontmatter_invalide, triplets_desynchronises, attachements_manquants, doublons, actions_a_reviser. Default 'all'."),
+      steps: z.string().optional().describe("Comma-separated subset of: liens_casses, frontmatter_invalide, triplets_desynchronises, attachements_manquants, doublons. Default 'all'."),
     },
     annotations: { readOnlyHint: true },
   },
@@ -595,6 +595,24 @@ server.registerTool(
     const a = [];
     pushFlag(a, "steps", args.steps);
     return runAndFormat("audit", "check", a);
+  }
+);
+
+server.registerTool(
+  "connaissance_actions_list",
+  {
+    description: "List open action items extracted from entity chronologies (- [ ] checkboxes). Returns {items: [{entite, action, echeance, status, raison, source_path}], total}. Business content, not integrity.",
+    inputSchema: {
+      status: z.enum(["all", "ouverte", "expiree"]).default("all").describe("Filter by status. 'expiree' = overdue (échéance < today) or open > 90 days without update."),
+      entity: z.string().optional().describe("Filter by entity identifier in 'type/slug' format (e.g., 'organismes/fmrq')."),
+    },
+    annotations: { readOnlyHint: true },
+  },
+  async (args) => {
+    const a = [];
+    pushFlag(a, "status", args.status);
+    pushFlag(a, "entity", args.entity);
+    return runAndFormat("actions", "list", a);
   }
 );
 

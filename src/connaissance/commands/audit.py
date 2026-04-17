@@ -6,7 +6,6 @@ restent disponibles comme helpers.
 """
 
 import re
-from datetime import date, timedelta
 from pathlib import Path
 
 import yaml
@@ -208,61 +207,6 @@ def verifier_doublons() -> list[dict]:
     return problemes
 
 
-# --- Vérification 6 : Actions à réviser ---
-
-def verifier_actions() -> list[dict]:
-    """Détecter les actions ouvertes avec échéance dépassée ou > 90 jours."""
-    problemes = []
-    chronos_dir = SYNTHESE
-    if not chronos_dir.exists():
-        return problemes
-
-    today = date.today()
-    seuil_90j = today - timedelta(days=90)
-    pattern_action = re.compile(r'^- \[ \] (.+?)(?:\s*—\s*(?:échéance\s+)?(\d{4}-\d{2}-\d{2}))?$',
-                                re.MULTILINE)
-
-    for chrono in chronos_dir.rglob("chronologie.md"):
-        try:
-            content = chrono.read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError):
-            continue
-
-        entity_rel = str(chrono.parent.relative_to(SYNTHESE))
-
-        for match in pattern_action.finditer(content):
-            description = match.group(1).strip()
-            echeance_str = match.group(2)
-
-            if echeance_str:
-                try:
-                    echeance = date.fromisoformat(echeance_str)
-                    if echeance < today:
-                        problemes.append({
-                            "entite": entity_rel,
-                            "action": description,
-                            "echeance": echeance_str,
-                            "raison": "échéance dépassée",
-                        })
-                except ValueError:
-                    pass
-            else:
-                # Vérifier mtime de la chronologie > 90 jours
-                try:
-                    chrono_mtime = date.fromtimestamp(chrono.stat().st_mtime)
-                    if chrono_mtime < seuil_90j:
-                        problemes.append({
-                            "entite": entity_rel,
-                            "action": description,
-                            "echeance": None,
-                            "raison": "ouverte > 90 jours sans mise à jour",
-                        })
-                except OSError:
-                    pass
-
-    return problemes
-
-
 # --- API publique ---
 
 
@@ -272,7 +216,6 @@ _AUDIT_STEPS = {
     "triplets_desynchronises": verifier_triplets,
     "attachements_manquants": verifier_attachements,
     "doublons": verifier_doublons,
-    "actions_a_reviser": verifier_actions,
 }
 
 
