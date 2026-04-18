@@ -329,21 +329,80 @@ def cleanup_orphans(db, dry_run=False) -> tuple[int, int]:
         except OSError as e:
             print(f"  ⚠ {o['path'].name}: {e}", file=sys.stderr)
 
-    # Supprimer les dossiers Attachments/ maintenant vides, et les dossiers
-    # parents s'ils ne contiennent plus rien.
+    # Remonter récursivement les dossiers vides jusqu'à un parent non-vide
+    # (sans dépasser TRANSCRIPTIONS).
     for d in dirs_touched:
-        try:
-            if not any(d.iterdir()):
-                d.rmdir()
-                parent = d.parent
-                if parent != TRANSCRIPTIONS and not any(parent.iterdir()):
-                    parent.rmdir()
-        except OSError:
-            pass
+        _prune_empty_upwards(d)
 
     print(f"\n  ✓ {removed} orphelins supprimés (~{freed // 1024} Ko)",
           file=sys.stderr)
     return removed, freed
+
+
+def _prune_empty_upwards(path: Path) -> int:
+    """Supprimer ``path`` puis ses parents tant qu'ils sont vides.
+
+    S'arrête à ``TRANSCRIPTIONS`` (ne remonte jamais au-dessus). Retourne le
+    nombre de dossiers supprimés.
+    """
+    removed = 0
+    current = path
+    while current != TRANSCRIPTIONS and current.is_dir():
+        try:
+            # any(iterdir()) compte aussi les .DS_Store — on les tolère
+            # pour éviter de garder des dossiers "vides" en vrai.
+            entries = [e for e in current.iterdir() if e.name != ".DS_Store"]
+            if entries:
+                return removed
+            # Supprimer les .DS_Store qui ne font pas de mal
+            for e in current.iterdir():
+                try:
+                    e.unlink()
+                except OSError:
+                    pass
+            current.rmdir()
+            removed += 1
+            current = current.parent
+        except OSError:
+            return removed
+    return removed
+
+
+def remove_empty_dirs() -> int:
+    """Balayer ``Transcriptions/`` pour supprimer tous les dossiers vides.
+
+    Itère jusqu'à stabilisation (un dossier peut devenir vide après que ses
+    enfants aient été supprimés). Tolère les ``.DS_Store`` — les supprime
+    au passage pour ne pas garder de dossier "vide" en vrai.
+
+    Retourne le nombre total de dossiers supprimés.
+    """
+    if not TRANSCRIPTIONS.exists():
+        return 0
+    total_removed = 0
+    while True:
+        removed_this_pass = 0
+        # Parcours bottom-up (reversed dans rglob) pour supprimer les feuilles
+        # avant leurs parents.
+        dirs = [d for d in TRANSCRIPTIONS.rglob("*") if d.is_dir()]
+        for d in sorted(dirs, key=lambda p: -len(p.parts)):
+            try:
+                entries = [e for e in d.iterdir() if e.name != ".DS_Store"]
+                if entries:
+                    continue
+                for e in d.iterdir():
+                    try:
+                        e.unlink()
+                    except OSError:
+                        pass
+                d.rmdir()
+                removed_this_pass += 1
+            except OSError:
+                pass
+        total_removed += removed_this_pass
+        if removed_this_pass == 0:
+            break
+    return total_removed
 
 
 # --- API publique ---
@@ -402,11 +461,21 @@ def apply(dry_run: bool = False, promote_docs: bool = True,
                 deduped = dedup_result
         if cleanup_orphans_flag:
             orphans_removed, orphans_freed = cleanup_orphans(db, dry_run=dry_run)
+        # Passe finale : supprimer tous les dossiers vides restants sous
+        # Transcriptions/ (effet cumulé de promote + dedup + cleanup_orphans,
+        # qui peuvent laisser des hiérarchies vidées).
+        empty_dirs_removed = 0
+        if not dry_run:
+            empty_dirs_removed = remove_empty_dirs()
+            if empty_dirs_removed:
+                print(f"  ✓ {empty_dirs_removed} dossier(s) vide(s) supprimé(s)",
+                      file=sys.stderr)
         return {
             "promoted": promoted,
             "deduped": deduped,
             "freed_bytes": freed + orphans_freed,
             "orphans_removed": orphans_removed,
+            "empty_dirs_removed": empty_dirs_removed,
             "dry_run": dry_run,
         }
     finally:
