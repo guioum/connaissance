@@ -62,7 +62,7 @@ Mêmes règles que pour les documents :
 
 ```markdown
 ---
-type: courriel
+type: courriel  # littéralement "courriel", jamais "résumé" ni autre mot
 source: {chemin relatif vers la transcription}
 created: {created de la transcription}
 modified: {modified de la transcription}

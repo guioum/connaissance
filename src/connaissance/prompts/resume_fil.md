@@ -35,7 +35,7 @@ Mêmes règles que pour les documents : tâches concrètes à faire après le fi
 
 ```markdown
 ---
-type: fil
+type: fil  # littéralement "fil", jamais "résumé" ni autre mot
 source: {chemin relatif vers la transcription du PREMIER message (le plus ancien)}
 created: {created du premier message}
 modified: {modified du dernier message}

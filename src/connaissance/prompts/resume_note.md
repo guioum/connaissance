@@ -33,7 +33,7 @@ Format :
 
 ```markdown
 ---
-type: note
+type: note  # littéralement "note", jamais "résumé" ni autre mot
 source: {chemin relatif vers la transcription}
 created: {created de la transcription}
 modified: {modified de la transcription}

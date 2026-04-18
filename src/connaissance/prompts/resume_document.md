@@ -89,7 +89,7 @@ Copier ce template et remplir les `{placeholders}`. NE PAS ajouter de sections s
 
 ```markdown
 ---
-type: document
+type: document  # littéralement "document", jamais "résumé" ni autre mot
 source: {chemin relatif depuis ~/Connaissance/ vers la transcription}
 created: {created copié de la transcription}
 modified: {modified copié de la transcription}
