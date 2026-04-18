@@ -11,6 +11,7 @@ Expose (API publique utilisée par le dispatcher CLI et les outils MCP) :
 Délègue à `emails_cleanup` pour le re-scoring rétroactif et l'archivage réversible.
 """
 from __future__ import annotations
+import sys
 
 import mailbox
 import email
@@ -490,7 +491,8 @@ def extract_messages_from_mbox(mbox_path: Path,
         skipped_date = len(imap_index) - len(candidate_entries)
 
         if skipped_date:
-            print(f"    ({skipped_date} messages hors plage ignorés via bisect, {len(candidate_entries)} à parser)")
+            print(f"    ({skipped_date} messages hors plage ignorés via bisect, {len(candidate_entries)} à parser)", file=sys.stderr)
+
 
         # Parser seulement les messages dans la plage
         with open(mbox_path, "rb") as f:
@@ -515,7 +517,8 @@ def extract_messages_from_mbox(mbox_path: Path,
                     if parsed:
                         messages.append(parsed)
                 except Exception as e:
-                    print(f"  Erreur message uid={entry.get('uid')}: {e}")
+                    print(f"  Erreur message uid={entry.get('uid')}: {e}", file=sys.stderr)
+
                     continue
 
         return messages
@@ -524,7 +527,8 @@ def extract_messages_from_mbox(mbox_path: Path,
     try:
         mbox = mailbox.mbox(str(mbox_path))
     except Exception as e:
-        print(f"  Erreur ouverture {mbox_path}: {e}")
+        print(f"  Erreur ouverture {mbox_path}: {e}", file=sys.stderr)
+
         return messages
 
     for msg in mbox:
@@ -550,12 +554,14 @@ def extract_messages_from_mbox(mbox_path: Path,
             if parsed:
                 messages.append(parsed)
         except Exception as e:
-            print(f"  Erreur message: {e}")
+            print(f"  Erreur message: {e}", file=sys.stderr)
+
             continue
 
     mbox.close()
     if skipped_date:
-        print(f"    ({skipped_date} messages hors plage de dates ignorés)")
+        print(f"    ({skipped_date} messages hors plage de dates ignorés)", file=sys.stderr)
+
     return messages
 
 
@@ -711,9 +717,11 @@ def calibrer(mbox_files, filtres, sample_size=200, since=None, until=None):
     """
     import yaml
 
-    print(f"  Calibrage sur {sample_size} messages...")
+    print(f"  Calibrage sur {sample_size} messages...", file=sys.stderr)
+
     messages = _collect_sample(mbox_files, filtres, sample_size, since, until)
-    print(f"  Échantillon : {len(messages)} messages collectés")
+    print(f"  Échantillon : {len(messages)} messages collectés", file=sys.stderr)
+
 
     seuils = filtres.scoring_config.get("seuils", {})
     seuil_capturer = seuils.get("capturer", 0)
@@ -787,23 +795,33 @@ def calibrer(mbox_files, filtres, sample_size=200, since=None, until=None):
                                 sort_keys=False), encoding="utf-8")
 
     # Affichage
-    print(f"\n  === Calibrage ===")
-    print(f"  Échantillon : {total} messages")
-    print(f"  Capturés :    {len(captured):4d} ({rapport['repartition']['pct_captures']}%)")
-    print(f"  Zone grise :  {len(zone_grise):4d} ({rapport['repartition']['pct_zone_grise']}%)")
-    print(f"  Ignorés :     {len(ignored):4d} ({rapport['repartition']['pct_ignores']}%)")
+    print(f"\n  === Calibrage ===", file=sys.stderr)
+
+    print(f"  Échantillon : {total} messages", file=sys.stderr)
+
+    print(f"  Capturés :    {len(captured):4d} ({rapport['repartition']['pct_captures']}%)", file=sys.stderr)
+
+    print(f"  Zone grise :  {len(zone_grise):4d} ({rapport['repartition']['pct_zone_grise']}%)", file=sys.stderr)
+
+    print(f"  Ignorés :     {len(ignored):4d} ({rapport['repartition']['pct_ignores']}%)", file=sys.stderr)
+
 
     if captures_suspectes:
-        print(f"\n  Captures suspectes ({len(captures_suspectes)}) :")
+        print(f"\n  Captures suspectes ({len(captures_suspectes)}) :", file=sys.stderr)
+
         for e in captures_suspectes[:5]:
-            print(f"    [{e['score']:+d}] {e['from'][:35]:35s} | {e['subject'][:40]}")
+            print(f"    [{e['score']:+d}] {e['from'][:35]:35s} | {e['subject'][:40]}", file=sys.stderr)
+
 
     if ignores_suspects:
-        print(f"\n  Ignorés suspects ({len(ignores_suspects)}) :")
-        for e in ignores_suspects[:5]:
-            print(f"    [{e['score']:+d}] {e['from'][:35]:35s} | {e['subject'][:40]}")
+        print(f"\n  Ignorés suspects ({len(ignores_suspects)}) :", file=sys.stderr)
 
-    print(f"\n  Rapport → {output}")
+        for e in ignores_suspects[:5]:
+            print(f"    [{e['score']:+d}] {e['from'][:35]:35s} | {e['subject'][:40]}", file=sys.stderr)
+
+
+    print(f"\n  Rapport → {output}", file=sys.stderr)
+
 
 
 def valider_expediteurs(mbox_files, filtres, sample_size=500, since=None, until=None):
@@ -814,9 +832,11 @@ def valider_expediteurs(mbox_files, filtres, sample_size=500, since=None, until=
     import yaml
     from collections import defaultdict
 
-    print(f"  Analyse des expéditeurs sur {sample_size} messages...")
+    print(f"  Analyse des expéditeurs sur {sample_size} messages...", file=sys.stderr)
+
     messages = _collect_sample(mbox_files, filtres, sample_size, since, until)
-    print(f"  Échantillon : {len(messages)} messages collectés")
+    print(f"  Échantillon : {len(messages)} messages collectés", file=sys.stderr)
+
 
     seuils = filtres.scoring_config.get("seuils", {})
     seuil_capturer = seuils.get("capturer", 0)
@@ -916,12 +936,18 @@ def valider_expediteurs(mbox_files, filtres, sample_size=500, since=None, until=
     output.write_text(yaml.dump(rapport, default_flow_style=False, allow_unicode=True,
                                 sort_keys=False), encoding="utf-8")
 
-    print(f"\n  === Expéditeurs ===")
-    print(f"  {len(by_domain)} domaines analysés")
-    print(f"  Candidats whitelist :  {len(candidats_whitelist)}")
-    print(f"  Candidats blacklist :  {len(candidats_blacklist)}")
-    print(f"  Candidats en revue :   {len(candidats_revue)}")
-    print(f"\n  Rapport → {output}")
+    print(f"\n  === Expéditeurs ===", file=sys.stderr)
+
+    print(f"  {len(by_domain)} domaines analysés", file=sys.stderr)
+
+    print(f"  Candidats whitelist :  {len(candidats_whitelist)}", file=sys.stderr)
+
+    print(f"  Candidats blacklist :  {len(candidats_blacklist)}", file=sys.stderr)
+
+    print(f"  Candidats en revue :   {len(candidats_revue)}", file=sys.stderr)
+
+    print(f"\n  Rapport → {output}", file=sys.stderr)
+
 
 
 # --- API publique ---

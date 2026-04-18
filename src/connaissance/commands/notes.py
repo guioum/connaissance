@@ -5,6 +5,7 @@ Expose :
 - `copy(dry_run=False, since=None, until=None, db=None) -> NotesCopy`
 """
 from __future__ import annotations
+import sys
 
 import re
 import shutil
@@ -125,9 +126,11 @@ def copy_notes(items, db, dry_run=False):
 
         if dry_run:
             label = "→ copier" if status == "nouveau" else "→ mettre à jour"
-            print(f"  {label} : {item['rel']}")
+            print(f"  {label} : {item['rel']}", file=sys.stderr)
+
             if item["attachments"]:
-                print(f"    + {len(item['attachments'])} attachement(s)")
+                print(f"    + {len(item['attachments'])} attachement(s)", file=sys.stderr)
+
             if status == "nouveau":
                 copied += 1
             else:

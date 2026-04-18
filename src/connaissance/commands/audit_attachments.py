@@ -11,6 +11,7 @@ fonctionne.
 Ne modifie pas le contenu des .md, ne supprime pas les fichiers centraux.
 """
 from __future__ import annotations
+import sys
 
 import re
 import shutil
@@ -45,7 +46,8 @@ def _find_attachment(fname: str) -> Path | None:
 def repair(dry_run: bool = False) -> dict:
     stats = {"scanned": 0, "repaired": 0, "missing": 0, "already_ok": 0}
     if not TRANSCRIPTIONS_DOCS.exists():
-        print(f"✗ Pas de dossier {TRANSCRIPTIONS_DOCS}")
+        print(f"✗ Pas de dossier {TRANSCRIPTIONS_DOCS}", file=sys.stderr)
+
         return stats
 
     for md in sorted(TRANSCRIPTIONS_DOCS.rglob("*.md")):
@@ -79,11 +81,13 @@ def repair(dry_run: bool = False) -> dict:
             rel_dst = dst_att_dir.relative_to(TRANSCRIPTIONS_DOCS)
             rel_src = source_file.relative_to(TRANSCRIPTIONS_DOCS)
             if dry_run:
-                print(f"  [dry-run] {rel_src} → {rel_dst}/")
+                print(f"  [dry-run] {rel_src} → {rel_dst}/", file=sys.stderr)
+
             else:
                 dst_att_dir.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(str(source_file), str(local_file))
-                print(f"  ✓ {rel_src} → {rel_dst}/")
+                print(f"  ✓ {rel_src} → {rel_dst}/", file=sys.stderr)
+
             stats["repaired"] += 1
 
     return stats

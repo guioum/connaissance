@@ -5,6 +5,7 @@ Expose :
 - `check() -> dict`
 - helpers de classification (`scan_directories`, `generate_report`, `is_excluded`)
 """
+import sys
 import os
 from collections import Counter
 from pathlib import Path
@@ -253,7 +254,8 @@ def init_config_if_needed():
         CONFIG_DIR.mkdir(parents=False, exist_ok=True)
         import shutil
         shutil.copy2(TEMPLATE_FILTRES, FILTRES_CONFIG)
-        print(f"  Config initialisée depuis le template → {FILTRES_CONFIG}")
+        print(f"  Config initialisée depuis le template → {FILTRES_CONFIG}", file=sys.stderr)
+
         return True
     return False
 
@@ -383,9 +385,12 @@ CATEGORY_ORDER = [
 
 def print_stats(results, config):
     """Afficher un résumé rapide du scan."""
-    print(f"\n{'='*60}")
-    print(f"  Scan du périmètre — {DOCUMENTS_DIR}")
-    print(f"{'='*60}")
+    print(f"\n{'='*60}", file=sys.stderr)
+
+    print(f"  Scan du périmètre — {DOCUMENTS_DIR}", file=sys.stderr)
+
+    print(f"{'='*60}", file=sys.stderr)
+
 
     total = len(results)
     by_cat = Counter(r["category"] for r in results)
@@ -400,22 +405,31 @@ def print_stats(results, config):
         else:
             by_status["a_decider"] += 1
 
-    print(f"\n  {total} dossiers analysés\n")
-    print(f"  {'Catégorie':<30} {'Dossiers':>8}")
-    print(f"  {'─'*30} {'─'*8}")
+    print(f"\n  {total} dossiers analysés\n", file=sys.stderr)
+
+    print(f"  {'Catégorie':<30} {'Dossiers':>8}", file=sys.stderr)
+
+    print(f"  {'─'*30} {'─'*8}", file=sys.stderr)
+
     for cat in CATEGORY_ORDER:
         if cat in by_cat:
             label = CATEGORY_LABELS.get(cat, cat)
-            print(f"  {label:<30} {by_cat[cat]:>8}")
+            print(f"  {label:<30} {by_cat[cat]:>8}", file=sys.stderr)
+
     for cat in sorted(by_cat):
         if cat not in CATEGORY_ORDER:
             label = CATEGORY_LABELS.get(cat, cat)
-            print(f"  {label:<30} {by_cat[cat]:>8}")
+            print(f"  {label:<30} {by_cat[cat]:>8}", file=sys.stderr)
 
-    print(f"\n  Statut :")
-    print(f"    Déjà exclus (config)  : {by_status.get('exclu', 0)}")
-    print(f"    Inclus (documents)    : {by_status.get('inclus', 0)}")
-    print(f"    À décider             : {by_status.get('a_decider', 0)}")
+
+    print(f"\n  Statut :", file=sys.stderr)
+
+    print(f"    Déjà exclus (config)  : {by_status.get('exclu', 0)}", file=sys.stderr)
+
+    print(f"    Inclus (documents)    : {by_status.get('inclus', 0)}", file=sys.stderr)
+
+    print(f"    À décider             : {by_status.get('a_decider', 0)}", file=sys.stderr)
+
 
 
 # ── Main ─────────────────────────────────────────────────────────────────────

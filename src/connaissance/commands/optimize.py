@@ -5,6 +5,7 @@ Expose :
 - `apply(dry_run=False) -> OptimizeApply` : applique promotion + dédup.
 """
 from __future__ import annotations
+import sys
 
 import hashlib
 import json
@@ -71,10 +72,12 @@ def promote(db, dry_run=False):
     """Promouvoir les PJ documents vers ~/Documents/promus/."""
     items = scan_promotable()
     if not items:
-        print("Aucune PJ document à promouvoir.")
+        print("Aucune PJ document à promouvoir.", file=sys.stderr)
+
         return 0
 
-    print(f"PJ documents à promouvoir : {len(items)}")
+    print(f"PJ documents à promouvoir : {len(items)}", file=sys.stderr)
+
 
     promoted = 0
     skipped = 0
@@ -87,11 +90,13 @@ def promote(db, dry_run=False):
         # Vérifier si déjà dans la DB (document déjà connu par hash)
         existing = db.has_hash(file_hash) if file_hash else None
         if existing:
-            print(f"  ○ {src.name} — déjà connu ({Path(existing).name})")
+            print(f"  ○ {src.name} — déjà connu ({Path(existing).name})", file=sys.stderr)
+
             skipped += 1
             continue
 
-        print(f"  → {src.name} → ~/Documents/promus/")
+        print(f"  → {src.name} → ~/Documents/promus/", file=sys.stderr)
+
 
         if dry_run:
             promoted += 1
@@ -110,7 +115,8 @@ def promote(db, dry_run=False):
                details={"hash": file_hash})
         promoted += 1
 
-    print(f"\n  ✓ {promoted} promus, {skipped} déjà existants")
+    print(f"\n  ✓ {promoted} promus, {skipped} déjà existants", file=sys.stderr)
+
     return promoted
 
 
@@ -174,10 +180,12 @@ def dedup(db, dry_run=False):
     """Dédupliquer les fichiers identiques entre Attachments/ et documents."""
     duplicates = scan_duplicates(db)
     if not duplicates:
-        print("Aucun doublon détecté.")
+        print("Aucun doublon détecté.", file=sys.stderr)
+
         return 0
 
-    print(f"Doublons détectés : {len(duplicates)}")
+    print(f"Doublons détectés : {len(duplicates)}", file=sys.stderr)
+
 
     removed = 0
     updated = 0
@@ -185,7 +193,8 @@ def dedup(db, dry_run=False):
     for dup in duplicates:
         dup_path = dup["path"]
         keeper = dup["existing"]
-        print(f"  ✗ {dup_path.name} → doublon de {Path(keeper).name}")
+        print(f"  ✗ {dup_path.name} → doublon de {Path(keeper).name}", file=sys.stderr)
+
 
         if dry_run:
             removed += 1
@@ -216,10 +225,12 @@ def dedup(db, dry_run=False):
                    source_path=str(dup_path),
                    details={"hash": dup["hash"], "keeper": keeper})
         except OSError as e:
-            print(f"    ⚠ Erreur suppression : {e}")
+            print(f"    ⚠ Erreur suppression : {e}", file=sys.stderr)
+
 
     action = "à supprimer" if dry_run else "supprimés"
-    print(f"\n  ✓ {removed} doublons {action}, {updated} transcriptions mises à jour")
+    print(f"\n  ✓ {removed} doublons {action}, {updated} transcriptions mises à jour", file=sys.stderr)
+
     return removed
 
 

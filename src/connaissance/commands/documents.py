@@ -6,6 +6,7 @@ Expose :
 - `suspects() -> DocumentsSuspects`
 """
 
+import sys
 import hashlib
 import re
 from datetime import datetime, timezone
@@ -414,7 +415,8 @@ def detect_suspicious_transcriptions() -> list[dict]:
 def register_existing(db):
     """Enregistrer tous les documents déjà transcrits dans la DB."""
     if not TRANSCRIPTIONS_DIR.exists():
-        print("Pas de transcriptions existantes.")
+        print("Pas de transcriptions existantes.", file=sys.stderr)
+
         return 0
 
     extensions = Filtres().docs_config.get("extensions", [])

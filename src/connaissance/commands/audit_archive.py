@@ -8,6 +8,7 @@ automatiquement : les chemins exclus qui ont été déplacés sont retirés.
 
 API publique : `archive(dry_run, category)`.
 """
+import sys
 import json
 import os
 import shutil
@@ -342,32 +343,43 @@ def print_plan(moves):
         by_subdir[m["subdir"]].append(m)
 
     total = len(moves)
-    print(f"\n{'='*60}")
-    print(f"  Plan d'archivage — {total} dossiers")
-    print(f"{'='*60}")
+    print(f"\n{'='*60}", file=sys.stderr)
+
+    print(f"  Plan d'archivage — {total} dossiers", file=sys.stderr)
+
+    print(f"{'='*60}", file=sys.stderr)
+
 
     for subdir in ["Applications", "Code", "Photos", "Divers"]:
         items = by_subdir.get(subdir, [])
         if not items:
             continue
-        print(f"\n  - Archives/{subdir}/ ({len(items)} dossiers)")
-        print(f"  {'─'*50}")
+        print(f"\n  - Archives/{subdir}/ ({len(items)} dossiers)", file=sys.stderr)
+
+        print(f"  {'─'*50}", file=sys.stderr)
+
         for m in items:
             name = Path(m["rel_path"]).name
-            print(f"    {name}")
-            print(f"      ← {m['rel_path'][:70]}")
+            print(f"    {name}", file=sys.stderr)
+
+            print(f"      ← {m['rel_path'][:70]}", file=sys.stderr)
+
 
 
 def print_results(moved, errors, cleaned_dirs, dry_run=False):
     """Afficher les résultats."""
     prefix = "[DRY-RUN] " if dry_run else ""
-    print(f"\n  {prefix}{len(moved)} dossiers {'à déplacer' if dry_run else 'déplacés'}")
+    print(f"\n  {prefix}{len(moved)} dossiers {'à déplacer' if dry_run else 'déplacés'}", file=sys.stderr)
+
     if cleaned_dirs:
-        print(f"  {len(cleaned_dirs)} dossiers vides nettoyés")
+        print(f"  {len(cleaned_dirs)} dossiers vides nettoyés", file=sys.stderr)
+
     if errors:
-        print(f"\n  ⚠ {len(errors)} erreurs :")
+        print(f"\n  ⚠ {len(errors)} erreurs :", file=sys.stderr)
+
         for e in errors:
-            print(f"    {Path(e['rel_path']).name} : {e.get('error', '?')}")
+            print(f"    {Path(e['rel_path']).name} : {e.get('error', '?')}", file=sys.stderr)
+
 
 
 # --- API publique ---

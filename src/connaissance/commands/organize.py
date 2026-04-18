@@ -7,6 +7,7 @@ Expose :
 - `resolve(name=None, date=None, title=None, alias=None) -> OrganizeResolve`.
 """
 
+import sys
 import json
 import re
 import shutil
@@ -167,22 +168,29 @@ def apply_manifest(manifest_path, dry_run=False):
     db = TrackingDB()
 
     if not entries:
-        print("Manifeste vide, rien à faire.")
+        print("Manifeste vide, rien à faire.", file=sys.stderr)
+
         return
 
-    print(f"\n{'='*60}")
-    print(f"  Organisation de {len(entries)} fichiers par entité")
+    print(f"\n{'='*60}", file=sys.stderr)
+
+    print(f"  Organisation de {len(entries)} fichiers par entité", file=sys.stderr)
+
     if dry_run:
-        print(f"  MODE SIMULATION — aucun fichier ne sera déplacé")
-    print(f"{'='*60}\n")
+        print(f"  MODE SIMULATION — aucun fichier ne sera déplacé", file=sys.stderr)
+
+    print(f"{'='*60}\n", file=sys.stderr)
+
 
     # Décompte par source
     by_source = {}
     for e in entries:
         by_source[e["source"]] = by_source.get(e["source"], 0) + 1
     for src, count in sorted(by_source.items()):
-        print(f"  {src:12s} : {count}")
-    print()
+        print(f"  {src:12s} : {count}", file=sys.stderr)
+
+    print(file=sys.stderr)
+
 
     moved = 0
     skipped = 0
@@ -206,7 +214,8 @@ def apply_manifest(manifest_path, dry_run=False):
                 try:
                     resume_rel = resume_path.relative_to(RESUMES / source_label)
                 except ValueError:
-                    print(f"  ✗ Chemin invalide : {resume_path}")
+                    print(f"  ✗ Chemin invalide : {resume_path}", file=sys.stderr)
+
                     errors += 1
                     continue
             else:
@@ -218,11 +227,14 @@ def apply_manifest(manifest_path, dry_run=False):
 
         # Affichage
         label = f"  [{confidence}] " if confidence == "low" else "  "
-        print(f"{label}{source} : {resume_rel}")
-        print(f"    → {entity_type}/{entity_slug}/{new_name}")
+        print(f"{label}{source} : {resume_rel}", file=sys.stderr)
+
+        print(f"    → {entity_type}/{entity_slug}/{new_name}", file=sys.stderr)
+
 
         if dest_resume.exists():
-            print(f"    ○ Destination résumé existe déjà, ignoré")
+            print(f"    ○ Destination résumé existe déjà, ignoré", file=sys.stderr)
+
             skipped += 1
             continue
 
@@ -290,16 +302,21 @@ def apply_manifest(manifest_path, dry_run=False):
                 pass
 
         except Exception as e:
-            print(f"    ✗ Erreur : {e}")
+            print(f"    ✗ Erreur : {e}", file=sys.stderr)
+
             errors += 1
 
-    print(f"\n  {'─'*40}")
+    print(f"\n  {'─'*40}", file=sys.stderr)
+
     action = "à déplacer" if dry_run else "déplacés"
-    print(f"  ✓ {moved} {action}")
+    print(f"  ✓ {moved} {action}", file=sys.stderr)
+
     if skipped:
-        print(f"  ○ {skipped} ignorés")
+        print(f"  ○ {skipped} ignorés", file=sys.stderr)
+
     if errors:
-        print(f"  ✗ {errors} erreurs")
+        print(f"  ✗ {errors} erreurs", file=sys.stderr)
+
 
 
 def generer_manifeste():

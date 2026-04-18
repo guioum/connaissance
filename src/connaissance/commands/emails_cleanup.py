@@ -5,6 +5,7 @@ API publique. Archivage réversible vers `~/Connaissance/.archive/courriels-depu
 """
 
 from __future__ import annotations
+import sys
 import hashlib
 import json
 import re
@@ -210,12 +211,16 @@ def apply_user_filters(obsoletes: list[dict],
 
 def print_text_report(obsoletes: list[dict], total_scanned: int) -> None:
     """Affichage humain du dry-run."""
-    print(f"\n── Re-scoring rétroactif ──")
-    print(f"  Transcriptions courriels scannées : {total_scanned}")
-    print(f"  Courriels qui seraient filtrés     : {len(obsoletes)}")
+    print(f"\n── Re-scoring rétroactif ──", file=sys.stderr)
+
+    print(f"  Transcriptions courriels scannées : {total_scanned}", file=sys.stderr)
+
+    print(f"  Courriels qui seraient filtrés     : {len(obsoletes)}", file=sys.stderr)
+
 
     if not obsoletes:
-        print(f"\n  Aucun courriel obsolète avec la config actuelle.")
+        print(f"\n  Aucun courriel obsolète avec la config actuelle.", file=sys.stderr)
+
         return
 
     # Groupement par domaine
@@ -226,30 +231,39 @@ def print_text_report(obsoletes: list[dict], total_scanned: int) -> None:
             domain = from_addr.rsplit("@", 1)[-1].rstrip(">").strip()
             domain_counter[domain] += 1
 
-    print(f"\n  Top 10 domaines concernés :")
+    print(f"\n  Top 10 domaines concernés :", file=sys.stderr)
+
     for domain, count in domain_counter.most_common(10):
-        print(f"    {domain:40s} {count:>4d}")
+        print(f"    {domain:40s} {count:>4d}", file=sys.stderr)
+
 
     # Groupement par dossier
     folder_counter: Counter[str] = Counter()
     for item in obsoletes:
         folder_counter[item.get("folder") or "(inconnu)"] += 1
-    print(f"\n  Par dossier :")
+    print(f"\n  Par dossier :", file=sys.stderr)
+
     for folder, count in folder_counter.most_common():
-        print(f"    {folder:20s} {count:>4d}")
+        print(f"    {folder:20s} {count:>4d}", file=sys.stderr)
+
 
     # Exemples représentatifs
-    print(f"\n  Exemples (5 premiers) :")
+    print(f"\n  Exemples (5 premiers) :", file=sys.stderr)
+
     for item in obsoletes[:5]:
         date = item.get("date", "?")[:10] if item.get("date") else "?"
         from_short = (item.get("from") or "")[:40]
         subject = (item.get("subject") or "")[:50]
-        print(f"    [{item['score']:+d}] {date} {from_short:40s} | {subject}")
-        for reason in item["reasons"][:3]:
-            print(f"         → {reason}")
+        print(f"    [{item['score']:+d}] {date} {from_short:40s} | {subject}", file=sys.stderr)
 
-    print(f"\n  Pour archiver : --apply")
-    print(f"  Pour cibler un domaine : --apply --only-domain DOMAIN")
+        for reason in item["reasons"][:3]:
+            print(f"         → {reason}", file=sys.stderr)
+
+
+    print(f"\n  Pour archiver : --apply", file=sys.stderr)
+
+    print(f"  Pour cibler un domaine : --apply --only-domain DOMAIN", file=sys.stderr)
+
 
 
 def print_json_report(obsoletes: list[dict], total_scanned: int) -> None:
