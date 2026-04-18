@@ -412,19 +412,24 @@ def register(custom_id: str, content: str,
 
 
 def register_from_results_file(results_file: str,
+                               requests_file: str | None = None,
                                db: TrackingDB | None = None) -> dict:
     """Enregistrer en masse les résumés d'un fichier de résultats API.
 
-    Le fichier peut être :
+    ``results_file`` peut être :
     - ``{results: [{custom_id, content, ...}]}`` (sortie de
       ``claude_api__query_direct`` / ``wait_for_batch`` avec
       ``output_file``)
     - ``[{custom_id, content, ...}]`` (bare array)
 
-    Pour chaque item, appelle ``register()`` avec son ``content``. Le
-    ``content`` peut être soit une chaîne markdown directe, soit une liste
-    de content blocks à la Anthropic (``[{type: "text", text: "..."}]``) —
-    dans ce cas on concatène les ``text`` des blocs ``type == "text"``.
+    ``requests_file`` (optionnel) : chemin vers le fichier produit par
+    ``summarize_prepare --output-file``. Permet de récupérer le
+    ``source_path`` par ``custom_id`` et de l'utiliser en fallback quand
+    le LLM a oublié d'injecter ``source:`` dans le frontmatter généré.
+    Fortement recommandé : les résultats de l'API Anthropic ne
+    contiennent pas ``source_path``, donc sans ça on dépend entièrement
+    du modèle pour inclure le champ — et quand il oublie (ça arrive),
+    tout le lot échoue avec « pas de champ source dans le frontmatter ».
 
     Retourne ``{registered, errors, paths: [{custom_id, path}]}``. Le
     Claude appelant ne voit jamais les contenus : ils ne transitent pas
@@ -432,6 +437,24 @@ def register_from_results_file(results_file: str,
     """
     if db is None:
         db = TrackingDB()
+
+    # Mapping custom_id → source_path depuis le fichier de prep, quand
+    # fourni. Ça sert de filet de sécurité si le LLM a oublié `source:`.
+    source_path_by_id: dict[str, str] = {}
+    if requests_file:
+        req_path = Path(requests_file).expanduser()
+        if req_path.exists():
+            try:
+                req_data = json.loads(req_path.read_text(encoding="utf-8"))
+                req_items = (req_data if isinstance(req_data, list)
+                             else req_data.get("requests", []))
+                for r in req_items:
+                    cid = r.get("custom_id")
+                    sp = r.get("source_path")
+                    if cid and sp:
+                        source_path_by_id[cid] = sp
+            except (OSError, json.JSONDecodeError):
+                pass  # on continuera sans mapping, c'est juste un fallback
 
     path = Path(results_file).expanduser()
     if not path.exists():
@@ -477,9 +500,10 @@ def register_from_results_file(results_file: str,
         if not content.strip():
             errors.append({"custom_id": custom_id, "error": "content vide"})
             continue
-        result = register(custom_id, content,
-                          source_path=item.get("source_path"),
-                          db=db)
+        # Source path : priorité au champ inline de l'item, fallback
+        # sur le mapping depuis le requests_file.
+        src_path = item.get("source_path") or source_path_by_id.get(custom_id)
+        result = register(custom_id, content, source_path=src_path, db=db)
         if result.get("error"):
             errors.append({"custom_id": custom_id, "error": result["error"]})
         else:

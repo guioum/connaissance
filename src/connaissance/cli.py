@@ -180,7 +180,10 @@ def _cmd_summarize(args) -> Any:
                                  output_file=args.output_file)
     if args.verb == "register":
         if args.from_results_file:
-            return summarize.register_from_results_file(args.from_results_file)
+            return summarize.register_from_results_file(
+                args.from_results_file,
+                requests_file=args.requests_file,
+            )
         content = sys.stdin.read() if args.stdin else (args.content or "")
         return summarize.register(args.custom_id, content, source_path=args.source_path)
     raise SystemExit(f"verbe inconnu : summarize {args.verb}")
@@ -426,6 +429,13 @@ def build_parser() -> argparse.ArgumentParser:
                                 "query_direct avec output_file). Itère sur chaque "
                                 "item sans charger les contents dans le contexte "
                                 "de l'appelant.")
+    p_sum_reg.add_argument("--requests-file", dest="requests_file",
+                           type=str, default=None,
+                           help="Fichier de prep (sortie de summarize_prepare "
+                                "--output-file). Utilisé avec --from-results-file "
+                                "pour remplir le fallback source_path par "
+                                "custom_id quand le LLM a oublié d'injecter "
+                                "`source:` dans le frontmatter.")
 
     # synthesis
     p_syn = sub.add_parser("synthesis")

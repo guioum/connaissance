@@ -627,11 +627,24 @@ server.registerTool(
           "claude-api-mcp. All entries are registered in one pass. Preferred for " +
           "API-based workflows — no content transits through the MCP channel."
         ),
+      requests_file: z
+        .string()
+        .optional()
+        .describe(
+          "Batch mode (optional but strongly recommended): path to the " +
+          "prep file produced by summarize_prepare(output_file=...). Used as " +
+          "a fallback to resolve 'source_path' by custom_id when the LLM " +
+          "forgot to inject `source:` in the generated frontmatter — which " +
+          "is frequent enough to make this flag almost mandatory. Without " +
+          "it, a single forgetful batch will fail every item with " +
+          "« pas de champ source dans le frontmatter »."
+        ),
     },
   },
   async (args) => {
     if (args.from_results_file) {
       const a = ["--from-results-file", args.from_results_file];
+      if (args.requests_file) a.push("--requests-file", args.requests_file);
       return runAndFormat("summarize", "register", a);
     }
     if (!args.custom_id || !args.content) {
