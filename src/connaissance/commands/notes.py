@@ -24,11 +24,11 @@ def _parse_frontmatter_dates(content: str) -> dict[str, str]:
     dates = {}
     if not content.startswith("---"):
         return dates
-    try:
-        end = content.index("---", 3)
-        fm_text = content[3:end]
-    except ValueError:
+    # Chercher `\n---` pour éviter de matcher un `---` dans une valeur YAML.
+    end = content.find("\n---", 4)
+    if end < 0:
         return dates
+    fm_text = content[4:end]
     for field in ("created", "modified"):
         match = re.search(rf'^{field}:\s*(\d{{4}}-\d{{2}}-\d{{2}})', fm_text, re.MULTILINE)
         if match:

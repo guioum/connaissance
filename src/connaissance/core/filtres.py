@@ -423,11 +423,14 @@ class Filtres:
         """Vérifier les dates created/modified du frontmatter."""
         if not content.startswith("---"):
             return True  # pas de frontmatter → inclure
-        try:
-            end = content.index("---", 3)
-            fm_text = content[3:end]
-        except ValueError:
+        # Chercher `\n---` (pas juste `---`) pour éviter de matcher une chaîne
+        # `---` à l'intérieur d'une valeur YAML (séparateur dans un body,
+        # ASCII art, etc.). Aligné avec `_read_transcription` (summarize.py) et
+        # `parse_frontmatter` (audit_reindex.py).
+        end = content.find("\n---", 4)
+        if end < 0:
             return True
+        fm_text = content[4:end]
 
         dates = []
         for field in ("created", "modified"):
