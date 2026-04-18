@@ -432,6 +432,32 @@ def reindex_document_hashes(db: TrackingDB, dry_run: bool) -> dict:
 # --- API publique ---
 
 
+def prune_orphans(db: TrackingDB, dry_run: bool) -> dict:
+    """Supprimer de `files` les entrées dont le chemin n'existe plus sur disque.
+
+    Sans ce nettoyage, les transcriptions/résumés supprimés du filesystem
+    restent indexés en DB et faussent `pipeline_costs`, `summarize_plan`,
+    `stale_synthesis`, etc. (ex. : une note supprimée continue d'être comptée
+    comme « à résumer »). La table `operations` (log historique) est
+    préservée — seules les références aux fichiers inexistants sont purgées.
+    """
+    counts = {"total": 0}
+    rows = db._conn.execute("SELECT path, file_type FROM files").fetchall()
+    orphans: list[str] = []
+    for row in rows:
+        path = row[0]
+        if not (CONNAISSANCE / path).exists():
+            orphans.append(path)
+            ft = row[1] or "autre"
+            counts[ft] = counts.get(ft, 0) + 1
+            counts["total"] += 1
+    if not dry_run and orphans:
+        db._conn.executemany("DELETE FROM files WHERE path = ?",
+                             [(p,) for p in orphans])
+        db._conn.commit()
+    return counts
+
+
 def reindex(dry_run: bool = False, skip_hashes: bool = False,
             db: TrackingDB | None = None) -> dict:
     """Repopuler tracking.db depuis les fichiers existants (schema AuditReindex)."""
@@ -449,6 +475,7 @@ def reindex(dry_run: bool = False, skip_hashes: bool = False,
         trans_counts = reindex_transcriptions(db, dry_run)
         resume_counts = reindex_resumes(db, dry_run)
         synth_counts = reindex_synthese(db, dry_run)
+        orphan_counts = prune_orphans(db, dry_run)
         hash_counts = None
         if not skip_hashes:
             hash_counts = reindex_document_hashes(db, dry_run)
@@ -459,6 +486,7 @@ def reindex(dry_run: bool = False, skip_hashes: bool = False,
                        "transcriptions": trans_counts["total"],
                        "resumes": resume_counts["total"],
                        "syntheses": sum(synth_counts.values()),
+                       "orphans_pruned": orphan_counts["total"],
                        "skip_hashes": skip_hashes,
                    })
 
@@ -469,6 +497,7 @@ def reindex(dry_run: bool = False, skip_hashes: bool = False,
                 "transcriptions": trans_counts,
                 "resumes": resume_counts,
                 "synthese": synth_counts,
+                "orphans": orphan_counts,
                 "hashes": hash_counts,
             },
             "dry_run": dry_run,
