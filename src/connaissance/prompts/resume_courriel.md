@@ -97,6 +97,7 @@ Résume ce courriel pour la base de connaissances.
 **created** : `{{created}}`
 **modified** : `{{modified}}`
 **from** : `{{from}}`
+**subject** : `{{title}}`
 **message-id** : `{{message_id}}`
 
 **Courriel (transcription complète)** :

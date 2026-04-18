@@ -79,6 +79,36 @@ def _substitute(template: str, variables: dict) -> str:
     return re.sub(r"\{\{\s*(\w+)\s*\}\}", replace, template)
 
 
+def _fallback_parse_frontmatter(fm_text: str) -> dict:
+    """Parseur tolérant pour frontmatters YAML invalides.
+
+    Certaines anciennes transcriptions de courriels ont un frontmatter avec
+    des headers RFC 5322 repliés non-échappés (valeur sur plusieurs lignes
+    commençant par un tab ou un espace). PyYAML refuse ce format. Ce
+    fallback extrait les champs plats ``clé: valeur`` ligne par ligne et
+    fusionne les lignes de continuation (indentation par tab ou espaces)
+    dans la valeur de la clé précédente. Utilisé uniquement quand
+    ``yaml.safe_load`` échoue — pour éviter de perdre les métadonnées des
+    anciennes transcriptions sans forcer leur ré-extraction.
+    """
+    fm: dict = {}
+    current_key: str | None = None
+    for line in fm_text.splitlines():
+        if not line.strip():
+            continue
+        # Ligne de continuation (RFC 5322 folded header) : tab ou espaces en tête
+        if line[0] in (" ", "\t") and current_key:
+            fm[current_key] = str(fm[current_key]) + " " + line.strip()
+            continue
+        if ":" in line:
+            key, _, value = line.partition(":")
+            key = key.strip()
+            value = value.strip().strip('"').strip("'")
+            fm[key] = value
+            current_key = key
+    return fm
+
+
 def _read_transcription(path: Path) -> tuple[dict, str]:
     """Lire une transcription et séparer frontmatter / body."""
     content = path.read_text(encoding="utf-8")
@@ -87,12 +117,16 @@ def _read_transcription(path: Path) -> tuple[dict, str]:
     end = content.find("\n---", 4)
     if end < 0:
         return {}, content
+    fm_text = content[4:end]
     try:
-        fm = yaml.safe_load(content[4:end]) or {}
+        fm = yaml.safe_load(fm_text) or {}
+        if not isinstance(fm, dict):
+            fm = {}
     except yaml.YAMLError:
-        fm = {}
+        # Ancien format (courriels extraits avant _clean) : fallback ligne-à-ligne.
+        fm = _fallback_parse_frontmatter(fm_text)
     body = content[end + 4:].lstrip("\n")
-    return (fm if isinstance(fm, dict) else {}), body
+    return fm, body
 
 
 def _custom_id(rel_path: str) -> str:
@@ -194,16 +228,22 @@ def prepare(paths: list[str] | str = "all", mode: str = "batch",
         except FileNotFoundError:
             continue
 
+        # Pour les courriels et fils, le frontmatter de transcription utilise
+        # `subject`. Pour documents/notes, c'est `title`. On unifie sous `title`
+        # pour que les templates aient une seule variable à interpoler, sans
+        # quoi le LLM ne reçoit pas l'objet du courriel quand le corps est court
+        # ou vide (cas des invitations calendar, des HTML-only mal extraits).
+        title_or_subject = fm.get("title") or fm.get("subject") or ""
         variables = {
             "source": _rel_transcription(trans_path),
             "created": str(fm.get("created", "")),
             "modified": str(fm.get("modified", "")),
-            "title": str(fm.get("title", "")),
+            "title": str(title_or_subject),
             "date": str(fm.get("date", "")),
             "from": str(fm.get("from", "")),
             "message_id": str(fm.get("message-id", "")),
             "content": body,
-            "thread_count": str(fm.get("message-count", "")),
+            "message_count": str(fm.get("message-count", "")),
             "message_ids_yaml": "",
         }
 

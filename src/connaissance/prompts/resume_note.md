@@ -63,6 +63,7 @@ Résume cette note pour la base de connaissances.
 **Chemin relatif de la transcription** : `{{source}}`
 **created** : `{{created}}`
 **modified** : `{{modified}}`
+**title** (si connu) : `{{title}}`
 
 **Note (transcription complète)** :
 

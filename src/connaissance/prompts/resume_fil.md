@@ -71,6 +71,7 @@ Résume ce fil de discussion pour la base de connaissances.
 **created** (premier message) : `{{created}}`
 **modified** (dernier message) : `{{modified}}`
 **from** (interlocuteur principal) : `{{from}}`
+**subject** (premier message) : `{{title}}`
 **message-count** : `{{message_count}}`
 **message-ids** :
 {{message_ids_yaml}}
