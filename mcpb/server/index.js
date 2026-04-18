@@ -551,14 +551,37 @@ server.registerTool(
 server.registerTool(
   "connaissance_summarize_register",
   {
-    description: "Post-process a summary content returned by claude-api-mcp : parse the frontmatter, derive the destination path, write to Résumés/, update tracking.db.",
+    description:
+      "Post-process a summary returned by claude-api-mcp: parse the frontmatter, derive the destination path, write to Résumés/, update tracking.db. " +
+      "Two modes : (a) single — pass {custom_id, content} for one summary ; " +
+      "(b) batch — pass only {from_results_file} pointing at the output of " +
+      "`claude_api wait_for_batch` or `query_direct` with output_file, and all " +
+      "summaries are registered in one call without loading their contents into " +
+      "the caller's context.",
     inputSchema: {
-      custom_id: z.string().describe("Custom ID from the summarize_prepare request."),
-      content: z.string().describe("Full markdown content returned by the Anthropic API (with frontmatter)."),
+      custom_id: z.string().optional().describe("Custom ID (single mode only)."),
+      content: z.string().optional().describe("Full markdown content with frontmatter (single mode only)."),
       source_path: z.string().optional().describe("Fallback source path if content frontmatter is missing."),
+      from_results_file: z
+        .string()
+        .optional()
+        .describe(
+          "Batch mode: JSON file {results: [{custom_id, content, ...}]} from " +
+          "claude-api-mcp. All entries are registered in one pass. Preferred for " +
+          "API-based workflows — no content transits through the MCP channel."
+        ),
     },
   },
   async (args) => {
+    if (args.from_results_file) {
+      const a = ["--from-results-file", args.from_results_file];
+      return runAndFormat("summarize", "register", a);
+    }
+    if (!args.custom_id || !args.content) {
+      throw new Error(
+        "connaissance_summarize_register: must pass either {custom_id, content} (single mode) or {from_results_file} (batch mode)."
+      );
+    }
     const a = [args.custom_id, "--content", args.content];
     pushFlag(a, "source-path", args.source_path);
     return runAndFormat("summarize", "register", a);

@@ -142,6 +142,8 @@ def _cmd_summarize(args) -> Any:
                                  source=args.source,
                                  output_file=args.output_file)
     if args.verb == "register":
+        if args.from_results_file:
+            return summarize.register_from_results_file(args.from_results_file)
         content = sys.stdin.read() if args.stdin else (args.content or "")
         return summarize.register(args.custom_id, content, source_path=args.source_path)
     raise SystemExit(f"verbe inconnu : summarize {args.verb}")
@@ -371,10 +373,19 @@ def build_parser() -> argparse.ArgumentParser:
                                  "de les renvoyer inline (évite de polluer le contexte "
                                  "de l'assistant).")
     p_sum_reg = p_sum_verbs.add_parser("register")
-    p_sum_reg.add_argument("custom_id")
+    # custom_id est optionnel : requis pour register single, inutile pour
+    # register batch depuis --from-results-file.
+    p_sum_reg.add_argument("custom_id", nargs="?", default=None)
     p_sum_reg.add_argument("--content", type=str, default=None)
     p_sum_reg.add_argument("--source-path", dest="source_path", type=str, default=None)
     p_sum_reg.add_argument("--stdin", action="store_true")
+    p_sum_reg.add_argument("--from-results-file", dest="from_results_file",
+                           type=str, default=None,
+                           help="Enregistrer en masse depuis un fichier de résultats "
+                                "API (sortie de claude_api__wait_for_batch ou "
+                                "query_direct avec output_file). Itère sur chaque "
+                                "item sans charger les contents dans le contexte "
+                                "de l'appelant.")
 
     # synthesis
     p_syn = sub.add_parser("synthesis")

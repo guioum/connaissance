@@ -409,3 +409,85 @@ def register(custom_id: str, content: str,
         "source_type": source_type,
         "frontmatter_injected": True,
     }
+
+
+def register_from_results_file(results_file: str,
+                               db: TrackingDB | None = None) -> dict:
+    """Enregistrer en masse les résumés d'un fichier de résultats API.
+
+    Le fichier peut être :
+    - ``{results: [{custom_id, content, ...}]}`` (sortie de
+      ``claude_api__query_direct`` / ``wait_for_batch`` avec
+      ``output_file``)
+    - ``[{custom_id, content, ...}]`` (bare array)
+
+    Pour chaque item, appelle ``register()`` avec son ``content``. Le
+    ``content`` peut être soit une chaîne markdown directe, soit une liste
+    de content blocks à la Anthropic (``[{type: "text", text: "..."}]``) —
+    dans ce cas on concatène les ``text`` des blocs ``type == "text"``.
+
+    Retourne ``{registered, errors, paths: [{custom_id, path}]}``. Le
+    Claude appelant ne voit jamais les contenus : ils ne transitent pas
+    par son contexte.
+    """
+    if db is None:
+        db = TrackingDB()
+
+    path = Path(results_file).expanduser()
+    if not path.exists():
+        return {
+            "registered": 0,
+            "errors": [{"error": f"results_file introuvable : {path}"}],
+            "paths": [],
+        }
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as e:
+        return {
+            "registered": 0,
+            "errors": [{"error": f"JSON invalide : {e}"}],
+            "paths": [],
+        }
+
+    items = data if isinstance(data, list) else data.get("results", [])
+    if not isinstance(items, list):
+        return {
+            "registered": 0,
+            "errors": [{"error": "format attendu : [...] ou {results: [...]}"}],
+            "paths": [],
+        }
+
+    registered = 0
+    errors: list[dict] = []
+    paths: list[dict] = []
+    for item in items:
+        custom_id = item.get("custom_id", "")
+        raw_content = item.get("content")
+        # Si content est une liste de blocs Anthropic, concaténer les text
+        if isinstance(raw_content, list):
+            content = "".join(
+                b.get("text", "") for b in raw_content
+                if isinstance(b, dict) and b.get("type") == "text"
+            )
+        elif isinstance(raw_content, str):
+            content = raw_content
+        else:
+            errors.append({"custom_id": custom_id, "error": "content manquant ou invalide"})
+            continue
+        if not content.strip():
+            errors.append({"custom_id": custom_id, "error": "content vide"})
+            continue
+        result = register(custom_id, content,
+                          source_path=item.get("source_path"),
+                          db=db)
+        if result.get("error"):
+            errors.append({"custom_id": custom_id, "error": result["error"]})
+        else:
+            registered += 1
+            paths.append({"custom_id": custom_id, "path": result["path"]})
+
+    return {
+        "registered": registered,
+        "errors": errors,
+        "paths": paths,
+    }
