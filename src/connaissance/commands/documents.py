@@ -468,15 +468,31 @@ def scan(since=None, until=None, output_file: str | None = None, db=None) -> dic
         "skipped": skipped_list,
     }
     from connaissance.core.output_file import write_or_inline
-    return write_or_inline(
-        payload,
-        output_file=output_file,
-        summary_fn=lambda p: {
-            "total_to_transcribe": len(p["to_transcribe"]),
+    import re as _re
+
+    def _summary(p: dict) -> dict:
+        items = p["to_transcribe"]
+        # Répartition par année : extraire la première année plausible (1990-2099)
+        # depuis le chemin de chaque item. Évite à l'appelant de devoir ouvrir
+        # le fichier juste pour décider d'un filtre --since/--until.
+        year_counts: dict[str, int] = {}
+        for it in items:
+            m = _re.search(r"\b(19[9]\d|20\d{2})\b", it.get("rel", ""))
+            key = m.group(1) if m else "inconnu"
+            year_counts[key] = year_counts.get(key, 0) + 1
+        by_year = dict(sorted(year_counts.items()))
+        # Échantillon de chemins (5 premiers) pour inspection rapide sans
+        # ouvrir le fichier complet.
+        sample = [it.get("rel") or it.get("source") for it in items[:5]]
+        return {
+            "total_to_transcribe": len(items),
             "total_skipped": sum(x["count"] for x in p["skipped"]),
             "skipped": p["skipped"],
-        },
-    )
+            "by_year": by_year,
+            "sample_to_transcribe": sample,
+        }
+
+    return write_or_inline(payload, output_file=output_file, summary_fn=_summary)
 
 
 def register(source_file: str, transcription: str, file_hash: str | None = None,

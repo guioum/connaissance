@@ -205,15 +205,27 @@ def scan(since=None, until=None, output_file: str | None = None) -> dict:
         "skipped": skipped_list,
     }
     from connaissance.core.output_file import write_or_inline
-    return write_or_inline(
-        payload,
-        output_file=output_file,
-        summary_fn=lambda p: {
-            "total_to_copy": len(p["to_copy"]),
+
+    def _summary(p: dict) -> dict:
+        items = p["to_copy"]
+        # Répartition par année à partir du `created` du frontmatter
+        # (champ déjà extrait par `scan_notes`).
+        year_counts: dict[str, int] = {}
+        for it in items:
+            created = str(it.get("created") or "")[:4]
+            key = created if created.isdigit() else "inconnu"
+            year_counts[key] = year_counts.get(key, 0) + 1
+        by_year = dict(sorted(year_counts.items()))
+        sample = [it.get("rel") or it.get("source") for it in items[:5]]
+        return {
+            "total_to_copy": len(items),
             "total_skipped": sum(x["count"] for x in p["skipped"]),
             "skipped": p["skipped"],
-        },
-    )
+            "by_year": by_year,
+            "sample_to_copy": sample,
+        }
+
+    return write_or_inline(payload, output_file=output_file, summary_fn=_summary)
 
 
 def copy(dry_run: bool = False, since=None, until=None,
