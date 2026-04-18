@@ -328,6 +328,7 @@ def apply_manifest(manifest_path, dry_run=False):
     if errors:
         print(f"  ✗ {errors} erreurs", file=sys.stderr)
 
+    return {"moved": moved, "skipped": skipped, "errors": errors}
 
 
 def generer_manifeste():
@@ -495,12 +496,11 @@ def enrich(manifest_path: str, qmd_results: list[dict]) -> dict:
 
 def apply(manifest: str, dry_run: bool = False) -> dict:
     """Appliquer un manifeste (schema OrganizeApply)."""
-    apply_manifest(manifest, dry_run=dry_run)
-    # apply_manifest imprime sur stdout — on retourne une enveloppe simple.
+    result = apply_manifest(manifest, dry_run=dry_run) or {}
     return {
-        "moved": 0 if dry_run else -1,
-        "skipped": 0,
-        "errors": [],
+        "moved": result.get("moved", 0),
+        "skipped": result.get("skipped", 0),
+        "errors": result.get("errors", 0),
         "manifest": str(manifest),
         "dry_run": dry_run,
     }
