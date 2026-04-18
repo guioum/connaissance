@@ -445,8 +445,14 @@ def register_existing(db):
 # --- API publique (appelée par le dispatcher CLI et les outils MCP) ---
 
 
-def scan(since=None, until=None, db=None) -> dict:
-    """Scanner ~/Documents/ et retourner les fichiers à transcrire (schema DocumentsScan)."""
+def scan(since=None, until=None, output_file: str | None = None, db=None) -> dict:
+    """Scanner ~/Documents/ et retourner les fichiers à transcrire (schema DocumentsScan).
+
+    Si ``output_file`` est fourni, le payload complet (qui peut dépasser le Mo
+    sur une base documentaire conséquente) est écrit dans ce fichier et
+    seules des métadonnées sont renvoyées : ``{output_file, total_bytes,
+    total_to_transcribe, total_skipped, skipped}``.
+    """
     require_paths(DOCUMENTS_DIR, context="documents scan")
 
     if isinstance(since, str):
@@ -455,11 +461,22 @@ def scan(since=None, until=None, db=None) -> dict:
         until = datetime.strptime(until, "%Y-%m-%d").replace(tzinfo=timezone.utc)
 
     to_process, skipped = scan_documents(since, until, db=db)
-    return {
+    skipped_list = [{"reason": k, "count": v} for k, v in sorted(skipped.items())]
+    payload = {
         "to_transcribe": to_process,
         "registered_existing": [],
-        "skipped": [{"reason": k, "count": v} for k, v in sorted(skipped.items())],
+        "skipped": skipped_list,
     }
+    from connaissance.core.output_file import write_or_inline
+    return write_or_inline(
+        payload,
+        output_file=output_file,
+        summary_fn=lambda p: {
+            "total_to_transcribe": len(p["to_transcribe"]),
+            "total_skipped": sum(x["count"] for x in p["skipped"]),
+            "skipped": p["skipped"],
+        },
+    )
 
 
 def register(source_file: str, transcription: str, file_hash: str | None = None,

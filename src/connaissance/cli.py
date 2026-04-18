@@ -38,7 +38,7 @@ def _cmd_documents(args) -> Any:
     from connaissance.commands import documents
     if args.verb == "scan":
         since, until = _parse_date_range(args)
-        return documents.scan(since=since, until=until)
+        return documents.scan(since=since, until=until, output_file=args.output_file)
     if args.verb == "register":
         return documents.register(args.source_file, args.transcription)
     if args.verb == "register-existing":
@@ -81,7 +81,7 @@ def _cmd_notes(args) -> Any:
     from connaissance.commands import notes
     since, until = _parse_date_range(args)
     if args.verb == "scan":
-        return notes.scan(since=since, until=until)
+        return notes.scan(since=since, until=until, output_file=args.output_file)
     if args.verb == "copy":
         return notes.copy(dry_run=args.dry_run, since=since, until=until)
     raise SystemExit(f"verbe inconnu : notes {args.verb}")
@@ -274,6 +274,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_doc_verbs = p_doc.add_subparsers(dest="verb", required=True)
     p_doc_scan = p_doc_verbs.add_parser("scan")
     add_date_range(p_doc_scan)
+    p_doc_scan.add_argument("--output-file", dest="output_file", type=str,
+                            default=None,
+                            help="Écrire le scan complet dans ce fichier JSON "
+                                 "au lieu de le renvoyer inline (peut dépasser "
+                                 "le Mo sur une base documentaire chargée).")
     p_doc_reg = p_doc_verbs.add_parser("register")
     p_doc_reg.add_argument("source_file")
     p_doc_reg.add_argument("transcription")
@@ -306,6 +311,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_notes_verbs = p_notes.add_subparsers(dest="verb", required=True)
     p_notes_scan = p_notes_verbs.add_parser("scan")
     add_date_range(p_notes_scan)
+    p_notes_scan.add_argument("--output-file", dest="output_file", type=str,
+                              default=None,
+                              help="Écrire le scan complet dans ce fichier JSON "
+                                   "au lieu de le renvoyer inline (peut dépasser "
+                                   "plusieurs centaines de Ko sur un Apple "
+                                   "Notes chargé).")
     p_notes_copy = p_notes_verbs.add_parser("copy")
     p_notes_copy.add_argument("--dry-run", action="store_true")
     add_date_range(p_notes_copy)

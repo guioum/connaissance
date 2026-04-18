@@ -188,15 +188,32 @@ def _parse_dates(since, until):
     return since, until
 
 
-def scan(since=None, until=None) -> dict:
-    """Lister les notes à copier (schema dict avec to_copy + skipped)."""
+def scan(since=None, until=None, output_file: str | None = None) -> dict:
+    """Lister les notes à copier (schema dict avec to_copy + skipped).
+
+    Si ``output_file`` est fourni, le payload complet (~700 Ko sur un Apple
+    Notes chargé) est écrit dans ce fichier et seules des métadonnées sont
+    renvoyées : ``{output_file, total_bytes, total_to_copy, total_skipped,
+    skipped}``.
+    """
     require_paths(NOTES_DIR, context="notes scan")
     since, until = _parse_dates(since, until)
     to_process, skipped = scan_notes(since, until)
-    return {
+    skipped_list = [{"reason": k, "count": v} for k, v in sorted(skipped.items())]
+    payload = {
         "to_copy": to_process,
-        "skipped": [{"reason": k, "count": v} for k, v in sorted(skipped.items())],
+        "skipped": skipped_list,
     }
+    from connaissance.core.output_file import write_or_inline
+    return write_or_inline(
+        payload,
+        output_file=output_file,
+        summary_fn=lambda p: {
+            "total_to_copy": len(p["to_copy"]),
+            "total_skipped": sum(x["count"] for x in p["skipped"]),
+            "skipped": p["skipped"],
+        },
+    )
 
 
 def copy(dry_run: bool = False, since=None, until=None,

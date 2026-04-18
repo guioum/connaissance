@@ -186,14 +186,23 @@ server.registerTool(
 server.registerTool(
   "connaissance_documents_scan",
   {
-    description: "Scan ~/Documents/ and list files to transcribe. Applies filtres.yaml (extensions, excluded folders, date range).",
-    inputSchema: dateRangeSchema,
+    description: "Scan ~/Documents/ and list files to transcribe. Applies filtres.yaml (extensions, excluded folders, date range). " +
+      "The full payload can exceed 1 MB on a large document library — use 'output_file' to write it to disk and receive only a compact summary.",
+    inputSchema: {
+      ...dateRangeSchema,
+      output_file: z.string().optional().describe(
+        "If set, write the full scan payload to this JSON file and return only " +
+        "{output_file, total_bytes, total_to_transcribe, total_skipped, skipped}. " +
+        "Recommended when the library contains hundreds+ of files."
+      ),
+    },
     annotations: { readOnlyHint: true },
   },
   async (args) => {
     const a = [];
     pushFlag(a, "since", args.since);
     pushFlag(a, "until", args.until);
+    pushFlag(a, "output-file", args.output_file);
     return runAndFormat("documents", "scan", a);
   }
 );
@@ -341,14 +350,23 @@ server.registerTool(
 server.registerTool(
   "connaissance_notes_scan",
   {
-    description: "Scan ~/Notes/ and list Apple Notes markdown files to copy into the knowledge base.",
-    inputSchema: dateRangeSchema,
+    description: "Scan ~/Notes/ and list Apple Notes markdown files to copy into the knowledge base. " +
+      "The full payload can exceed 700 KB on a large Apple Notes library — use 'output_file' to write it to disk and receive only a compact summary.",
+    inputSchema: {
+      ...dateRangeSchema,
+      output_file: z.string().optional().describe(
+        "If set, write the full scan payload to this JSON file and return only " +
+        "{output_file, total_bytes, total_to_copy, total_skipped, skipped}. " +
+        "Recommended when the Apple Notes library contains hundreds+ of notes."
+      ),
+    },
     annotations: { readOnlyHint: true },
   },
   async (args) => {
     const a = [];
     pushFlag(a, "since", args.since);
     pushFlag(a, "until", args.until);
+    pushFlag(a, "output-file", args.output_file);
     return runAndFormat("notes", "scan", a);
   }
 );
