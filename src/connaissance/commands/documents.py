@@ -23,9 +23,59 @@ TRANSCRIPTIONS_DIR = BASE_PATH / "Connaissance" / "Transcriptions" / "Documents"
 
 # Champs canoniques du frontmatter de transcription de document.
 # Les autres champs présents dans un frontmatter existant sont préservés.
+# `created`/`modified` sont dérivés du filesystem de la source (birthtime,
+# mtime) et injectés pour que le pipeline puisse filtrer par date métier
+# sans avoir à inventer de fallback sur le nom de fichier.
 TRANSCRIPTION_FRONTMATTER_FIELDS = (
     "source", "source_hash", "source_size", "transcribed_at",
+    "created", "modified",
 )
+
+
+def _date_from_filename(name_or_path: str) -> str | None:
+    """Extraire une date ``YYYY-MM-DD`` d'un nom de fichier s'il en contient une.
+
+    Cherche un motif ``\\d{4}-\\d{2}-\\d{2}`` plausible (année 1990-2099, mois
+    01-12, jour 01-31). Retourne ``YYYY-MM-DDT00:00:00`` ou ``None``.
+
+    Utilisé comme fallback uniquement quand la source n'existe plus sur disque
+    — la convention de nommage ``YYYY-MM-DD foo.pdf`` est une donnée
+    intentionnelle de l'utilisateur, pas une invention du pipeline.
+    """
+    m = re.search(r"\b(19[9]\d|20\d{2})-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])\b",
+                  name_or_path)
+    if not m:
+        return None
+    return f"{m.group(1)}-{m.group(2)}-{m.group(3)}T00:00:00"
+
+
+def _source_dates(source_path: Path) -> tuple[str | None, str | None]:
+    """Retourner (created, modified) d'une source au format ISO, ou (None, None).
+
+    Priorité :
+    1. Filesystem (birthtime pour ``created`` si dispo, mtime sinon) — valeur
+       la plus fiable quand la source existe.
+    2. Fallback sur une date présente dans le chemin (``YYYY-MM-DD``) quand
+       la source n'existe plus sur disque. Dans ce cas, ``created`` est
+       renseigné, ``modified`` reste ``None``.
+
+    Formats : ``YYYY-MM-DDTHH:MM:SS`` (sans timezone pour la cohérence
+    avec le reste du pipeline : les courriels et notes utilisent déjà
+    ce format).
+    """
+    try:
+        st = source_path.stat()
+    except OSError:
+        # Source introuvable : dernier recours, utiliser une date éventuellement
+        # encodée dans le nom du chemin (ex. "Documents/.../2026-01-25 foo.pdf").
+        return _date_from_filename(str(source_path)), None
+    mtime = datetime.fromtimestamp(st.st_mtime, tz=timezone.utc)
+    birthtime = None
+    if hasattr(st, "st_birthtime") and st.st_birthtime > 0:
+        birthtime = datetime.fromtimestamp(st.st_birthtime, tz=timezone.utc)
+    created = (birthtime or mtime).strftime("%Y-%m-%dT%H:%M:%S")
+    modified = mtime.strftime("%Y-%m-%dT%H:%M:%S")
+    return created, modified
 
 
 def hash_file(path):
@@ -105,17 +155,52 @@ def _upsert_transcription_frontmatter(trans_path: Path, source_path: Path,
     except ValueError:
         source_rel = str(source_path)
 
-    new_fields = {
-        "source": source_rel,
-        "source_hash": f"sha256:{file_hash}" if file_hash else None,
-        "source_size": source_size if source_size is not None else None,
-        "transcribed_at": datetime.now().strftime("%Y-%m-%dT%H:%M:%S"),
-    }
+    created, modified = _source_dates(source_path)
 
+    # Lire le frontmatter existant pour décider si `transcribed_at` est à
+    # (re)mettre à jour : on veut un horodatage stable tant que le hash de
+    # la source n'a pas changé — ça évite de polluer les diffs à chaque
+    # reindex et permet une vraie traçabilité (date de la dernière OCR
+    # effective). On rafraîchit toujours `created`/`modified` depuis la
+    # source (la date métier bouge via rename/touch même sans re-OCR).
     try:
         content = trans_path.read_text(encoding="utf-8")
     except OSError:
         return
+
+    existing_fm: dict = {}
+    if content.startswith("---"):
+        end = content.find("\n---", 4)
+        if end > 0:
+            try:
+                existing_fm = yaml.safe_load(content[4:end]) or {}
+                if not isinstance(existing_fm, dict):
+                    existing_fm = {}
+            except yaml.YAMLError:
+                existing_fm = {}
+
+    prev_hash = str(existing_fm.get("source_hash") or "").removeprefix("sha256:")
+    new_hash_str = f"sha256:{file_hash}" if file_hash else None
+    # `transcribed_at` ne bouge que si (a) absent ou (b) le hash change
+    # (ré-OCR réelle).
+    keep_transcribed_at = (
+        existing_fm.get("transcribed_at")
+        and (not file_hash or prev_hash == file_hash)
+    )
+    transcribed_at = (
+        existing_fm["transcribed_at"]
+        if keep_transcribed_at
+        else datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
+    )
+
+    new_fields = {
+        "source": source_rel,
+        "source_hash": new_hash_str,
+        "source_size": source_size if source_size is not None else None,
+        "transcribed_at": transcribed_at,
+        "created": created,
+        "modified": modified,
+    }
 
     new_content = _merge_frontmatter(content, new_fields)
     if new_content != content:
@@ -222,17 +307,7 @@ def register_document(db, source_path, transcription_path, file_hash=None):
     except ValueError:
         rel = str(transcription_path)
 
-    try:
-        st = source_path.stat()
-        mtime = datetime.fromtimestamp(st.st_mtime, tz=timezone.utc)
-        birthtime = None
-        if hasattr(st, "st_birthtime") and st.st_birthtime > 0:
-            birthtime = datetime.fromtimestamp(st.st_birthtime, tz=timezone.utc)
-        created = (birthtime or mtime).strftime("%Y-%m-%dT%H:%M:%S")
-        modified = mtime.strftime("%Y-%m-%dT%H:%M:%S")
-    except OSError:
-        created = modified = None
-
+    created, modified = _source_dates(source_path)
     db.register_file(rel, "transcription",
                      source_type="document",
                      source_path=str(source_path),

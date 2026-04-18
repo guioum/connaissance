@@ -117,7 +117,8 @@ def _fm_date(fm: dict, key: str) -> str | None:
 
 
 def reindex_transcriptions(db: TrackingDB, dry_run: bool) -> dict:
-    counts = {"document": 0, "courriel": 0, "note": 0, "total": 0}
+    counts = {"document": 0, "courriel": 0, "note": 0, "total": 0,
+              "frontmatter_backfilled": 0}
     if not TRANSCRIPTIONS.exists():
         return counts
 
@@ -137,6 +138,42 @@ def reindex_transcriptions(db: TrackingDB, dry_run: bool) -> dict:
                 fm = parse_frontmatter(f.read_text(encoding="utf-8", errors="ignore"))
             except OSError:
                 pass
+
+            # Pour les transcriptions de documents, re-synchroniser le
+            # frontmatter depuis le filesystem de la source. L'opération est
+            # idempotente : `_upsert_transcription_frontmatter` n'écrit que
+            # si au moins un champ change, et ne bouge pas `transcribed_at`
+            # tant que le hash de la source est stable. Ça couvre deux cas :
+            # (a) backfill des anciennes transcriptions sans created/modified,
+            # (b) rafraîchissement des dates quand la source a été renommée
+            #     ou touchée sans changement de contenu (hash identique).
+            if source_type == "document":
+                source_rel = fm.get("source")
+                if source_rel:
+                    from pathlib import Path as _Path
+                    src_path = (BASE_PATH / source_rel
+                                if not _Path(source_rel).is_absolute()
+                                else _Path(source_rel))
+                    from connaissance.commands.documents import (
+                        _upsert_transcription_frontmatter, hash_file,
+                    )
+                    try:
+                        size = src_path.stat().st_size
+                        hash_val = hash_file(src_path)
+                    except OSError:
+                        # Source introuvable : _upsert utilisera le fallback
+                        # `_date_from_filename` pour `created`.
+                        size = None
+                        hash_val = None
+                    before = f.read_text(encoding="utf-8", errors="ignore")
+                    _upsert_transcription_frontmatter(
+                        f, src_path, hash_val, size,
+                    )
+                    after = f.read_text(encoding="utf-8", errors="ignore")
+                    if before != after:
+                        counts["frontmatter_backfilled"] += 1
+                    fm = parse_frontmatter(after)
+
             message_id = fm.get("message-id") or fm.get("message_id") if source_type == "courriel" else None
             db.register_file(
                 relpath(f),
