@@ -98,11 +98,42 @@ def _cmd_pipeline(args) -> Any:
     if args.verb == "costs":
         return pipeline.costs(mode=args.mode, since=since, until=until)
     if args.verb == "simulate":
-        from connaissance.commands import documents
+        from connaissance.commands import documents, emails, notes
+        import tempfile, uuid
+        tmp = tempfile.gettempdir()
+        uid = uuid.uuid4().hex[:8]
+        # Auto-output pour documents_scan et notes_scan (payloads volumineux).
+        # Pour emails, utiliser extract --dry-run qui retourne juste des counts.
+        docs = documents.scan(since=since, until=until,
+                              output_file=f"{tmp}/sim_docs_{uid}.json")
+        nts = notes.scan(since=since, until=until,
+                         output_file=f"{tmp}/sim_notes_{uid}.json")
+        try:
+            mails = emails.extract(since=since, until=until, dry_run=True)
+        except Exception as e:
+            mails = {"error": str(e)}
         return {
             "detect": pipeline.detect(since=since, until=until),
             "costs": pipeline.costs(mode=args.mode, since=since, until=until),
-            "documents_scan": documents.scan(since=since, until=until),
+            "sources_to_transcribe": {
+                "documents": {
+                    "to_transcribe": docs.get("total_to_transcribe", 0),
+                    "skipped_total": docs.get("total_skipped", 0),
+                    "by_year": docs.get("by_year", {}),
+                    "output_file": docs.get("output_file"),
+                },
+                "courriels": {
+                    "to_extract": mails.get("extracted", 0),
+                    "already_present": mails.get("dedup_skipped", 0),
+                    "filtered": mails.get("filtered", []),
+                },
+                "notes": {
+                    "to_copy": nts.get("total_to_copy", 0),
+                    "skipped_total": nts.get("total_skipped", 0),
+                    "by_year": nts.get("by_year", {}),
+                    "output_file": nts.get("output_file"),
+                },
+            },
         }
     raise SystemExit(f"verbe inconnu : pipeline {args.verb}")
 

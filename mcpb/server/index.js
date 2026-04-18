@@ -195,7 +195,8 @@ server.registerTool(
 server.registerTool(
   "connaissance_pipeline_simulate",
   {
-    description: "Composite dry-run : detect + costs + documents.scan. Use at the start of a pipeline run to preview everything. " +
+    description: "Composite dry-run covering BOTH (a) the DB backlog — transcriptions already present that need summaries/syntheses — and (b) the SOURCES — documents, emails and notes on disk/IMAP/Apple Notes that have not been imported yet. Returns {detect, costs, sources_to_transcribe: {documents, courriels, notes}}. " +
+      "This is the canonical tool to answer « qu'y a-t-il à faire sur la base ? » or « y a-t-il des notes/courriels à transcrire ? » — relying on detect alone misses the sources-side backlog (they aren't in the DB until transcribed). " +
       "When the user scopes the update to a time window (« pour 2026 »), ALWAYS pass 'since'/'until' — otherwise the preview will show the full historical backlog and lead to a wrong next step.",
     inputSchema: {
       mode: z.enum(["batch", "interactif"]).default("batch"),
