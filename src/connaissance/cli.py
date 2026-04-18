@@ -168,10 +168,13 @@ def _cmd_summarize(args) -> Any:
         return summarize.plan(source=args.source)
     if args.verb == "prepare":
         paths_arg: list[str] | str
-        if args.paths:
-            paths_arg = args.paths.split(",")
-        else:
+        # Accepter `--paths all` (sentinel littéral) comme équivalent de
+        # « tous les chemins manquants » ; ne splitter que si on a une vraie
+        # liste CSV.
+        if not args.paths or args.paths == "all":
             paths_arg = "all"
+        else:
+            paths_arg = args.paths.split(",")
         return summarize.prepare(paths=paths_arg, mode=args.mode,
                                  source=args.source,
                                  output_file=args.output_file)
