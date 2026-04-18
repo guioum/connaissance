@@ -96,6 +96,26 @@ def safe_mtime(p: Path) -> float | None:
         return None
 
 
+def _fm_date(fm: dict, key: str) -> str | None:
+    """Normaliser une valeur de date du frontmatter en chaîne stockable en DB.
+
+    Les frontmatters mélangent des dates YAML parsées en ``datetime.date`` /
+    ``datetime.datetime`` (sérialisées via ``isoformat()``) et des chaînes
+    brutes (ex. ``"2026-04-01T21:01:13"``). On retourne la forme chaîne ;
+    ``None`` si absent ou non reconnu.
+    """
+    value = fm.get(key)
+    if value is None or value == "":
+        return None
+    if isinstance(value, str):
+        return value
+    # datetime.datetime hérite de datetime.date, .isoformat() marche sur les deux
+    iso = getattr(value, "isoformat", None)
+    if callable(iso):
+        return iso()
+    return str(value)
+
+
 def reindex_transcriptions(db: TrackingDB, dry_run: bool) -> dict:
     counts = {"document": 0, "courriel": 0, "note": 0, "total": 0}
     if not TRANSCRIPTIONS.exists():
@@ -112,18 +132,19 @@ def reindex_transcriptions(db: TrackingDB, dry_run: bool) -> dict:
             counts["total"] += 1
             if dry_run:
                 continue
-            message_id = None
-            if source_type == "courriel":
-                try:
-                    fm = parse_frontmatter(f.read_text(encoding="utf-8", errors="ignore"))
-                    message_id = fm.get("message-id") or fm.get("message_id")
-                except OSError:
-                    pass
+            fm: dict = {}
+            try:
+                fm = parse_frontmatter(f.read_text(encoding="utf-8", errors="ignore"))
+            except OSError:
+                pass
+            message_id = fm.get("message-id") or fm.get("message_id") if source_type == "courriel" else None
             db.register_file(
                 relpath(f),
                 file_type="transcription",
                 source_type=source_type,
                 message_id=message_id,
+                created=_fm_date(fm, "created"),
+                modified=_fm_date(fm, "modified"),
                 mtime=safe_mtime(f),
             )
     return counts
@@ -165,6 +186,8 @@ def reindex_resumes(db: TrackingDB, dry_run: bool) -> dict:
                 entity_type=entity_type,
                 entity_slug=entity_slug,
                 message_id=message_id,
+                created=_fm_date(fm, "created"),
+                modified=_fm_date(fm, "modified"),
                 mtime=safe_mtime(f),
             )
     return counts

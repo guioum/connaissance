@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "connaissance"
-version = "2.2.2"
+version = "2.2.3"
 description = "Personal knowledge base CLI — transcription, summarization, entity organization, synthesis, audit. Built around a local Markdown + SQLite store."
 requires-python = ">=3.10"
 authors = [{ name = "guioum" }]
