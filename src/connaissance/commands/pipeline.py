@@ -17,9 +17,9 @@ RESUMES = CONNAISSANCE / "Résumés"
 SYNTHESE = CONNAISSANCE / "Synthèse"
 
 
-def resumes_manquants(db, source_type=None):
-    """Résumés manquants par source."""
-    rows = db.missing_resumes(source_type)
+def resumes_manquants(db, source_type=None, since=None, until=None):
+    """Résumés manquants par source. ``since``/``until`` en YYYY-MM-DD."""
+    rows = db.missing_resumes(source_type, since=since, until=until)
     by_source = {}
     for r in rows:
         st = r.get("source_type") or "inconnu"
@@ -98,8 +98,11 @@ def moc_perimes():
     return {"total": len(perimes), "categories": perimes}
 
 
-def estimer_couts(db, mode="batch"):
-    """Estimer les coûts du pipeline."""
+def estimer_couts(db, mode="batch", since=None, until=None):
+    """Estimer les coûts du pipeline. ``since``/``until`` en YYYY-MM-DD
+    appliquent au périmètre des résumés manquants uniquement ; les
+    synthèses et MOC périmés ne sont pas filtrés par date (leur
+    'périmé' est déjà relatif aux mtime filesystem)."""
     # Coûts unitaires (prix standard)
     PRIX = {
         "document": 0.03,
@@ -111,7 +114,7 @@ def estimer_couts(db, mode="batch"):
     facteur = 0.5 if mode == "batch" else 1.0
 
     # Résumés manquants par source
-    manquants = db.missing_resumes()
+    manquants = db.missing_resumes(since=since, until=until)
     by_source = {}
     for r in manquants:
         st = r.get("source_type") or "inconnu"
@@ -177,7 +180,8 @@ _STEP_ALL = ("resumes_manquants", "resumes_perimes", "non_organises",
 
 
 def detect(db: TrackingDB | None = None, steps: list[str] | None = None,
-           source: str | None = None, mode: str = "batch") -> dict:
+           source: str | None = None, mode: str = "batch",
+           since: str | None = None, until: str | None = None) -> dict:
     """Détecter le travail du pipeline (schema PipelineDetection).
 
     Parameters
@@ -189,6 +193,10 @@ def detect(db: TrackingDB | None = None, steps: list[str] | None = None,
         Filtrer `resumes_manquants` par source_type.
     mode : str
         Mode pour l'estimation des coûts ("batch" ou "interactif").
+    since, until : str | None
+        Intervalle de date (YYYY-MM-DD) appliqué à `resumes_manquants` et
+        aux coûts associés. Filtre sur le champ `created` du frontmatter
+        de la transcription.
     """
     owns_db = db is None
     if db is None:
@@ -201,7 +209,8 @@ def detect(db: TrackingDB | None = None, steps: list[str] | None = None,
 
     result: dict = {}
     if "resumes_manquants" in active:
-        result["resumes_manquants"] = resumes_manquants(db, source)
+        result["resumes_manquants"] = resumes_manquants(
+            db, source, since=since, until=until)
     if "resumes_perimes" in active:
         result["resumes_perimes"] = resumes_perimes(db)
     if "non_organises" in active:
@@ -211,22 +220,33 @@ def detect(db: TrackingDB | None = None, steps: list[str] | None = None,
     if "moc_perimes" in active:
         result["moc_perimes"] = moc_perimes()
     if "couts" in active:
-        result["couts"] = estimer_couts(db, mode)
+        result["couts"] = estimer_couts(db, mode, since=since, until=until)
     if "stats" in active:
         result["stats"] = stats(db)
+    # Signaler la plage si appliquée — facilite l'interprétation côté appelant
+    if since or until:
+        result["date_range"] = {"since": since, "until": until}
 
     if owns_db:
         db.close()
     return result
 
 
-def costs(db: TrackingDB | None = None, mode: str = "batch") -> dict:
-    """Estimation des coûts du pipeline (schema Couts)."""
+def costs(db: TrackingDB | None = None, mode: str = "batch",
+          since: str | None = None, until: str | None = None) -> dict:
+    """Estimation des coûts du pipeline (schema Couts).
+
+    ``since``/``until`` (YYYY-MM-DD) restreignent le périmètre des résumés
+    manquants.
+    """
     owns_db = db is None
     if db is None:
         db = TrackingDB()
     try:
-        return estimer_couts(db, mode)
+        result = estimer_couts(db, mode, since=since, until=until)
+        if since or until:
+            result["date_range"] = {"since": since, "until": until}
+        return result
     finally:
         if owns_db:
             db.close()

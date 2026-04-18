@@ -291,8 +291,15 @@ class TrackingDB:
 
         return added, total
 
-    def missing_resumes(self, source_type=None):
-        """Trouver les transcriptions sans résumé correspondant."""
+    def missing_resumes(self, source_type=None, since=None, until=None):
+        """Trouver les transcriptions sans résumé correspondant.
+
+        ``since``/``until`` filtrent sur ``f.created`` (date métier du
+        frontmatter) au format ``YYYY-MM-DD`` ; intervalle inclusif à
+        gauche, exclusif à droite. Les transcriptions dont ``created``
+        est NULL sont exclues quand un filtre date est actif — on préfère
+        les rater que les compter à tort dans un budget temporel.
+        """
         query = """
             SELECT f.path, f.source_type, f.message_id
             FROM files f
@@ -307,6 +314,12 @@ class TrackingDB:
         if source_type:
             query += " AND f.source_type = ?"
             params.append(source_type)
+        if since:
+            query += " AND f.created IS NOT NULL AND f.created >= ?"
+            params.append(since)
+        if until:
+            query += " AND f.created IS NOT NULL AND f.created < ?"
+            params.append(until)
         query += " ORDER BY f.created DESC"
         return [dict(r) for r in self._conn.execute(query, params).fetchall()]
 

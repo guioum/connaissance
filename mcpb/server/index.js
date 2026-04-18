@@ -152,11 +152,13 @@ async function runAndFormat(group, verb, args) {
 server.registerTool(
   "connaissance_pipeline_detect",
   {
-    description: "Detect outstanding pipeline work : missing summaries, unorganized summaries, stale syntheses, stale MOCs, cost estimates, DB stats.",
+    description: "Detect outstanding pipeline work : missing summaries, unorganized summaries, stale syntheses, stale MOCs, cost estimates, DB stats. " +
+      "When the user asks about a specific time window (« pour 2026 », « depuis mars », etc.), ALWAYS pass 'since'/'until' — otherwise the backlog shown includes the entire history and the numbers will be misleading.",
     inputSchema: {
       steps: z.string().optional().describe("Comma-separated subset of: resumes_manquants, resumes_perimes, non_organises, synthese_perimee, moc_perimes, couts, stats. Default 'all'."),
       source: z.enum(["document", "courriel", "note"]).optional().describe("Filter by source type."),
       mode: z.enum(["batch", "interactif"]).default("batch").describe("Cost estimation mode."),
+      ...dateRangeSchema,
     },
     annotations: { readOnlyHint: true },
   },
@@ -165,6 +167,8 @@ server.registerTool(
     pushFlag(a, "steps", args.steps);
     pushFlag(a, "source", args.source);
     pushFlag(a, "mode", args.mode);
+    pushFlag(a, "since", args.since);
+    pushFlag(a, "until", args.until);
     return runAndFormat("pipeline", "detect", a);
   }
 );
@@ -172,25 +176,39 @@ server.registerTool(
 server.registerTool(
   "connaissance_pipeline_costs",
   {
-    description: "Estimate pipeline cost in USD for the current backlog (missing summaries, stale entities, stale MOCs).",
+    description: "Estimate pipeline cost in USD for the current backlog (missing summaries, stale entities, stale MOCs). " +
+      "Accepts 'since'/'until' to scope the estimate to a time window — always pass them when the user asks about a specific period.",
     inputSchema: {
       mode: z.enum(["batch", "interactif"]).default("batch").describe("Batch API gets 50% discount vs interactive."),
+      ...dateRangeSchema,
     },
     annotations: { readOnlyHint: true },
   },
-  async (args) => runAndFormat("pipeline", "costs", ["--mode", args.mode ?? "batch"])
+  async (args) => {
+    const a = ["--mode", args.mode ?? "batch"];
+    pushFlag(a, "since", args.since);
+    pushFlag(a, "until", args.until);
+    return runAndFormat("pipeline", "costs", a);
+  }
 );
 
 server.registerTool(
   "connaissance_pipeline_simulate",
   {
-    description: "Composite dry-run : detect + costs + documents.scan. Use at the start of a pipeline run to preview everything.",
+    description: "Composite dry-run : detect + costs + documents.scan. Use at the start of a pipeline run to preview everything. " +
+      "When the user scopes the update to a time window (« pour 2026 »), ALWAYS pass 'since'/'until' — otherwise the preview will show the full historical backlog and lead to a wrong next step.",
     inputSchema: {
       mode: z.enum(["batch", "interactif"]).default("batch"),
+      ...dateRangeSchema,
     },
     annotations: { readOnlyHint: true },
   },
-  async (args) => runAndFormat("pipeline", "simulate", ["--mode", args.mode ?? "batch"])
+  async (args) => {
+    const a = ["--mode", args.mode ?? "batch"];
+    pushFlag(a, "since", args.since);
+    pushFlag(a, "until", args.until);
+    return runAndFormat("pipeline", "simulate", a);
+  }
 );
 
 // ── documents ──────────────────────────────────────────────────

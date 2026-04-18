@@ -89,17 +89,20 @@ def _cmd_notes(args) -> Any:
 
 def _cmd_pipeline(args) -> Any:
     from connaissance.commands import pipeline
+    since = getattr(args, "since", None)
+    until = getattr(args, "until", None)
     if args.verb == "detect":
         steps = args.steps.split(",") if args.steps else ["all"]
-        return pipeline.detect(steps=steps, source=args.source, mode=args.mode)
+        return pipeline.detect(steps=steps, source=args.source,
+                               mode=args.mode, since=since, until=until)
     if args.verb == "costs":
-        return pipeline.costs(mode=args.mode)
+        return pipeline.costs(mode=args.mode, since=since, until=until)
     if args.verb == "simulate":
         from connaissance.commands import documents
         return {
-            "detect": pipeline.detect(),
-            "costs": pipeline.costs(mode=args.mode),
-            "documents_scan": documents.scan(),
+            "detect": pipeline.detect(since=since, until=until),
+            "costs": pipeline.costs(mode=args.mode, since=since, until=until),
+            "documents_scan": documents.scan(since=since, until=until),
         }
     raise SystemExit(f"verbe inconnu : pipeline {args.verb}")
 
@@ -330,10 +333,13 @@ def build_parser() -> argparse.ArgumentParser:
     p_pipe_detect.add_argument("--steps", type=str, default=None)
     p_pipe_detect.add_argument("--source", type=str, default=None)
     p_pipe_detect.add_argument("--mode", type=str, default="batch")
+    add_date_range(p_pipe_detect)
     p_pipe_costs = p_pipe_verbs.add_parser("costs")
     p_pipe_costs.add_argument("--mode", type=str, default="batch")
+    add_date_range(p_pipe_costs)
     p_pipe_sim = p_pipe_verbs.add_parser("simulate")
     p_pipe_sim.add_argument("--mode", type=str, default="batch")
+    add_date_range(p_pipe_sim)
 
     # organize
     p_org = sub.add_parser("organize")
