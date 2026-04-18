@@ -54,12 +54,29 @@ def is_cowork() -> bool:
     return VM_HOME.parent == Path("/sessions")
 
 
+def _app_data_root() -> Path:
+    """Répertoire standard pour les données d'application utilisateur.
+
+    - macOS : ``~/Library/Application Support/connaissance/``
+    - Linux / cowork VM : ``~/.local/share/connaissance/`` (XDG_DATA_HOME)
+    """
+    import os
+    if sys.platform == "darwin":
+        return VM_HOME / "Library" / "Application Support" / "connaissance"
+    xdg = os.environ.get("XDG_DATA_HOME")
+    root = Path(xdg) if xdg else VM_HOME / ".local" / "share"
+    return root / "connaissance"
+
+
 # Dossier de transit persistant pour les échanges entre outils MCP
 # (summarize_prepare → submit_batch → wait_for_batch → summarize_register).
 # /tmp/ était remis à zéro entre les sessions Claude Desktop, ce qui cassait
-# la chaîne dès qu'un batch prenait plusieurs heures. Ici la persistance est
-# garantie tant que la base existe.
-TRANSIT_DIR = CONNAISSANCE_ROOT / ".config" / "transit"
+# la chaîne dès qu'un batch prenait plusieurs heures. Ce dossier survit aux
+# redémarrages système, et suit les conventions standard par plateforme.
+#
+# Distinct de ~/Connaissance/.config/ qui reste couplé à la base (tracking
+# DB, filtres, scoring, secrets — partent ensemble lors d'une sauvegarde).
+TRANSIT_DIR = _app_data_root() / "transit"
 
 
 def transit_file(kind: str) -> Path:

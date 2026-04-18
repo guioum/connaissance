@@ -22,34 +22,27 @@ import { randomBytes } from "node:crypto";
  * par macOS entre sessions. Quand un batch Anthropic prend plusieurs
  * heures, le fichier de requests pouvait disparaître avant la fin du
  * batch, cassant `summarize_register` par manque de mapping
- * custom_id → source_path. Ici la persistance est garantie tant que la
- * base Connaissance existe.
+ * custom_id → source_path.
  *
- * `~/Connaissance/.config/transit/` (ou `~/mnt/Connaissance/...` en VM
- * cowork via CONNAISSANCE_CLI qui détecte l'env).
+ * Emplacement standard par plateforme :
+ * - macOS : `~/Library/Application Support/connaissance/transit/`
+ * - Linux (cowork VM) : `~/.local/share/connaissance/transit/`
+ *
+ * Distinct de `~/Connaissance/.config/` qui reste couplé à la base
+ * (tracking DB, filtres, scoring — partent ensemble avec une
+ * sauvegarde).
  */
 function transitDir() {
-  // On essaie d'abord ~/Connaissance/ (macOS natif) ; fallback vers un
-  // dossier côté home si la base n'existe pas encore.
-  const candidates = [
-    join(homedir(), "Connaissance", ".config", "transit"),
-    join(homedir(), "mnt", "Connaissance", ".config", "transit"),
-  ];
-  for (const c of candidates) {
-    const parent = join(c, "..");
-    if (existsSync(parent) || existsSync(join(parent, ".."))) {
-      try {
-        mkdirSync(c, { recursive: true });
-        return c;
-      } catch {
-        continue;
-      }
-    }
-  }
-  // Dernier recours : ~/.config/connaissance/transit/ (si pas de base).
-  const fallback = join(homedir(), ".config", "connaissance", "transit");
-  mkdirSync(fallback, { recursive: true });
-  return fallback;
+  const isMac = process.platform === "darwin";
+  const base = isMac
+    ? join(homedir(), "Library", "Application Support", "connaissance")
+    : join(
+        process.env.XDG_DATA_HOME || join(homedir(), ".local", "share"),
+        "connaissance",
+      );
+  const dir = join(base, "transit");
+  mkdirSync(dir, { recursive: true });
+  return dir;
 }
 
 /**
