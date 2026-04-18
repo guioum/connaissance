@@ -154,6 +154,34 @@ def _source_label(file_type_or_source: str) -> str:
     return "document"
 
 
+def _infer_source_type_from_path(rel_path: str) -> str | None:
+    """Déduire le source_type à partir du dossier de la transcription.
+
+    Les notes Apple n'ont pas de champ `type:` dans leur frontmatter (juste
+    `source: Apple Notes`), et certaines transcriptions anciennes n'ont aucun
+    type exploitable. Le chemin miroir sous ``Transcriptions/{Documents,
+    Courriels,Notes}/...`` reste un signal fiable. Retourne ``None`` si on ne
+    peut rien conclure pour laisser la logique appelante gérer le défaut.
+    """
+    if not rel_path:
+        return None
+    parts = Path(rel_path).parts
+    try:
+        idx = parts.index("Transcriptions")
+    except ValueError:
+        return None
+    if idx + 1 >= len(parts):
+        return None
+    bucket = parts[idx + 1].lower()
+    if bucket.startswith("courriel"):
+        return "courriel"
+    if bucket.startswith("note"):
+        return "note"
+    if bucket.startswith("document"):
+        return "document"
+    return None
+
+
 # --- API publique ---
 
 
@@ -221,7 +249,10 @@ def prepare(paths: list[str] | str = "all", mode: str = "batch",
                 continue
 
         fm, body = _read_transcription(trans_path)
-        source_type = _source_label(fm.get("type") or source or "document")
+        rel = _rel_transcription(trans_path)
+        source_type = _source_label(
+            fm.get("type") or source or _infer_source_type_from_path(rel) or "document"
+        )
 
         try:
             system_tmpl, user_tmpl = _load_prompt_template(source_type)
@@ -315,7 +346,9 @@ def register(custom_id: str, content: str,
     resume_abs.parent.mkdir(parents=True, exist_ok=True)
     resume_abs.write_text(content, encoding="utf-8")
 
-    # Déduire source_type
+    # Déduire source_type — priorité au `type:` du frontmatter du résumé,
+    # puis fallback sur le chemin de la source quand la valeur est absente
+    # (cas des anciennes notes Apple sans `type:` dans leur transcription).
     fm_type = (fm.get("type") or "").lower()
     if fm_type == "courriel":
         source_type = "courriel"
@@ -323,8 +356,11 @@ def register(custom_id: str, content: str,
         source_type = "courriel"
     elif fm_type == "note":
         source_type = "note"
-    else:
+    elif fm_type == "document":
         source_type = "document"
+    else:
+        inferred = _infer_source_type_from_path(str(source_rel))
+        source_type = inferred if inferred in ("courriel", "note", "document") else "document"
 
     db.register_file(
         str(resume_rel),
