@@ -405,9 +405,15 @@ class Filtres:
             if d in path.parts:
                 return False, f"dossier_ignore:{d}"
 
-        # Date (mtime/birthtime du fichier, comme pour les documents)
+        # Date : pour les notes Apple, la vraie date (création dans Apple Notes)
+        # vit dans le frontmatter `created:`/`modified:`. Le mtime du fichier
+        # local correspond à la dernière synchro, pas à la date métier.
+        # Fallback sur le mtime si le contenu n'est pas disponible.
         if since or until:
-            ok = self._check_date_file(path, since, until)
+            if content is not None:
+                ok = self._check_date_frontmatter(content, since, until)
+            else:
+                ok = self._check_date_file(path, since, until)
             if not ok:
                 return False, "hors_date"
 
