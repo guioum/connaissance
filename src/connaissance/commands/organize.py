@@ -92,13 +92,12 @@ def _extract_attachment_filenames(md_path):
 
 
 def _move_with_attachments(src, dst, source_type="documents"):
-    """Déplacer un fichier .md et ses attachements.
+    """Déplacer un fichier .md et ses attachements référencés.
 
-    Pour les deux sources, extrait les fichiers Attachments référencés par
-    le .md et les transfère individuellement vers dst.parent/Attachments/.
-    La différence : documents utilise copy2 (Attachments/ peut être partagé
-    entre plusieurs documents à la racine), courriels/notes utilise move
-    (chaque email/note a son propre dossier Attachments isolé).
+    Uniforme pour les trois sources (documents, courriels, notes) :
+    ``shutil.move`` pour éviter la duplication. Si un autre .md du dossier
+    source référence encore un attachement, on le laisse en place (move
+    conditionnel sur « plus aucun référent restant »).
     """
     dst.parent.mkdir(parents=True, exist_ok=True)
 
@@ -116,13 +115,25 @@ def _move_with_attachments(src, dst, source_type="documents"):
 
         filenames = _extract_attachment_filenames(dst)
         if filenames and att_src_dir.is_dir():
+            # Quels autres .md du dossier source référencent encore ces
+            # attachements ? Si un autre référent subsiste, on copie
+            # (attachement partagé). Sinon on déplace.
+            remaining_refs: set[str] = set()
+            for other_md in att_src_dir.parent.glob("*.md"):
+                if other_md == src or other_md == dst:
+                    continue
+                remaining_refs |= _extract_attachment_filenames(other_md)
+
             att_dst_dir.mkdir(parents=True, exist_ok=True)
-            transfer = shutil.copy2 if source_type == "documents" else shutil.move
             for fname in filenames:
                 src_file = att_src_dir / fname
                 dst_file = att_dst_dir / fname
-                if src_file.exists() and not dst_file.exists():
-                    transfer(str(src_file), str(dst_file))
+                if not src_file.exists() or dst_file.exists():
+                    continue
+                if fname in remaining_refs:
+                    shutil.copy2(str(src_file), str(dst_file))
+                else:
+                    shutil.move(str(src_file), str(dst_file))
 
         _cleanup_empty_parents(src)
         return True

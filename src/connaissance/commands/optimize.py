@@ -234,6 +234,118 @@ def dedup(db, dry_run=False):
     return removed
 
 
+# --- Scan des attachements orphelins (sans .md référent) ---
+
+_ATT_REF_PATTERN = re.compile(r'\(\.?/?Attachments/([^)]+)\)')
+
+
+def _attachments_referenced_in_md(md_path: Path) -> set[str]:
+    """Noms de fichiers référencés sous la forme ``(Attachments/xxx)`` dans un .md."""
+    try:
+        content = md_path.read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        return set()
+    return {m.group(1) for m in _ATT_REF_PATTERN.finditer(content)}
+
+
+def scan_orphan_attachments() -> list[dict]:
+    """Lister les fichiers dans ``*/Attachments/`` qui ne sont référencés par
+    aucun ``.md`` du même dossier parent.
+
+    Héritage du bug historique où les transcriptions de documents étaient
+    déplacées via ``organize_apply`` avec ``copy2`` de leurs Attachments —
+    les fichiers source se retrouvaient sans .md frère pour les référencer.
+
+    La nouvelle logique dans ``_move_with_attachments`` (uniforme ``move``)
+    empêche ce cas à la génération. Cet outil nettoie l'état existant.
+    """
+    orphans: list[dict] = []
+    if not TRANSCRIPTIONS.exists():
+        return orphans
+
+    for att_dir in TRANSCRIPTIONS.rglob("Attachments"):
+        if not att_dir.is_dir():
+            continue
+        parent = att_dir.parent
+        # Agréger toutes les références de tous les .md du même dossier parent
+        all_refs: set[str] = set()
+        for md in parent.glob("*.md"):
+            all_refs |= _attachments_referenced_in_md(md)
+        for f in sorted(att_dir.iterdir()):
+            if not f.is_file() or f.name.startswith("."):
+                continue
+            if f.name in all_refs:
+                continue
+            try:
+                size = f.stat().st_size
+            except OSError:
+                size = 0
+            orphans.append({
+                "path": f,
+                "size": size,
+                "dir": att_dir,
+            })
+    return orphans
+
+
+def cleanup_orphans(db, dry_run=False) -> tuple[int, int]:
+    """Supprimer les attachements orphelins (sans .md référent frère).
+
+    Retourne ``(removed, freed_bytes)``.
+    """
+    orphans = scan_orphan_attachments()
+    if not orphans:
+        print("Aucun attachement orphelin.", file=sys.stderr)
+        return 0, 0
+
+    total_bytes = sum(o["size"] for o in orphans)
+    print(
+        f"Attachements orphelins : {len(orphans)} "
+        f"(~{total_bytes // 1024} Ko)",
+        file=sys.stderr,
+    )
+
+    if dry_run:
+        for o in orphans[:10]:
+            rel = o["path"].relative_to(CONNAISSANCE)
+            print(f"  → supprimer {rel}", file=sys.stderr)
+        if len(orphans) > 10:
+            print(f"  … (+{len(orphans) - 10})", file=sys.stderr)
+        return len(orphans), total_bytes
+
+    removed = 0
+    freed = 0
+    # Grouper par dossier pour pouvoir supprimer les Attachments/ vides après
+    dirs_touched: set[Path] = set()
+    for o in orphans:
+        try:
+            o["path"].unlink()
+            removed += 1
+            freed += o["size"]
+            dirs_touched.add(o["dir"])
+            db.log("connaissance", "orphan_attachment_remove",
+                   source_path=str(o["path"]),
+                   details={"size": o["size"]})
+        except OSError as e:
+            print(f"  ⚠ {o['path'].name}: {e}", file=sys.stderr)
+
+    # Supprimer les dossiers Attachments/ maintenant vides, et les dossiers
+    # parents s'ils ne contiennent plus rien.
+    for d in dirs_touched:
+        try:
+            if not any(d.iterdir()):
+                d.rmdir()
+                parent = d.parent
+                if parent != TRANSCRIPTIONS and not any(parent.iterdir()):
+                    parent.rmdir()
+        except OSError:
+            pass
+
+    print(f"\n  ✓ {removed} orphelins supprimés (~{freed // 1024} Ko)",
+          file=sys.stderr)
+    return removed, freed
+
+
 # --- API publique ---
 
 
@@ -249,16 +361,18 @@ def _serialize_entry(entry: dict) -> dict:
 
 
 def plan(db: TrackingDB | None = None) -> dict:
-    """Lister les PJ à promouvoir et les doublons (schema OptimizePlan)."""
+    """Lister les PJ à promouvoir, les doublons et les orphelins (schema OptimizePlan)."""
     owns_db = db is None
     if db is None:
         db = TrackingDB()
     try:
         promotable = scan_promotable()
         duplicates = scan_duplicates(db)
+        orphans = scan_orphan_attachments()
         return {
             "promotable": [_serialize_entry(p) for p in promotable],
             "duplicates": [_serialize_entry(d) for d in duplicates],
+            "orphan_attachments": [_serialize_entry(o) for o in orphans],
         }
     finally:
         if owns_db:
@@ -266,8 +380,9 @@ def plan(db: TrackingDB | None = None) -> dict:
 
 
 def apply(dry_run: bool = False, promote_docs: bool = True,
-          dedup_attachments: bool = True, db: TrackingDB | None = None) -> dict:
-    """Appliquer promotion + déduplication (schema OptimizeApply)."""
+          dedup_attachments: bool = True, cleanup_orphans_flag: bool = True,
+          db: TrackingDB | None = None) -> dict:
+    """Appliquer promotion + déduplication + nettoyage orphelins (schema OptimizeApply)."""
     owns_db = db is None
     if db is None:
         db = TrackingDB()
@@ -275,6 +390,8 @@ def apply(dry_run: bool = False, promote_docs: bool = True,
         promoted = 0
         deduped = 0
         freed = 0
+        orphans_removed = 0
+        orphans_freed = 0
         if promote_docs:
             promoted = promote(db, dry_run=dry_run) or 0
         if dedup_attachments:
@@ -283,10 +400,13 @@ def apply(dry_run: bool = False, promote_docs: bool = True,
                 deduped, freed = dedup_result
             elif isinstance(dedup_result, int):
                 deduped = dedup_result
+        if cleanup_orphans_flag:
+            orphans_removed, orphans_freed = cleanup_orphans(db, dry_run=dry_run)
         return {
             "promoted": promoted,
             "deduped": deduped,
-            "freed_bytes": freed,
+            "freed_bytes": freed + orphans_freed,
+            "orphans_removed": orphans_removed,
             "dry_run": dry_run,
         }
     finally:
