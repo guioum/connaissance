@@ -99,15 +99,14 @@ def _cmd_pipeline(args) -> Any:
         return pipeline.costs(mode=args.mode, since=since, until=until)
     if args.verb == "simulate":
         from connaissance.commands import documents, emails, notes
-        import tempfile, uuid
-        tmp = tempfile.gettempdir()
-        uid = uuid.uuid4().hex[:8]
+        from connaissance.core.paths import transit_file
         # Auto-output pour documents_scan et notes_scan (payloads volumineux).
+        # Ecrit dans le transit dir persistant (survit aux redémarrages Claude).
         # Pour emails, utiliser extract --dry-run qui retourne juste des counts.
         docs = documents.scan(since=since, until=until,
-                              output_file=f"{tmp}/sim_docs_{uid}.json")
+                              output_file=str(transit_file("pipeline_sim_docs")))
         nts = notes.scan(since=since, until=until,
-                         output_file=f"{tmp}/sim_notes_{uid}.json")
+                         output_file=str(transit_file("pipeline_sim_notes")))
         try:
             mails = emails.extract(since=since, until=until, dry_run=True)
         except Exception as e:

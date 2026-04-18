@@ -519,9 +519,20 @@ def register_from_results_file(results_file: str,
 
     # Cleanup : supprimer les fichiers de transit si tout s'est bien passé.
     # On garde les fichiers quand il y a des erreurs pour permettre le debug
-    # et une éventuelle relance. On ne touche à `requests_file` que s'il
-    # vit sous /tmp/ (évite d'effacer un fichier utilisateur explicite).
+    # et une éventuelle relance. On ne touche à `requests_file` que s'il vit
+    # dans un emplacement de transit reconnu (évite d'effacer un fichier
+    # utilisateur explicite placé ailleurs).
+    from connaissance.core.paths import TRANSIT_DIR
     cleaned_up: list[str] = []
+
+    def _is_transit(p: Path) -> bool:
+        s = str(p)
+        return (
+            "/tmp/" in s
+            or s.startswith("/var/folders/")
+            or s.startswith(str(TRANSIT_DIR))
+        )
+
     if cleanup and not errors:
         try:
             Path(results_file).expanduser().unlink(missing_ok=True)
@@ -530,10 +541,7 @@ def register_from_results_file(results_file: str,
             pass
         if requests_file:
             req_p = Path(requests_file).expanduser()
-            # Ne purger le requests_file que s'il est clairement un transit
-            # (/tmp/ ou équivalent système). Sinon l'utilisateur l'a
-            # peut-être placé ailleurs intentionnellement.
-            if "/tmp/" in str(req_p) or str(req_p).startswith("/var/folders/"):
+            if _is_transit(req_p):
                 try:
                     req_p.unlink(missing_ok=True)
                     cleaned_up.append(str(req_p))

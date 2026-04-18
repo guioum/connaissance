@@ -11,20 +11,56 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { homedir, tmpdir } from "node:os";
+import { homedir } from "node:os";
 import { join } from "node:path";
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 
 /**
- * Génère un chemin temporaire unique pour l'option `output_file` quand
- * l'appelant n'en fournit pas. Éviter qu'un assistant « oublie » ce flag
- * et reçoive à la place des centaines de Ko de payload inline qui
- * polluent son contexte.
+ * Dossier de transit persistant. Auparavant les fichiers générés (scans,
+ * requests, résultats) étaient écrits dans `/tmp/` — purgé aléatoirement
+ * par macOS entre sessions. Quand un batch Anthropic prend plusieurs
+ * heures, le fichier de requests pouvait disparaître avant la fin du
+ * batch, cassant `summarize_register` par manque de mapping
+ * custom_id → source_path. Ici la persistance est garantie tant que la
+ * base Connaissance existe.
+ *
+ * `~/Connaissance/.config/transit/` (ou `~/mnt/Connaissance/...` en VM
+ * cowork via CONNAISSANCE_CLI qui détecte l'env).
+ */
+function transitDir() {
+  // On essaie d'abord ~/Connaissance/ (macOS natif) ; fallback vers un
+  // dossier côté home si la base n'existe pas encore.
+  const candidates = [
+    join(homedir(), "Connaissance", ".config", "transit"),
+    join(homedir(), "mnt", "Connaissance", ".config", "transit"),
+  ];
+  for (const c of candidates) {
+    const parent = join(c, "..");
+    if (existsSync(parent) || existsSync(join(parent, ".."))) {
+      try {
+        mkdirSync(c, { recursive: true });
+        return c;
+      } catch {
+        continue;
+      }
+    }
+  }
+  // Dernier recours : ~/.config/connaissance/transit/ (si pas de base).
+  const fallback = join(homedir(), ".config", "connaissance", "transit");
+  mkdirSync(fallback, { recursive: true });
+  return fallback;
+}
+
+/**
+ * Génère un chemin persistant unique pour l'option `output_file` quand
+ * l'appelant n'en fournit pas. Dossier : `~/Connaissance/.config/transit/`.
+ * Format : `<kind>_<timestamp>_<id>.json`.
  */
 function autoOutputFile(kind) {
-  const id = randomBytes(6).toString("hex");
-  return join(tmpdir(), `connaissance_${kind}_${id}.json`);
+  const id = randomBytes(4).toString("hex");
+  const stamp = new Date().toISOString().replace(/[-:.]/g, "").slice(0, 15);
+  return join(transitDir(), `${kind}_${stamp}_${id}.json`);
 }
 
 const execFileAsync = promisify(execFile);

@@ -54,6 +54,28 @@ def is_cowork() -> bool:
     return VM_HOME.parent == Path("/sessions")
 
 
+# Dossier de transit persistant pour les échanges entre outils MCP
+# (summarize_prepare → submit_batch → wait_for_batch → summarize_register).
+# /tmp/ était remis à zéro entre les sessions Claude Desktop, ce qui cassait
+# la chaîne dès qu'un batch prenait plusieurs heures. Ici la persistance est
+# garantie tant que la base existe.
+TRANSIT_DIR = CONNAISSANCE_ROOT / ".config" / "transit"
+
+
+def transit_file(kind: str) -> Path:
+    """Générer un chemin unique dans le transit dir persistant.
+
+    Le dossier est créé au besoin. Format du nom :
+    ``<kind>_<timestamp>_<pid>.json`` pour éviter les collisions entre
+    processus concurrents.
+    """
+    import os
+    import time
+    TRANSIT_DIR.mkdir(parents=True, exist_ok=True)
+    stamp = time.strftime("%Y%m%dT%H%M%S")
+    return TRANSIT_DIR / f"{kind}_{stamp}_{os.getpid()}.json"
+
+
 def require_paths(*paths: Path, context: str = "") -> None:
     """Vérifier que des chemins requis (dossiers ou fichiers) existent.
 
