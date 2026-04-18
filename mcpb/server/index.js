@@ -33,20 +33,15 @@ const CLI = findCli();
 async function runCli(group, verb, args = []) {
   const fullArgs = [group, verb, ...args];
   try {
-    const { stdout, stderr } = await execFileAsync(CLI, fullArgs, {
+    const { stdout } = await execFileAsync(CLI, fullArgs, {
       env: { ...process.env },
       maxBuffer: 100 * 1024 * 1024, // 100 MB for large payloads (prompts, large extracts)
       timeout: 600_000, // 10 minutes (emails extract can be long)
     });
-    if (stderr && stderr.trim()) {
-      try {
-        const parsed = JSON.parse(stderr.trim());
-        throw new Error(parsed?.error?.message || parsed?.error || stderr.trim());
-      } catch (e) {
-        if (e instanceof SyntaxError) throw new Error(stderr.trim());
-        throw e;
-      }
-    }
+    // Si on arrive ici, le CLI a exit avec code 0 — stdout contient le JSON
+    // attendu. stderr peut contenir des logs de progression ("N messages
+    // hors plage ignorés via bisect..."), des rapports humains de calibrage,
+    // etc. — ce ne sont pas des erreurs, on les ignore silencieusement.
     if (!stdout || !stdout.trim()) return {};
     return JSON.parse(stdout);
   } catch (err) {
@@ -56,6 +51,19 @@ async function runCli(group, verb, args = []) {
         `connaissance CLI not found at "${CLI}". ` +
         `Install with: uv tool install git+https://github.com/guioum/connaissance`
       );
+    }
+    // Exit code non-zéro : essayer d'extraire un message d'erreur structuré
+    // depuis stderr (le CLI émet du JSON {error: ...} sur stderr en cas
+    // d'échec). Fallback : texte brut de stderr puis message natif.
+    const stderrText = (err.stderr || "").trim();
+    if (stderrText) {
+      try {
+        const parsed = JSON.parse(stderrText);
+        throw new Error(parsed?.error?.message || parsed?.error || stderrText);
+      } catch (e) {
+        if (e instanceof SyntaxError) throw new Error(stderrText);
+        throw e;
+      }
     }
     throw err;
   }
