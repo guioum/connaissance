@@ -29,9 +29,16 @@ Format :
 - Tâche ouverte : `- [ ] Description — échéance YYYY-MM-DD | inconnue`
 - Tâche complétée : `- [x] Description — YYYY-MM-DD`
 
-## Template à produire exactement
+## Format de sortie
 
-```markdown
+Ta réponse complète est UN fichier markdown. Commence-la directement par `---`
+(frontmatter YAML), puis le corps markdown. **NE PAS** entourer ta réponse
+d'une fence ```` ```markdown ```` ou ```` ``` ```` — sortie brute uniquement.
+
+Structure attendue (le bloc ci-dessous entre fences est un schéma
+illustratif, pas le format de ta sortie) :
+
+~~~
 ---
 type: note  # littéralement "note", jamais "résumé" ni autre mot
 source: {chemin relatif vers la transcription}
@@ -55,7 +62,7 @@ confidence: {high | low}
 ## Actions
 - [ ] {tâche ouverte} — échéance {YYYY-MM-DD | inconnue}
 - [x] {tâche complétée} — {YYYY-MM-DD}
-```
+~~~
 
 <!-- user -->
 Résume cette note pour la base de connaissances.

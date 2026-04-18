@@ -31,9 +31,16 @@ NE PAS INCLURE : questions sans réponse, propositions non acceptées, remerciem
 
 Mêmes règles que pour les documents : tâches concrètes à faire après le fil, verbe à l'infinitif, format `- [ ] Description — échéance YYYY-MM-DD | inconnue`. Si aucune action concrète → NE PAS créer la section Actions.
 
-## Template à produire exactement
+## Format de sortie
 
-```markdown
+Ta réponse complète est UN fichier markdown. Commence-la directement par `---`
+(frontmatter YAML), puis le corps markdown. **NE PAS** entourer ta réponse
+d'une fence ```` ```markdown ```` ou ```` ``` ```` — sortie brute uniquement.
+
+Structure attendue (le bloc ci-dessous entre fences est un schéma
+illustratif, pas le format de ta sortie) :
+
+~~~
 ---
 type: fil  # littéralement "fil", jamais "résumé" ni autre mot
 source: {chemin relatif vers la transcription du PREMIER message (le plus ancien)}
@@ -62,7 +69,7 @@ confidence: {high | low}
 {UNIQUEMENT si tâches concrètes :}
 ## Actions
 - [ ] {verbe à l'infinitif + objet} — échéance {YYYY-MM-DD | inconnue}
-```
+~~~
 
 <!-- user -->
 Résume ce fil de discussion pour la base de connaissances.

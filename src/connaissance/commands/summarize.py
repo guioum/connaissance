@@ -328,6 +328,32 @@ def prepare(paths: list[str] | str = "all", mode: str = "batch",
     return write_or_inline(payload, output_file=output_file, summary_fn=_summary)
 
 
+def _strip_code_fence(content: str) -> str:
+    """Retirer une éventuelle fence markdown qui entoure le contenu.
+
+    Certains modèles renvoient leur résumé encapsulé dans un bloc de
+    code (```markdown ... ``` ou ``` ... ```) — héritage du template où
+    l'exemple lui-même était dans une fence. Strip défensif :
+    si le content commence par ``` et finit par ``` (avec une ligne
+    « ``` » en tête et en queue), on enlève ces deux lignes.
+    """
+    stripped = content.strip()
+    lines = stripped.splitlines()
+    if len(lines) < 2:
+        return content
+    first = lines[0].strip()
+    last = lines[-1].strip()
+    # Accepter ```markdown, ```yaml, ```md, ``` (fenced), même avec un
+    # langage différent — on veut juste éliminer l'enveloppe.
+    if first.startswith("```") and last == "```":
+        inner = "\n".join(lines[1:-1])
+        # Préserver une dernière ligne vide si elle existait
+        if content.endswith("\n"):
+            inner += "\n"
+        return inner
+    return content
+
+
 def register(custom_id: str, content: str,
              source_path: str | None = None,
              db: TrackingDB | None = None) -> dict:
@@ -340,6 +366,10 @@ def register(custom_id: str, content: str,
     """
     if db is None:
         db = TrackingDB()
+
+    # Défense : certains modèles encapsulent leur réponse dans une fence
+    # ```markdown ... ```. On déballe avant parsing du frontmatter.
+    content = _strip_code_fence(content)
 
     # Parser le frontmatter pour extraire `source` et `type`
     fm: dict = {}

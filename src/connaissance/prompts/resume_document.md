@@ -83,11 +83,17 @@ NE PAS INCLURE : informations de contact, descriptions ou contexte, options ou a
 
 Si aucune action concrète → NE PAS créer la section Actions.
 
-## Template à produire exactement
+## Format de sortie
 
-Copier ce template et remplir les `{placeholders}`. NE PAS ajouter de sections supplémentaires.
+Ta réponse complète est UN fichier markdown. Commence-la directement par `---`
+(frontmatter YAML), puis le corps markdown. **NE PAS** entourer ta réponse
+d'une fence ```` ```markdown ```` ou ```` ``` ```` — sortie brute uniquement.
+NE PAS ajouter de sections au-delà du schéma ci-dessous.
 
-```markdown
+Structure attendue (le bloc ci-dessous entre fences est un schéma
+illustratif, pas le format de ta sortie) :
+
+~~~
 ---
 type: document  # littéralement "document", jamais "résumé" ni autre mot
 source: {chemin relatif depuis ~/Connaissance/ vers la transcription}
@@ -113,7 +119,7 @@ confidence: {high | low}
 {UNIQUEMENT si des tâches concrètes sont identifiées :}
 ## Actions
 - [ ] {verbe à l'infinitif + objet} — échéance {YYYY-MM-DD | inconnue}
-```
+~~~
 
 <!-- user -->
 Résume ce document pour la base de connaissances.

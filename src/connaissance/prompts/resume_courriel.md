@@ -58,9 +58,16 @@ Mêmes règles que pour les documents :
 - `entity_slug` : minuscules, accents supprimés, espaces→tirets, acronyme si usuel
 - Section Actions : tâches concrètes avec verbe à l'infinitif et échéance, jamais d'opinions ou de contexte
 
-## Template à produire exactement
+## Format de sortie
 
-```markdown
+Ta réponse complète est UN fichier markdown. Commence-la directement par `---`
+(frontmatter YAML), puis le corps markdown. **NE PAS** entourer ta réponse
+d'une fence ```` ```markdown ```` ou ```` ``` ```` — sortie brute uniquement.
+
+Structure attendue (le bloc ci-dessous entre fences est un schéma
+illustratif, pas le format de ta sortie) :
+
+~~~
 ---
 type: courriel  # littéralement "courriel", jamais "résumé" ni autre mot
 source: {chemin relatif vers la transcription}
@@ -88,7 +95,7 @@ confidence: {high | low}
 {UNIQUEMENT si tâches concrètes :}
 ## Actions
 - [ ] {verbe à l'infinitif + objet} — échéance {YYYY-MM-DD | inconnue}
-```
+~~~
 
 <!-- user -->
 Résume ce courriel pour la base de connaissances.
