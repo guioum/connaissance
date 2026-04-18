@@ -11,9 +11,21 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { homedir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { existsSync } from "node:fs";
+import { randomBytes } from "node:crypto";
+
+/**
+ * Génère un chemin temporaire unique pour l'option `output_file` quand
+ * l'appelant n'en fournit pas. Éviter qu'un assistant « oublie » ce flag
+ * et reçoive à la place des centaines de Ko de payload inline qui
+ * polluent son contexte.
+ */
+function autoOutputFile(kind) {
+  const id = randomBytes(6).toString("hex");
+  return join(tmpdir(), `connaissance_${kind}_${id}.json`);
+}
 
 const execFileAsync = promisify(execFile);
 
@@ -504,14 +516,18 @@ server.registerTool(
   {
     description:
       "Build LLM requests from prompt templates + transcription content. " +
-      "Returns {requests: [{custom_id, system, user, model, max_tokens}]} ready " +
-      "for any generation mode (API batch, API direct, or subagent). " +
+      "Returns compact metadata {output_file, total, estimated_input_tokens, " +
+      "source_types, total_bytes}; the full requests (with system/user prompts) " +
+      "are written to a JSON file. By default a temp path is auto-generated so " +
+      "the prompts NEVER enter the assistant context — pass 'output_file' to " +
+      "choose a specific path, or 'inline=true' to get the old inline response " +
+      "(not recommended, easily saturates the context for 10+ requests). " +
+      "Typical flow: " +
+      "summarize_prepare() → {output_file: '/tmp/...'} → submit_batch(requests_file='/tmp/...'). " +
       "'paths' must be FILE PATHS of transcriptions (the 'path' field from " +
       "summarize_plan), not custom_ids or hashes. " +
       "'mode' controls the request FORMAT only — always use 'direct', even if " +
-      "you plan to process the requests via subagents. " +
-      "For volumes > ~20 requests, prefer 'output_file' to avoid flooding the " +
-      "assistant context with hundreds of KB of prompt text.",
+      "you plan to process the requests via subagents.",
     inputSchema: {
       paths: z.union([z.string(), z.array(z.string())]).optional().describe(
         "Transcription file paths (e.g., 'Transcriptions/Documents/org/file.md'). " +
@@ -524,12 +540,15 @@ server.registerTool(
       ),
       source: z.enum(["document", "courriel", "note", "fil"]).optional().describe("Override source_type for template selection."),
       output_file: z.string().optional().describe(
-        "If set, write the full requests (with system/user prompts) to this JSON " +
-        "file and return only compact metadata (total, estimated_input_tokens, " +
-        "source_types, total_bytes, output_file). Strongly recommended for batches " +
-        "of more than ~20 requests: a batch of 50 can produce 300+ KB of prompt " +
-        "text, which pollutes the assistant context. The file can then be passed " +
-        "to claude-api submit_batch via --input-file or to subagents via Read."
+        "Absolute path where the full requests JSON will be written. Default: " +
+        "auto-generated temp path. The response always contains 'output_file' " +
+        "so you know where the file is."
+      ),
+      inline: z.boolean().optional().describe(
+        "Escape hatch: if true, return the full {requests: [...]} inline " +
+        "instead of writing to a file. Not recommended — even 10 requests " +
+        "can exceed 50 KB of prompt text that pollutes the assistant context. " +
+        "Leave unset unless you really want the old behaviour."
       ),
     },
     annotations: { readOnlyHint: true },
@@ -543,7 +562,13 @@ server.registerTool(
     const mode = args.mode === "inline" ? "direct" : (args.mode ?? "direct");
     pushFlag(a, "mode", mode);
     pushFlag(a, "source", args.source);
-    pushFlag(a, "output-file", args.output_file);
+    // Default : auto-generated output_file so prompts never enter the
+    // assistant context. Only skip when the caller explicitly asks
+    // for inline output (escape hatch).
+    const outputFile = args.inline === true
+      ? undefined
+      : (args.output_file || autoOutputFile("summarize_prepare"));
+    pushFlag(a, "output-file", outputFile);
     return runAndFormat("summarize", "prepare", a);
   }
 );
