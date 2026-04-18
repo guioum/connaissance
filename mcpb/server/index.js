@@ -639,12 +639,21 @@ server.registerTool(
           "it, a single forgetful batch will fail every item with " +
           "« pas de champ source dans le frontmatter »."
         ),
+      no_cleanup: z
+        .boolean()
+        .optional()
+        .describe(
+          "Conserver les fichiers de transit (from_results_file, " +
+          "requests_file sous /tmp/) après l'enregistrement. Par défaut ils " +
+          "sont supprimés si aucune erreur — c'est du cache temporaire."
+        ),
     },
   },
   async (args) => {
     if (args.from_results_file) {
       const a = ["--from-results-file", args.from_results_file];
       if (args.requests_file) a.push("--requests-file", args.requests_file);
+      if (args.no_cleanup) a.push("--no-cleanup");
       return runAndFormat("summarize", "register", a);
     }
     if (!args.custom_id || !args.content) {

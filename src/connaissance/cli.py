@@ -183,6 +183,7 @@ def _cmd_summarize(args) -> Any:
             return summarize.register_from_results_file(
                 args.from_results_file,
                 requests_file=args.requests_file,
+                cleanup=not args.no_cleanup,
             )
         content = sys.stdin.read() if args.stdin else (args.content or "")
         return summarize.register(args.custom_id, content, source_path=args.source_path)
@@ -436,6 +437,12 @@ def build_parser() -> argparse.ArgumentParser:
                                 "pour remplir le fallback source_path par "
                                 "custom_id quand le LLM a oublié d'injecter "
                                 "`source:` dans le frontmatter.")
+    p_sum_reg.add_argument("--no-cleanup", dest="no_cleanup",
+                           action="store_true",
+                           help="Conserver les fichiers de transit "
+                                "(results_file, requests_file) après "
+                                "l'enregistrement. Par défaut ils sont "
+                                "supprimés si aucune erreur.")
 
     # synthesis
     p_syn = sub.add_parser("synthesis")

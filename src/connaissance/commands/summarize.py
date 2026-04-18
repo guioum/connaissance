@@ -413,6 +413,7 @@ def register(custom_id: str, content: str,
 
 def register_from_results_file(results_file: str,
                                requests_file: str | None = None,
+                               cleanup: bool = True,
                                db: TrackingDB | None = None) -> dict:
     """Enregistrer en masse les résumés d'un fichier de résultats API.
 
@@ -431,9 +432,15 @@ def register_from_results_file(results_file: str,
     du modèle pour inclure le champ — et quand il oublie (ça arrive),
     tout le lot échoue avec « pas de champ source dans le frontmatter ».
 
-    Retourne ``{registered, errors, paths: [{custom_id, path}]}``. Le
-    Claude appelant ne voit jamais les contenus : ils ne transitent pas
-    par son contexte.
+    ``cleanup`` (défaut ``True``) : supprime ``results_file`` (et
+    ``requests_file`` s'il est sous ``/tmp/``) une fois l'enregistrement
+    terminé sans erreur. Ces fichiers sont des caches de transit — une
+    fois les résumés écrits dans ``Résumés/*.md``, ils n'ont plus
+    d'utilité. S'il y a eu des erreurs, on les garde pour le debug.
+
+    Retourne ``{registered, errors, paths: [{custom_id, path}], cleaned_up}``.
+    Le Claude appelant ne voit jamais les contenus : ils ne transitent
+    pas par son contexte.
     """
     if db is None:
         db = TrackingDB()
@@ -510,8 +517,32 @@ def register_from_results_file(results_file: str,
             registered += 1
             paths.append({"custom_id": custom_id, "path": result["path"]})
 
+    # Cleanup : supprimer les fichiers de transit si tout s'est bien passé.
+    # On garde les fichiers quand il y a des erreurs pour permettre le debug
+    # et une éventuelle relance. On ne touche à `requests_file` que s'il
+    # vit sous /tmp/ (évite d'effacer un fichier utilisateur explicite).
+    cleaned_up: list[str] = []
+    if cleanup and not errors:
+        try:
+            Path(results_file).expanduser().unlink(missing_ok=True)
+            cleaned_up.append(str(results_file))
+        except OSError:
+            pass
+        if requests_file:
+            req_p = Path(requests_file).expanduser()
+            # Ne purger le requests_file que s'il est clairement un transit
+            # (/tmp/ ou équivalent système). Sinon l'utilisateur l'a
+            # peut-être placé ailleurs intentionnellement.
+            if "/tmp/" in str(req_p) or str(req_p).startswith("/var/folders/"):
+                try:
+                    req_p.unlink(missing_ok=True)
+                    cleaned_up.append(str(req_p))
+                except OSError:
+                    pass
+
     return {
         "registered": registered,
         "errors": errors,
         "paths": paths,
+        "cleaned_up": cleaned_up,
     }
