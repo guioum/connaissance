@@ -138,7 +138,9 @@ def _cmd_summarize(args) -> Any:
             paths_arg = args.paths.split(",")
         else:
             paths_arg = "all"
-        return summarize.prepare(paths=paths_arg, mode=args.mode, source=args.source)
+        return summarize.prepare(paths=paths_arg, mode=args.mode,
+                                 source=args.source,
+                                 output_file=args.output_file)
     if args.verb == "register":
         content = sys.stdin.read() if args.stdin else (args.content or "")
         return summarize.register(args.custom_id, content, source_path=args.source_path)
@@ -352,6 +354,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_sum_prep.add_argument("--paths", type=str, default=None)
     p_sum_prep.add_argument("--mode", type=str, default="batch")
     p_sum_prep.add_argument("--source", type=str, default=None)
+    p_sum_prep.add_argument("--output-file", dest="output_file", type=str,
+                            default=None,
+                            help="Écrire les requests dans ce fichier JSON au lieu "
+                                 "de les renvoyer inline (évite de polluer le contexte "
+                                 "de l'assistant).")
     p_sum_reg = p_sum_verbs.add_parser("register")
     p_sum_reg.add_argument("custom_id")
     p_sum_reg.add_argument("--content", type=str, default=None)

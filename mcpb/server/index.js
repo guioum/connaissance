@@ -491,7 +491,9 @@ server.registerTool(
       "'paths' must be FILE PATHS of transcriptions (the 'path' field from " +
       "summarize_plan), not custom_ids or hashes. " +
       "'mode' controls the request FORMAT only — always use 'direct', even if " +
-      "you plan to process the requests via subagents.",
+      "you plan to process the requests via subagents. " +
+      "For volumes > ~20 requests, prefer 'output_file' to avoid flooding the " +
+      "assistant context with hundreds of KB of prompt text.",
     inputSchema: {
       paths: z.union([z.string(), z.array(z.string())]).optional().describe(
         "Transcription file paths (e.g., 'Transcriptions/Documents/org/file.md'). " +
@@ -503,6 +505,14 @@ server.registerTool(
         "'inline' is accepted as an alias for 'direct'. 'batch' adds cache_control headers."
       ),
       source: z.enum(["document", "courriel", "note", "fil"]).optional().describe("Override source_type for template selection."),
+      output_file: z.string().optional().describe(
+        "If set, write the full requests (with system/user prompts) to this JSON " +
+        "file and return only compact metadata (total, estimated_input_tokens, " +
+        "source_types, total_bytes, output_file). Strongly recommended for batches " +
+        "of more than ~20 requests: a batch of 50 can produce 300+ KB of prompt " +
+        "text, which pollutes the assistant context. The file can then be passed " +
+        "to claude-api submit_batch via --input-file or to subagents via Read."
+      ),
     },
     annotations: { readOnlyHint: true },
   },
@@ -515,6 +525,7 @@ server.registerTool(
     const mode = args.mode === "inline" ? "direct" : (args.mode ?? "direct");
     pushFlag(a, "mode", mode);
     pushFlag(a, "source", args.source);
+    pushFlag(a, "output-file", args.output_file);
     return runAndFormat("summarize", "prepare", a);
   }
 );

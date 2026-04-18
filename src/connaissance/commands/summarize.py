@@ -15,6 +15,7 @@ Expose :
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 from datetime import datetime
 from pathlib import Path
@@ -215,7 +216,9 @@ def plan(db: TrackingDB | None = None, source: str | None = None) -> dict:
 
 
 def prepare(paths: list[str] | str = "all", mode: str = "batch",
-            source: str | None = None, db: TrackingDB | None = None) -> dict:
+            source: str | None = None,
+            output_file: str | None = None,
+            db: TrackingDB | None = None) -> dict:
     """Construire les requêtes pour `mcp__claude_api__submit_batch`.
 
     Parameters
@@ -227,10 +230,20 @@ def prepare(paths: list[str] | str = "all", mode: str = "batch",
         "batch" (défaut, -50 %) ou "direct".
     source : str | None
         Filtre optionnel par source_type.
+    output_file : str | None
+        Si fourni, écrit les requests complètes (avec prompts système et
+        utilisateur) dans ce fichier JSON et renvoie uniquement des
+        métadonnées compactes (total, estimated_input_tokens, source_types,
+        total_bytes, output_file). Utile pour éviter de polluer le contexte
+        d'un assistant avec des centaines de Ko de prompts ; l'appelant
+        (ex. `claude-api submit_batch --input-file`) peut ensuite lire
+        le fichier sans contamination.
 
     Returns
     -------
-    dict conforme au schema SummarizePrepare : `{requests, total, estimated_input_tokens}`.
+    dict. Par défaut : `{requests, total, estimated_input_tokens, mode}`.
+    Avec `output_file` : `{output_file, total, estimated_input_tokens,
+    mode, source_types, total_bytes}` (requests absents).
     """
     if paths == "all" or paths is None:
         plan_result = plan(db=db, source=source)
@@ -291,10 +304,37 @@ def prepare(paths: list[str] | str = "all", mode: str = "batch",
             "source_path": _rel_transcription(trans_path),
         })
 
+    estimated_tokens = total_input_chars // 4  # ~4 chars/token
+
+    if output_file:
+        out_path = Path(output_file).expanduser()
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        # Écrire un JSON compact (pas indenté) pour minimiser la taille disque.
+        payload = {
+            "requests": requests,
+            "total": len(requests),
+            "estimated_input_tokens": estimated_tokens,
+            "mode": mode,
+        }
+        out_path.write_text(json.dumps(payload, ensure_ascii=False),
+                            encoding="utf-8")
+        source_types: dict[str, int] = {}
+        for r in requests:
+            st = r.get("source_type", "?")
+            source_types[st] = source_types.get(st, 0) + 1
+        return {
+            "output_file": str(out_path),
+            "total": len(requests),
+            "estimated_input_tokens": estimated_tokens,
+            "mode": mode,
+            "source_types": source_types,
+            "total_bytes": out_path.stat().st_size,
+        }
+
     return {
         "requests": requests,
         "total": len(requests),
-        "estimated_input_tokens": total_input_chars // 4,  # ~4 chars/token
+        "estimated_input_tokens": estimated_tokens,
         "mode": mode,
     }
 
