@@ -218,13 +218,17 @@ server.registerTool(
   "connaissance_documents_scan",
   {
     description: "Scan ~/Documents/ and list files to transcribe. Applies filtres.yaml (extensions, excluded folders, date range). " +
-      "The full payload can exceed 1 MB on a large document library — use 'output_file' to write it to disk and receive only a compact summary.",
+      "The full scan is always written to a JSON file (auto-generated path by default). The response contains compact metadata (total_to_transcribe, by_year, sample_to_transcribe) — enough to decide the next step without opening the file. " +
+      "When the full list is needed (e.g. to submit a batch OCR), pass the returned 'output_file' to a downstream tool that reads files directly — such as `mistral-ocr ocr_batch_submit(files_from_json=...)`. Never try to `bash cat` or `python open()` the file from a Claude sandbox — the sandbox doesn't see the host filesystem. Use the `Read` MCP tool if you must inspect contents.",
     inputSchema: {
       ...dateRangeSchema,
       output_file: z.string().optional().describe(
-        "If set, write the full scan payload to this JSON file and return only " +
-        "{output_file, total_bytes, total_to_transcribe, total_skipped, skipped}. " +
-        "Recommended when the library contains hundreds+ of files."
+        "Absolute path where the full scan JSON will be written. Default : " +
+        "auto-generated temp path. The response always contains 'output_file'."
+      ),
+      inline: z.boolean().optional().describe(
+        "Escape hatch : if true, return the full scan inline (may exceed 1 MB). " +
+        "Not recommended — prefer the downstream tool that reads the file directly."
       ),
     },
     annotations: { readOnlyHint: true },
@@ -233,7 +237,10 @@ server.registerTool(
     const a = [];
     pushFlag(a, "since", args.since);
     pushFlag(a, "until", args.until);
-    pushFlag(a, "output-file", args.output_file);
+    const outputFile = args.inline === true
+      ? undefined
+      : (args.output_file || autoOutputFile("documents_scan"));
+    pushFlag(a, "output-file", outputFile);
     return runAndFormat("documents", "scan", a);
   }
 );
@@ -382,13 +389,16 @@ server.registerTool(
   "connaissance_notes_scan",
   {
     description: "Scan ~/Notes/ and list Apple Notes markdown files to copy into the knowledge base. " +
-      "The full payload can exceed 700 KB on a large Apple Notes library — use 'output_file' to write it to disk and receive only a compact summary.",
+      "The full scan is always written to a JSON file (auto-generated path by default). The response contains compact metadata (total_to_copy, by_year, sample_to_copy). Never bash/python the file from a sandbox — use the `Read` MCP tool or pass the 'output_file' to a downstream tool that reads it directly.",
     inputSchema: {
       ...dateRangeSchema,
       output_file: z.string().optional().describe(
-        "If set, write the full scan payload to this JSON file and return only " +
-        "{output_file, total_bytes, total_to_copy, total_skipped, skipped}. " +
-        "Recommended when the Apple Notes library contains hundreds+ of notes."
+        "Absolute path where the full scan JSON will be written. Default : " +
+        "auto-generated temp path. The response always contains 'output_file'."
+      ),
+      inline: z.boolean().optional().describe(
+        "Escape hatch : if true, return the full scan inline (can exceed 700 KB). " +
+        "Not recommended."
       ),
     },
     annotations: { readOnlyHint: true },
@@ -397,7 +407,10 @@ server.registerTool(
     const a = [];
     pushFlag(a, "since", args.since);
     pushFlag(a, "until", args.until);
-    pushFlag(a, "output-file", args.output_file);
+    const outputFile = args.inline === true
+      ? undefined
+      : (args.output_file || autoOutputFile("notes_scan"));
+    pushFlag(a, "output-file", outputFile);
     return runAndFormat("notes", "scan", a);
   }
 );
