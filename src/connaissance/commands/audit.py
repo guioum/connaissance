@@ -34,18 +34,24 @@ CHAMPS_REQUIS = {
 
 
 def _lire_frontmatter(path: Path) -> dict | None:
-    """Lire le frontmatter YAML d'un fichier Markdown."""
+    """Lire le frontmatter YAML d'un fichier Markdown.
+
+    Cherche la fin du frontmatter via ``\\n---`` (newline + tirets) pour
+    ne pas se faire tromper par des ``---`` présents dans des valeurs de
+    champs (ex: chemins de résumés organisés de la forme
+    ``date---entité---titre.md``).
+    """
     try:
         content = path.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError):
         return None
     if not content.startswith("---"):
         return None
-    parts = content.split("---", 2)
-    if len(parts) < 3:
+    end = content.find("\n---", 4)
+    if end < 0:
         return None
     try:
-        return yaml.safe_load(parts[1]) or {}
+        return yaml.safe_load(content[4:end]) or {}
     except yaml.YAMLError:
         return None
 
