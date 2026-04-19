@@ -72,7 +72,64 @@ CREATE INDEX IF NOT EXISTS idx_files_file_type ON files(file_type);
 CREATE INDEX IF NOT EXISTS idx_files_entity ON files(entity_type, entity_slug);
 CREATE INDEX IF NOT EXISTS idx_files_message_id ON files(message_id);
 CREATE INDEX IF NOT EXISTS idx_files_hash ON files(hash);
+
+CREATE TABLE IF NOT EXISTS llm_usage (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%S', 'now', 'localtime')),
+    operation TEXT NOT NULL,
+    source_type TEXT,
+    source_path TEXT,
+    dest_path TEXT,
+    custom_id TEXT,
+    model TEXT,
+    mode TEXT,
+    input_tokens INTEGER,
+    output_tokens INTEGER,
+    cache_creation_input_tokens INTEGER,
+    cache_read_input_tokens INTEGER,
+    cost_usd REAL
+);
+
+CREATE INDEX IF NOT EXISTS idx_llm_usage_timestamp ON llm_usage(timestamp);
+CREATE INDEX IF NOT EXISTS idx_llm_usage_operation ON llm_usage(operation);
+CREATE INDEX IF NOT EXISTS idx_llm_usage_source_type ON llm_usage(source_type);
 """
+
+
+# Tarifs USD / million de tokens — alignés sur claude-api-mcp/src/anthropic.ts.
+# Le prompt ephemeral cached applique 1.25× au write et 0.10× au read.
+PRICING_USD_PER_MTOK: dict[str, dict[str, float]] = {
+    "claude-sonnet-4-5-20250929": {"input": 3.0, "output": 15.0},
+    "claude-sonnet-4-6": {"input": 3.0, "output": 15.0},
+    "claude-sonnet-4-20250514": {"input": 3.0, "output": 15.0},
+    "claude-opus-4-5-20250929": {"input": 15.0, "output": 75.0},
+    "claude-haiku-4-5-20251001": {"input": 0.8, "output": 4.0},
+    "claude-haiku-4-5": {"input": 0.8, "output": 4.0},
+}
+_DEFAULT_PRICING = {"input": 3.0, "output": 15.0}
+
+
+def compute_cost_usd(model: str | None, usage: dict) -> float | None:
+    """Calculer le coût USD d'un appel LLM à partir du ``usage`` Anthropic.
+
+    ``usage`` doit contenir ``input_tokens``, ``output_tokens`` et optionnellement
+    ``cache_creation_input_tokens`` et ``cache_read_input_tokens``. Retourne
+    ``None`` si le dict est vide.
+    """
+    if not usage:
+        return None
+    pricing = PRICING_USD_PER_MTOK.get(model or "", _DEFAULT_PRICING)
+    inp = usage.get("input_tokens") or 0
+    out = usage.get("output_tokens") or 0
+    cw = usage.get("cache_creation_input_tokens") or 0
+    cr = usage.get("cache_read_input_tokens") or 0
+    input_cost = (
+        inp * pricing["input"]
+        + cw * pricing["input"] * 1.25
+        + cr * pricing["input"] * 0.10
+    ) / 1_000_000
+    output_cost = out * pricing["output"] / 1_000_000
+    return round(input_cost + output_cost, 6)
 
 
 class TrackingDB:
@@ -367,6 +424,107 @@ class TrackingDB:
                AND t.file_type = 'transcription'
                AND t.mtime IS NOT NULL AND r.mtime IS NOT NULL
                AND t.mtime > r.mtime""").fetchall()]
+
+    # --- LLM usage (coûts réels) ---
+
+    def log_usage(self, operation: str, usage: dict,
+                  source_type: str | None = None,
+                  source_path: str | None = None,
+                  dest_path: str | None = None,
+                  custom_id: str | None = None,
+                  model: str | None = None,
+                  mode: str | None = None) -> None:
+        """Enregistrer un usage LLM (tokens + coût) après un appel API.
+
+        Utilisé par ``summarize.register_from_results_file`` et
+        ``synthesis.register_from_results_file`` pour tracer les coûts réels
+        par opération et source. ``usage`` suit le format Anthropic
+        (``input_tokens``, ``output_tokens``, ``cache_creation_input_tokens``,
+        ``cache_read_input_tokens``). Les appels manuels (mode « dans Claude »)
+        n'ont pas de usage API et ne sont pas tracés.
+        """
+        if not usage:
+            return
+        cost = compute_cost_usd(model, usage)
+        self._conn.execute(
+            """INSERT INTO llm_usage
+               (operation, source_type, source_path, dest_path, custom_id,
+                model, mode, input_tokens, output_tokens,
+                cache_creation_input_tokens, cache_read_input_tokens, cost_usd)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (operation, source_type,
+             str(source_path) if source_path else None,
+             str(dest_path) if dest_path else None,
+             custom_id, model, mode,
+             usage.get("input_tokens") or 0,
+             usage.get("output_tokens") or 0,
+             usage.get("cache_creation_input_tokens") or 0,
+             usage.get("cache_read_input_tokens") or 0,
+             cost))
+        self._conn.commit()
+
+    def usage_summary(self, since: str | None = None,
+                      until: str | None = None,
+                      operation: str | None = None) -> dict:
+        """Agrégats de coûts réels LLM par opération et source_type.
+
+        ``since``/``until`` : bornes YYYY-MM-DD sur ``timestamp`` (inclusif à
+        gauche, exclusif à droite). ``operation`` : filtre sur le nom.
+        Retourne ``{total: {...}, par_operation: {...}, par_source_type: {...},
+        cache_hit_rate}``.
+        """
+        where = ["1=1"]
+        params: list = []
+        if since:
+            where.append("timestamp >= ?")
+            params.append(since)
+        if until:
+            where.append("timestamp < ?")
+            params.append(until)
+        if operation:
+            where.append("operation = ?")
+            params.append(operation)
+        w = " AND ".join(where)
+
+        def _agg(group_col: str | None) -> list[dict]:
+            cols = f"{group_col}, " if group_col else ""
+            row_group = group_col or "'all'"
+            query = f"""SELECT {cols}
+                    COUNT(*) as n,
+                    COALESCE(SUM(input_tokens), 0) as input_tokens,
+                    COALESCE(SUM(output_tokens), 0) as output_tokens,
+                    COALESCE(SUM(cache_creation_input_tokens), 0) as cache_write,
+                    COALESCE(SUM(cache_read_input_tokens), 0) as cache_read,
+                    COALESCE(SUM(cost_usd), 0.0) as cost_usd
+                FROM llm_usage WHERE {w}"""
+            if group_col:
+                query += f" GROUP BY {group_col} ORDER BY cost_usd DESC"
+            else:
+                query += f" GROUP BY {row_group}"
+            return [dict(r) for r in self._conn.execute(query, params).fetchall()]
+
+        total_rows = _agg(None)
+        total = total_rows[0] if total_rows else {
+            "n": 0, "input_tokens": 0, "output_tokens": 0,
+            "cache_write": 0, "cache_read": 0, "cost_usd": 0.0,
+        }
+        # Cache hit rate = read / (read + write + uncached). Le input_tokens
+        # stocké exclut déjà les tokens cachés (semantics de l'usage Anthropic).
+        total_input_with_cache = (
+            (total.get("input_tokens") or 0)
+            + (total.get("cache_write") or 0)
+            + (total.get("cache_read") or 0)
+        )
+        hit_rate = (
+            (total.get("cache_read") or 0) / total_input_with_cache
+            if total_input_with_cache else 0.0
+        )
+        return {
+            "total": {**total, "cache_hit_rate": round(hit_rate, 4)},
+            "par_operation": _agg("operation"),
+            "par_source_type": _agg("source_type"),
+            "par_model": _agg("model"),
+        }
 
     # --- Stats ---
 

@@ -97,7 +97,8 @@ def _cmd_pipeline(args) -> Any:
         return pipeline.detect(steps=steps, source=args.source,
                                mode=args.mode, since=since, until=until)
     if args.verb == "costs":
-        return pipeline.costs(mode=args.mode, since=since, until=until)
+        return pipeline.costs(mode=args.mode, since=since, until=until,
+                              real=getattr(args, "real", False))
     if args.verb == "simulate":
         from connaissance.commands import documents, emails, notes
         from connaissance.core.paths import transit_file
@@ -177,7 +178,8 @@ def _cmd_summarize(args) -> Any:
             paths_arg = args.paths.split(",")
         return summarize.prepare(paths=paths_arg, mode=args.mode,
                                  source=args.source,
-                                 output_file=args.output_file)
+                                 output_file=args.output_file,
+                                 preference=args.preference)
     if args.verb == "register":
         if args.from_results_file:
             return summarize.register_from_results_file(
@@ -205,6 +207,12 @@ def _cmd_synthesis(args) -> Any:
     if args.verb == "register":
         # Mode moderne : content + kind (+ entity). Le contenu peut arriver
         # via --content, --content-file, ou stdin (si --content-stdin).
+        if args.from_results_file:
+            return synthesis.register_from_results_file(
+                args.from_results_file,
+                requests_file=args.requests_file,
+                cleanup=not args.no_cleanup,
+            )
         content = None
         if getattr(args, "content_stdin", False):
             content = sys.stdin.read()
@@ -220,6 +228,15 @@ def _cmd_synthesis(args) -> Any:
             source_type=getattr(args, "source_type", None),
             source_path=getattr(args, "source_path", None),
         )
+    if args.verb == "prepare":
+        ents: list[str] | str
+        if not args.entities or args.entities == "stale":
+            ents = "stale"
+        else:
+            ents = args.entities.split(",")
+        return synthesis.prepare(entities=ents,
+                                 preference=args.preference,
+                                 output_file=args.output_file)
     raise SystemExit(f"verbe inconnu : synthesis {args.verb}")
 
 
@@ -394,6 +411,10 @@ def build_parser() -> argparse.ArgumentParser:
     add_date_range(p_pipe_detect)
     p_pipe_costs = p_pipe_verbs.add_parser("costs")
     p_pipe_costs.add_argument("--mode", type=str, default="batch")
+    p_pipe_costs.add_argument("--real", action="store_true",
+                              help="Coûts réels mesurés (depuis le journal "
+                                   "llm_usage) au lieu de l'estimation "
+                                   "forfaitaire.")
     add_date_range(p_pipe_costs)
     p_pipe_sim = p_pipe_verbs.add_parser("simulate")
     p_pipe_sim.add_argument("--mode", type=str, default="batch")
@@ -431,6 +452,13 @@ def build_parser() -> argparse.ArgumentParser:
     p_sum_prep.add_argument("--paths", type=str, default=None)
     p_sum_prep.add_argument("--mode", type=str, default="batch")
     p_sum_prep.add_argument("--source", type=str, default=None)
+    p_sum_prep.add_argument("--preference",
+                            choices=["auto", "quality", "economy"],
+                            default="auto",
+                            help="Pilote l'heuristique de choix de modèle. "
+                                 "'auto' (défaut) mélange Sonnet et Haiku ; "
+                                 "'economy' force Haiku sauf documents longs "
+                                 "et fils ; 'quality' force Sonnet.")
     p_sum_prep.add_argument("--output-file", dest="output_file", type=str,
                             default=None,
                             help="Écrire les requests dans ce fichier JSON au lieu "
@@ -497,6 +525,33 @@ def build_parser() -> argparse.ArgumentParser:
                                 "enregistre seulement dans la DB, n'écrit pas de fichier.")
     p_syn_reg.add_argument("--source-type", dest="source_type", default=None)
     p_syn_reg.add_argument("--source-path", dest="source_path", default=None)
+    # Mode batch API : enregistrer fiches+chronologies depuis un fichier de résultats
+    p_syn_reg.add_argument("--from-results-file", dest="from_results_file",
+                           type=str, default=None,
+                           help="Enregistre en masse les paires fiche+chronologie "
+                                "depuis un fichier de résultats API (sortie de "
+                                "claude_api__wait_for_batch ou query_direct). "
+                                "Split chaque content sur les marqueurs "
+                                "<!-- FICHE --> / <!-- CHRONOLOGIE --> et double-"
+                                "register sans charger le contenu dans le contexte.")
+    p_syn_reg.add_argument("--requests-file", dest="requests_file",
+                           type=str, default=None,
+                           help="Fichier de prep (sortie de synthesis prepare "
+                                "--output-file). Requis avec --from-results-file : "
+                                "fournit le mapping custom_id → entity.")
+    p_syn_reg.add_argument("--no-cleanup", dest="no_cleanup", action="store_true")
+    # synthesis prepare — construit les requests fiche+chronologie pour l'API
+    p_syn_prep = p_syn_verbs.add_parser("prepare")
+    p_syn_prep.add_argument("--entities", type=str, default=None,
+                            help="Liste CSV 'type/slug,type/slug,…' ou omettre "
+                                 "pour cibler toutes les entités 'stale'.")
+    p_syn_prep.add_argument("--preference",
+                            choices=["auto", "quality", "economy"],
+                            default="auto")
+    p_syn_prep.add_argument("--output-file", dest="output_file", type=str,
+                            default=None,
+                            help="Chemin JSON où écrire les requests "
+                                 "(évite de polluer le contexte de l'assistant).")
 
     # audit
     p_aud = sub.add_parser("audit")

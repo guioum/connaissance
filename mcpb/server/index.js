@@ -224,16 +224,18 @@ server.registerTool(
 server.registerTool(
   "connaissance_pipeline_costs",
   {
-    description: "Estimate pipeline cost in USD for the current backlog (missing summaries, stale entities, stale MOCs). " +
-      "Accepts 'since'/'until' to scope the estimate to a time window — always pass them when the user asks about a specific period.",
+    description: "Pipeline cost in USD. Two modes: (default) forecast estimate for the current backlog (missing summaries, stale entities, stale MOCs), or 'real=true' to aggregate actually-measured usage from the llm_usage journal (tokens in/out, cache hit rate, cost per source_type and per model). " +
+      "Accepts 'since'/'until' to scope the window — always pass them when the user asks about a specific period.",
     inputSchema: {
-      mode: z.enum(["batch", "interactif"]).default("batch").describe("Batch API gets 50% discount vs interactive."),
+      mode: z.enum(["batch", "interactif"]).default("batch").describe("Batch API gets 50% discount vs interactive. Ignored when real=true."),
+      real: z.boolean().optional().describe("When true, return real measured costs from the llm_usage journal instead of a forecast. Use to calibrate model routing and measure cache effectiveness."),
       ...dateRangeSchema,
     },
     annotations: { readOnlyHint: true },
   },
   async (args) => {
     const a = ["--mode", args.mode ?? "batch"];
+    if (args.real) a.push("--real");
     pushFlag(a, "since", args.since);
     pushFlag(a, "until", args.until);
     return runAndFormat("pipeline", "costs", a);
@@ -619,6 +621,16 @@ server.registerTool(
         "'inline' is accepted as an alias for 'direct'. 'batch' adds cache_control headers."
       ),
       source: z.enum(["document", "courriel", "note", "fil"]).optional().describe("Override source_type for template selection."),
+      preference: z.enum(["auto", "quality", "economy"]).optional().describe(
+        "Model routing preference. 'auto' (default) dispatches each request to " +
+        "Sonnet or Haiku via the central heuristic (short emails/notes → Haiku, " +
+        "old sources > 18 months → Haiku, long documents and threads → Sonnet). " +
+        "'economy' forces Haiku except where it degrades (long documents, " +
+        "threads). 'quality' forces Sonnet except for trivial short notes. " +
+        "Propose 'economy' when the user is running a large retroactive batch " +
+        "of old documents/emails where the marginal quality of Sonnet is not " +
+        "worth the cost."
+      ),
       output_file: z.string().optional().describe(
         "Absolute path where the full requests JSON will be written. Default: " +
         "auto-generated temp path. The response always contains 'output_file' " +
@@ -642,6 +654,7 @@ server.registerTool(
     const mode = args.mode === "inline" ? "direct" : (args.mode ?? "direct");
     pushFlag(a, "mode", mode);
     pushFlag(a, "source", args.source);
+    pushFlag(a, "preference", args.preference);
     // Default : auto-generated output_file so prompts never enter the
     // assistant context. Only skip when the caller explicitly asks
     // for inline output (escape hatch).
@@ -776,26 +789,44 @@ server.registerTool(
 server.registerTool(
   "connaissance_synthesis_register",
   {
-    description: "Write a fiche / chronologie / MOC / digest / index and register it in tracking.db. The destination path is computed from `kind` + `entity` so Claude never needs to know the knowledge base root (which differs between native and cowork VM). Content is written to the correct location under Synthèse/.",
+    description: "Write a fiche / chronologie / MOC / digest / index and register it in tracking.db. " +
+      "Single mode: pass {content, kind, entity} to write ONE file. " +
+      "Batch mode: pass {from_results_file, requests_file} to register many fiche+chronologie pairs at once from an API results file produced by claude_api__wait_for_batch or query_direct — the content is split on <!-- FICHE --> / <!-- CHRONOLOGIE --> markers and nothing transits through the MCP channel. Preferred for API-generated batches. " +
+      "The destination path is computed from `kind` + `entity` so Claude never needs to know the knowledge base root (which differs between native and cowork VM).",
     inputSchema: {
-      content: z.string().describe("Markdown content to write. Must include YAML frontmatter matching the template for the given kind."),
-      kind: z.enum(["fiche", "chronologie", "moc", "digest", "index"]).describe(
-        "Type of synthesis output. Determines the destination: "
+      content: z.string().optional().describe("Single mode: markdown content to write. Must include YAML frontmatter matching the template for the given kind."),
+      kind: z.enum(["fiche", "chronologie", "moc", "digest", "index"]).optional().describe(
+        "Single mode: type of synthesis output. "
         + "fiche/chronologie → Synthèse/{entity_type}/{entity_slug}/{kind}.md ; "
         + "moc → Synthèse/sujets/{entity}.md ; "
         + "digest → Synthèse/rapports/digests/{entity or today}.md ; "
         + "index → Synthèse/index.md"
       ),
       entity: z.string().optional().describe(
-        "Required for fiche/chronologie (format 'type/slug', e.g. 'personnes/jean-dupont'). "
+        "Single mode. Required for fiche/chronologie (format 'type/slug', e.g. 'personnes/jean-dupont'). "
         + "Required for moc (category slug, e.g. 'banque'). "
         + "Optional for digest (date YYYY-MM-DD, default today). Ignored for index."
       ),
       source_type: z.enum(["document", "courriel", "note", "synthese"]).optional().describe("Optional: origin category of the primary source that triggered this update (for tracking only)."),
       source_path: z.string().optional().describe("Optional: path of a resume that triggered this synthesis (for tracking only)."),
+      from_results_file: z.string().optional().describe(
+        "Batch mode: JSON file {results: [{custom_id, content, ...}]} from claude-api-mcp. " +
+        "Each content is split on <!-- FICHE --> / <!-- CHRONOLOGIE --> and registered as a fiche+chronologie pair."
+      ),
+      requests_file: z.string().optional().describe(
+        "Batch mode (required with from_results_file): prep file produced by synthesis_prepare(output_file=...). " +
+        "Supplies the custom_id → entity mapping that API results don't carry."
+      ),
+      no_cleanup: z.boolean().optional().describe("Batch mode: keep the transit files after registration (default: delete if no errors)."),
     },
   },
   async (args) => {
+    if (args.from_results_file) {
+      const a = ["--from-results-file", args.from_results_file];
+      if (args.requests_file) a.push("--requests-file", args.requests_file);
+      if (args.no_cleanup) a.push("--no-cleanup");
+      return runAndFormat("synthesis", "register", a);
+    }
     const a = ["--kind", args.kind];
     if (args.entity) a.push("--entity", args.entity);
     if (args.source_type) a.push("--source-type", args.source_type);
@@ -803,6 +834,38 @@ server.registerTool(
     // Pass content via stdin to avoid argv size limits and shell escaping.
     a.push("--content-stdin");
     return runAndFormat("synthesis", "register", a, { stdin: args.content });
+  }
+);
+
+server.registerTool(
+  "connaissance_synthesis_prepare",
+  {
+    description: "Build LLM requests (fiche + chronologie) for stale entities. " +
+      "Symmetric to summarize_prepare — the generation moves OUT of the main Claude context and into the Anthropic API (batch for -50%, or direct), unloading the summaries from the principal's window. " +
+      "Returns compact metadata {output_file, total, estimated_input_tokens, model_tiers}; the full requests are written to a JSON file. Typical flow: synthesis_prepare() → submit_batch(requests_file=...) → wait_for_batch(output_file=...) → synthesis_register(from_results_file=...). " +
+      "The central model heuristic routes each entity to Sonnet or Haiku (see preference).",
+    inputSchema: {
+      entities: z.union([z.string(), z.array(z.string())]).optional().describe(
+        "'type/slug,type/slug,…' or array. Omit to target all stale entities from synthesis_plan()."
+      ),
+      preference: z.enum(["auto", "quality", "economy"]).optional().describe(
+        "Model routing. 'auto' (default): Sonnet for fiche/chronologie (narrative). " +
+        "'economy': Haiku — propose it for massive retroactive rewrites where Sonnet quality is not worth the cost. " +
+        "'quality': force Sonnet everywhere."
+      ),
+      output_file: z.string().optional(),
+    },
+    annotations: { readOnlyHint: true },
+  },
+  async (args) => {
+    const a = [];
+    let entsVal = args.entities;
+    if (Array.isArray(entsVal)) entsVal = entsVal.join(",");
+    pushFlag(a, "entities", entsVal);
+    pushFlag(a, "preference", args.preference);
+    const outputFile = args.output_file || autoOutputFile("synthesis_prepare");
+    pushFlag(a, "output-file", outputFile);
+    return runAndFormat("synthesis", "prepare", a);
   }
 );
 

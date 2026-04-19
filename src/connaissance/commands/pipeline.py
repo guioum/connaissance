@@ -57,13 +57,30 @@ def synthese_perimee(db):
     }
 
 
-def moc_perimes():
-    """MOC périmés ou manquants par catégorie."""
+# Seuil MOC : nombre minimal de résumés nouveaux (plus récents que le MOC)
+# avant de marquer le MOC comme « périmé ». Régénérer un MOC à chaque résumé
+# est le plus gros contributeur de bruit/dépense sur les gros rattrapages.
+MOC_STALE_THRESHOLD = 3
+
+
+def moc_perimes(threshold: int = MOC_STALE_THRESHOLD):
+    """MOC périmés ou manquants par catégorie.
+
+    Un MOC est périmé seulement quand ≥ ``threshold`` résumés de sa catégorie
+    ont une mtime postérieure à celle du MOC. Les régénérations déclenchées
+    par un seul nouveau résumé étaient la cause principale des MOC régénérés
+    à perte — le MOC agrège des dizaines d'items, ajouter un seul ne change
+    rien d'utile à la vue globale.
+
+    ``threshold`` peut être ramené à 1 pour restaurer l'ancien comportement
+    (utile quand on veut forcer une régénération fine).
+    """
     if not RESUMES.exists():
         return {"total": 0, "categories": []}
 
-    # Scanner les catégories et leur mtime max dans les résumés
-    categories_mtime = {}
+    # Scanner les catégories : mtime max + nombre de résumés par catégorie
+    categories_mtime: dict[str, float] = {}
+    categories_mtimes: dict[str, list[float]] = {}
     for md_file in RESUMES.rglob("*.md"):
         try:
             content = md_file.read_text(encoding="utf-8")
@@ -82,6 +99,7 @@ def moc_perimes():
         if not cat:
             continue
         file_mtime = md_file.stat().st_mtime
+        categories_mtimes.setdefault(cat, []).append(file_mtime)
         if cat not in categories_mtime or file_mtime > categories_mtime[cat]:
             categories_mtime[cat] = file_mtime
 
@@ -91,11 +109,20 @@ def moc_perimes():
     for cat, resume_mtime in sorted(categories_mtime.items()):
         moc_path = sujets_dir / f"{cat}.md"
         if not moc_path.exists():
-            perimes.append({"category": cat, "status": "manquant"})
-        elif moc_path.stat().st_mtime < resume_mtime:
-            perimes.append({"category": cat, "status": "périmé"})
+            perimes.append({"category": cat, "status": "manquant",
+                            "nouveaux_resumes": len(categories_mtimes.get(cat, []))})
+            continue
+        moc_mtime = moc_path.stat().st_mtime
+        if moc_mtime >= resume_mtime:
+            continue
+        newer = sum(1 for m in categories_mtimes.get(cat, []) if m > moc_mtime)
+        if newer >= threshold:
+            perimes.append({"category": cat, "status": "périmé",
+                            "nouveaux_resumes": newer,
+                            "seuil": threshold})
 
-    return {"total": len(perimes), "categories": perimes}
+    return {"total": len(perimes), "categories": perimes,
+            "seuil": threshold}
 
 
 def estimer_couts(db, mode="batch", since=None, until=None):
@@ -181,7 +208,8 @@ _STEP_ALL = ("resumes_manquants", "resumes_perimes", "non_organises",
 
 def detect(db: TrackingDB | None = None, steps: list[str] | None = None,
            source: str | None = None, mode: str = "batch",
-           since: str | None = None, until: str | None = None) -> dict:
+           since: str | None = None, until: str | None = None,
+           moc_threshold: int | None = None) -> dict:
     """Détecter le travail du pipeline (schema PipelineDetection).
 
     Parameters
@@ -218,7 +246,8 @@ def detect(db: TrackingDB | None = None, steps: list[str] | None = None,
     if "synthese_perimee" in active:
         result["synthese_perimee"] = synthese_perimee(db)
     if "moc_perimes" in active:
-        result["moc_perimes"] = moc_perimes()
+        result["moc_perimes"] = moc_perimes(
+            threshold=moc_threshold if moc_threshold is not None else MOC_STALE_THRESHOLD)
     if "couts" in active:
         result["couts"] = estimer_couts(db, mode, since=since, until=until)
     if "stats" in active:
@@ -233,16 +262,29 @@ def detect(db: TrackingDB | None = None, steps: list[str] | None = None,
 
 
 def costs(db: TrackingDB | None = None, mode: str = "batch",
-          since: str | None = None, until: str | None = None) -> dict:
+          since: str | None = None, until: str | None = None,
+          real: bool = False) -> dict:
     """Estimation des coûts du pipeline (schema Couts).
 
     ``since``/``until`` (YYYY-MM-DD) restreignent le périmètre des résumés
-    manquants.
+    manquants (mode estimation) ou la plage du journal ``llm_usage``
+    (mode ``real``).
+
+    ``real=True`` : retourne les coûts **réels** observés (tokens et USD
+    depuis ``llm_usage``) plutôt qu'une estimation forfaitaire. Utile pour
+    mesurer le gain effectif du prompt caching et calibrer le routing
+    Haiku/Sonnet avec des chiffres et pas des approximations.
     """
     owns_db = db is None
     if db is None:
         db = TrackingDB()
     try:
+        if real:
+            result = db.usage_summary(since=since, until=until)
+            result["source"] = "llm_usage"
+            if since or until:
+                result["date_range"] = {"since": since, "until": until}
+            return result
         result = estimer_couts(db, mode, since=since, until=until)
         if since or until:
             result["date_range"] = {"since": since, "until": until}

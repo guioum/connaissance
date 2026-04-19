@@ -191,6 +191,94 @@ def strip_quoted_replies(body: str) -> str:
     return "\n".join(cleaned).rstrip()
 
 
+# --- Compression amont du corps de courriel ---
+
+# Motifs de signature standard : ligne `--` (RFC 3676), « Envoyé de mon X »,
+# footers légaux fréquents. On coupe AU PREMIER motif rencontré — tout ce
+# qui suit est considéré comme non-sémantique.
+_SIG_PATTERNS = [
+    r'^-- ?$',
+    r'^_{2,}$',
+    r'^\s*Envoy[ée]\s+(de|depuis)\s+mon\s+',
+    r'^\s*Sent\s+from\s+my\s+',
+    r'^\s*Get\s+Outlook\s+for\s+',
+    r'^\s*T[ée]l[ée]charg(?:ez|er)\s+(l\'|la\s+)app(?:lication)?',
+]
+
+# Lignes à supprimer (tracking, unsubscribe, boilerplate marketing) —
+# agissent sur la ligne elle-même, pas comme coupure.
+_NOISE_LINE_PATTERNS = [
+    r'^\s*\[image:\s*[^\]]+\]\s*$',       # [image: logo]
+    r'^\s*\[cid:[^\]]+\]\s*$',            # [cid:xxx]
+    r'^\s*Unsubscribe\s*(?:\||$)',
+    r'^\s*Se\s+d[ée]sabonner\s*(?:\||$)',
+    r'^\s*View\s+(?:this\s+email\s+)?in\s+(?:your\s+)?browser',
+    r'^\s*Voir\s+(?:ce\s+(?:courriel|message)\s+)?dans\s+(?:votre\s+)?navigateur',
+    r'^\s*Manage\s+(?:your\s+)?(?:email\s+)?preferences',
+    r'^\s*G[ée]rer\s+mes\s+pr[ée]f[ée]rences',
+    # Ligne d'url tracking pure (http(s) sans texte)
+    r'^\s*https?://\S+/(?:unsubscribe|track|click|pixel)\S*\s*$',
+]
+
+
+def compress_body(body: str, max_length: int | None = None) -> str:
+    """Compresser un corps de courriel en retirant le bruit non-sémantique.
+
+    Appliqué AVANT ``strip_quoted_replies`` dans le flow d'extraction. Cible :
+    réduire de 30-50 % la taille des transcriptions de courriels marketing
+    et transactionnels sans perdre d'information utile pour la génération de
+    résumés. Gain direct sur les tokens d'entrée en mode résumé API.
+
+    - Coupe au premier motif de signature (``-- ``, « Sent from my … »,
+      footer légal reconnu).
+    - Supprime les lignes de tracking / unsubscribe isolées.
+    - Collapse les suites de lignes vides à deux maximum.
+    - Tronque à ``max_length`` caractères (soft, coupe sur une ligne)
+      quand fourni — utile si le body fait plusieurs Mo (rare mais vu sur
+      des newsletters).
+    """
+    if not body:
+        return body
+
+    # 1) Couper à la première signature
+    for pat in _SIG_PATTERNS:
+        m = re.search(pat, body, re.MULTILINE | re.IGNORECASE)
+        if m:
+            body = body[:m.start()].rstrip()
+            break
+
+    # 2) Filtrer les lignes de bruit pur
+    keep: list[str] = []
+    for line in body.split("\n"):
+        if any(re.match(pat, line, re.IGNORECASE) for pat in _NOISE_LINE_PATTERNS):
+            continue
+        keep.append(line)
+
+    # 3) Collapse lignes vides
+    collapsed: list[str] = []
+    blank_run = 0
+    for line in keep:
+        if line.strip():
+            blank_run = 0
+            collapsed.append(line)
+        else:
+            blank_run += 1
+            if blank_run <= 2:
+                collapsed.append(line)
+
+    result = "\n".join(collapsed).rstrip()
+
+    # 4) Troncature soft
+    if max_length and len(result) > max_length:
+        cut = result[:max_length]
+        last_nl = cut.rfind("\n")
+        if last_nl > max_length * 0.8:
+            cut = cut[:last_nl]
+        result = cut + "\n\n…"
+
+    return result
+
+
 def extract_body(msg: email.message.Message) -> str:
     """Extrait le corps texte d'un message (préfère text/plain, sinon text/html)."""
     if msg.is_multipart():
@@ -635,8 +723,12 @@ def format_email(msg: dict) -> str:
     lines.append(f'**Date :** {date_str}')
     lines.append("")
 
-    # Corps
+    # Corps : strip citations puis compress (signatures, tracking, lignes
+    # vides excessives). L'ordre importe — strip_quoted_replies coupe
+    # d'abord sur « Le … a écrit : », puis compress_body retire les sigs
+    # et boilerplate restants sur le contenu réellement utile.
     body = strip_quoted_replies(msg["body"])
+    body = compress_body(body)
     if body:
         lines.append(body)
     lines.append("")

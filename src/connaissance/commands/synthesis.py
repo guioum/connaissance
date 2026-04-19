@@ -9,6 +9,9 @@ Expose :
 
 from __future__ import annotations
 
+import hashlib
+import json
+import re
 from collections import Counter, defaultdict
 from pathlib import Path
 from typing import cast
@@ -21,6 +24,13 @@ from connaissance.core.resolution import construire_slug
 
 RESUMES = CONNAISSANCE_ROOT / "Résumés"
 SYNTHESE = CONNAISSANCE_ROOT / "Synthèse"
+PROMPTS_DIR = Path(__file__).resolve().parent.parent / "prompts"
+
+# Tarif par défaut des requêtes de synthèse. Les fiches sont long-form
+# narratif — Sonnet reste le bon défaut ; Haiku est utilisé pour digest/moc
+# via l'heuristique centrale.
+DEFAULT_SYNTHESIS_MODEL = "claude-sonnet-4-6"
+DEFAULT_SYNTHESIS_MAX_TOKENS = 6144
 
 
 def _parse_frontmatter(content: str) -> dict | None:
@@ -321,6 +331,373 @@ def entity_paths(entity: str) -> dict:
 
 
 _VALID_KINDS = {"fiche", "chronologie", "moc", "digest", "index"}
+
+
+# --- Préparation API (batch/direct) -------------------------------------
+
+def _load_prompt_template(name: str) -> tuple[str, str]:
+    """Charger un template sectionné `<!-- system -->` / `<!-- user -->`."""
+    path = PROMPTS_DIR / name
+    content = path.read_text(encoding="utf-8")
+    parts = re.split(r"<!-- (system|user) -->\n?", content)
+    system_text = ""
+    user_text = ""
+    i = 1
+    while i < len(parts) - 1:
+        marker = parts[i]
+        body = parts[i + 1] if i + 1 < len(parts) else ""
+        if marker == "system":
+            system_text = body.strip()
+        elif marker == "user":
+            user_text = body.strip()
+        i += 2
+    return system_text, user_text
+
+
+def _substitute(template: str, variables: dict) -> str:
+    def replace(m):
+        key = m.group(1).strip()
+        return str(variables.get(key, m.group(0)))
+    return re.sub(r"\{\{\s*(\w+)\s*\}\}", replace, template)
+
+
+def _entity_custom_id(entity: str) -> str:
+    return hashlib.sha256(f"entity:{entity}".encode()).hexdigest()[:16]
+
+
+def _read_synthesis_file(entity_type: str, entity_slug: str, name: str) -> str:
+    p = SYNTHESE / entity_type / entity_slug / name
+    if not p.exists():
+        return ""
+    try:
+        return p.read_text(encoding="utf-8")
+    except OSError:
+        return ""
+
+
+def _compact_resume(fm: dict, body: str, max_body_chars: int = 1200) -> str:
+    """Représentation compacte d'un résumé pour l'injection dans un prompt.
+
+    On garde le frontmatter intégralement (métadonnées utiles : date,
+    category, entity_name, relations) mais on tronque le body au-delà d'un
+    seuil — le LLM n'a pas besoin de tout le narratif pour rédiger une fiche,
+    les sections « Informations clés » et « Actions » du résumé suffisent
+    dans la grande majorité des cas.
+    """
+    meta = {k: fm[k] for k in fm
+            if k in ("date", "title", "category", "entity_name",
+                     "entity_type", "entity_slug", "confidence", "type",
+                     "relations")}
+    body_trunc = body.strip()
+    if len(body_trunc) > max_body_chars:
+        body_trunc = body_trunc[:max_body_chars].rsplit("\n", 1)[0] + "\n…"
+    meta_block = yaml.safe_dump(meta, sort_keys=False, allow_unicode=True,
+                                default_flow_style=False).strip()
+    return f"{meta_block}\n---\n{body_trunc}"
+
+
+def _gather_entity_context(entity: str, max_resumes: int = 40) -> dict:
+    """Rassembler le contexte complet pour générer fiche + chronologie.
+
+    Limite volontairement le nombre de résumés injectés pour les entités très
+    actives : au-delà de ``max_resumes`` items, on prend les plus récents —
+    l'historique ancien est moins discriminant pour la fiche, et la
+    chronologie peut rester figée sur les événements passés (append-only
+    implicite via la fiche existante).
+    """
+    try:
+        entity_type, entity_slug = entity.split("/", 1)
+    except ValueError:
+        return {}
+
+    fiche_existante = _read_synthesis_file(entity_type, entity_slug, "fiche.md")
+    chronologie_existante = _read_synthesis_file(
+        entity_type, entity_slug, "chronologie.md")
+
+    resumes = _iter_entity_resumes(entity)
+    # Tri par date frontmatter décroissante ; les items sans date vont en fin.
+    def _key(item):
+        _p, fm = item
+        d = fm.get("date") or fm.get("created") or ""
+        return str(d)
+    resumes.sort(key=_key, reverse=True)
+    resumes = resumes[:max_resumes]
+
+    resumes_blocks: list[str] = []
+    for path, fm in resumes:
+        try:
+            full = path.read_text(encoding="utf-8")
+            body = full.split("---", 2)[-1].strip() if full.startswith("---") else full
+        except OSError:
+            body = ""
+        try:
+            rel = str(path.relative_to(CONNAISSANCE_ROOT))
+        except ValueError:
+            rel = str(path)
+        resumes_blocks.append(f"### {rel}\n\n{_compact_resume(fm, body)}")
+
+    return {
+        "entity": entity,
+        "fiche_existante": fiche_existante or "(aucune — première génération)",
+        "chronologie_existante": chronologie_existante or "(aucune — première génération)",
+        "aliases_candidates": json.dumps(
+            aliases_candidates(entity)["candidates"],
+            ensure_ascii=False, indent=2),
+        "relations_candidates": json.dumps(
+            relations_candidates(entity)["candidates"],
+            ensure_ascii=False, indent=2),
+        "entity_paths": json.dumps(
+            entity_paths(entity)["paths"],
+            ensure_ascii=False, indent=2),
+        "resumes": "\n\n".join(resumes_blocks) if resumes_blocks
+                   else "(aucun résumé enregistré pour cette entité)",
+        "_resume_count": len(resumes),
+    }
+
+
+def prepare(entities: list[str] | str = "stale",
+            preference: str = "auto",
+            output_file: str | None = None,
+            db: TrackingDB | None = None) -> dict:
+    """Construire les requests de synthèse (fiche + chronologie) pour l'API.
+
+    Symétrique de ``summarize.prepare`` : produit un fichier JSON prêt pour
+    ``claude_api__submit_batch`` ou ``query_direct``. La rédaction sort de
+    la fenêtre du Claude principal — gain double : -50 % de prix en batch,
+    et surtout les résumés ne transitent plus par le contexte principal.
+
+    Parameters
+    ----------
+    entities : list[str] | "stale"
+        Format ``type/slug``. ``"stale"`` utilise ``plan()`` pour cibler
+        uniquement les entités dont la synthèse est périmée.
+    preference : "auto" | "quality" | "economy"
+        Route chaque entité via l'heuristique centrale (voir
+        ``core.model_selection``). Les fiches/chronologies restent sur
+        Sonnet par défaut en mode auto — rédaction narrative ; ``economy``
+        bascule sur Haiku si l'utilisateur accepte une qualité moindre
+        (utile pour les gros rattrapages).
+    """
+    if entities == "stale" or entities is None:
+        p = plan(db=db)
+        target = [f"{e['entity_type']}/{e['entity_slug']}"
+                  for e in p.get("stale_entities", [])]
+    else:
+        target = list(entities)
+
+    from connaissance.core.model_selection import choose_model
+    system_tmpl, user_tmpl = _load_prompt_template("synthesis_entity.md")
+
+    requests: list[dict] = []
+    total_input_chars = 0
+    for entity in target:
+        ctx = _gather_entity_context(entity)
+        if not ctx:
+            continue
+        user_text = _substitute(user_tmpl, ctx)
+        total_input_chars += len(system_tmpl) + len(user_text)
+        choice = choose_model(
+            source_type="fiche",
+            content_length=len(user_text),
+            reference_date=None,
+            preference=preference,  # type: ignore[arg-type]
+        )
+        requests.append({
+            "custom_id": _entity_custom_id(entity),
+            "system": system_tmpl,
+            "user": user_text,
+            "model": choice["model"],
+            "max_tokens": DEFAULT_SYNTHESIS_MAX_TOKENS,
+            "source_type": "fiche_chronologie",
+            "entity": entity,
+            "model_tier": choice["tier"],
+            "model_reason": choice["reason"],
+            "resume_count": ctx.get("_resume_count", 0),
+        })
+
+    payload = {
+        "requests": requests,
+        "total": len(requests),
+        "estimated_input_tokens": total_input_chars // 4,
+        "mode": "direct",  # format du fichier (identique pour batch/direct)
+        "preference": preference,
+    }
+
+    def _summary(p: dict) -> dict:
+        tiers: dict[str, int] = {}
+        for r in p["requests"]:
+            t = r.get("model_tier", "?")
+            tiers[t] = tiers.get(t, 0) + 1
+        return {
+            "total": p["total"],
+            "estimated_input_tokens": p["estimated_input_tokens"],
+            "preference": preference,
+            "model_tiers": tiers,
+        }
+
+    from connaissance.core.output_file import write_or_inline
+    return write_or_inline(payload, output_file=output_file, summary_fn=_summary)
+
+
+def _split_fiche_chronologie(content: str) -> tuple[str, str] | None:
+    """Séparer la sortie LLM en (fiche, chronologie) via les marqueurs.
+
+    Retourne ``None`` si un marqueur est manquant — le caller marque alors
+    l'entité en erreur et laisse l'humain/LLM retenter.
+    """
+    fiche_marker = "<!-- FICHE -->"
+    chrono_marker = "<!-- CHRONOLOGIE -->"
+    stripped = content.strip()
+
+    # Le LLM peut préfixer d'espaces ou d'une ligne vide — strip prudent.
+    if fiche_marker not in stripped or chrono_marker not in stripped:
+        return None
+    _prefix, rest = stripped.split(fiche_marker, 1)
+    try:
+        fiche, chronologie = rest.split(chrono_marker, 1)
+    except ValueError:
+        return None
+    return fiche.strip(), chronologie.strip()
+
+
+def register_from_results_file(results_file: str,
+                               requests_file: str | None = None,
+                               cleanup: bool = True,
+                               db: TrackingDB | None = None) -> dict:
+    """Enregistrer en masse les fiches+chronologies d'un fichier de résultats API.
+
+    Symétrique de ``summarize.register_from_results_file``. Pour chaque item :
+    split du contenu en (fiche, chronologie) via les marqueurs stricts, puis
+    double ``register()`` — la paire fiche/chronologie reste atomique.
+
+    ``requests_file`` est requis : les résultats API ne contiennent pas
+    ``entity``, on le retrouve via le mapping ``custom_id → entity`` du
+    fichier de préparation.
+    """
+    if db is None:
+        db = TrackingDB()
+
+    entity_by_id: dict[str, str] = {}
+    model_by_id: dict[str, str] = {}
+    if requests_file:
+        try:
+            rd = json.loads(Path(requests_file).expanduser().read_text(encoding="utf-8"))
+            for r in (rd if isinstance(rd, list) else rd.get("requests", [])):
+                cid = r.get("custom_id")
+                if cid and r.get("entity"):
+                    entity_by_id[cid] = r["entity"]
+                if cid and r.get("model"):
+                    model_by_id[cid] = r["model"]
+        except (OSError, json.JSONDecodeError):
+            pass
+
+    path = Path(results_file).expanduser()
+    if not path.exists():
+        return {"registered": 0,
+                "errors": [{"error": f"results_file introuvable : {path}"}],
+                "paths": []}
+
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as e:
+        return {"registered": 0,
+                "errors": [{"error": f"JSON invalide : {e}"}],
+                "paths": []}
+
+    items = data if isinstance(data, list) else data.get("results", [])
+    if not isinstance(items, list):
+        return {"registered": 0,
+                "errors": [{"error": "format attendu : [...] ou {results: [...]}"}],
+                "paths": []}
+
+    registered = 0
+    errors: list[dict] = []
+    out_paths: list[dict] = []
+    for item in items:
+        cid = item.get("custom_id", "")
+        raw = item.get("content")
+        if isinstance(raw, list):
+            content = "".join(
+                b.get("text", "") for b in raw
+                if isinstance(b, dict) and b.get("type") == "text")
+        elif isinstance(raw, str):
+            content = raw
+        else:
+            errors.append({"custom_id": cid, "error": "content manquant"})
+            continue
+        if not content.strip():
+            errors.append({"custom_id": cid, "error": "content vide"})
+            continue
+
+        entity = item.get("entity") or entity_by_id.get(cid)
+        if not entity:
+            errors.append({"custom_id": cid,
+                           "error": "entity introuvable — fournir requests_file"})
+            continue
+
+        parts = _split_fiche_chronologie(content)
+        if parts is None:
+            errors.append({"custom_id": cid,
+                           "error": "marqueurs FICHE/CHRONOLOGIE manquants"})
+            continue
+        fiche_md, chrono_md = parts
+
+        rf = register(content=fiche_md, kind="fiche", entity=entity, db=db)
+        rc = register(content=chrono_md, kind="chronologie",
+                      entity=entity, db=db)
+        if rf.get("error") or rc.get("error"):
+            errors.append({"custom_id": cid,
+                           "error": rf.get("error") or rc.get("error")})
+            continue
+        registered += 1
+        out_paths.append({"custom_id": cid, "entity": entity,
+                          "fiche": rf.get("path"),
+                          "chronologie": rc.get("path")})
+
+        usage = item.get("usage")
+        if isinstance(usage, dict):
+            db.log_usage(
+                operation="synthesis",
+                usage=usage,
+                source_type="fiche_chronologie",
+                source_path=entity,
+                dest_path=rf.get("path"),
+                custom_id=cid,
+                model=model_by_id.get(cid),
+            )
+
+    from connaissance.core.paths import TRANSIT_DIR
+    cleaned_up: list[str] = []
+
+    def _is_transit(p: Path) -> bool:
+        s = str(p)
+        return (
+            "/tmp/" in s
+            or s.startswith("/var/folders/")
+            or s.startswith(str(TRANSIT_DIR))
+        )
+
+    if cleanup and not errors:
+        try:
+            Path(results_file).expanduser().unlink(missing_ok=True)
+            cleaned_up.append(str(results_file))
+        except OSError:
+            pass
+        if requests_file:
+            rp = Path(requests_file).expanduser()
+            if _is_transit(rp):
+                try:
+                    rp.unlink(missing_ok=True)
+                    cleaned_up.append(str(rp))
+                except OSError:
+                    pass
+
+    return {
+        "registered": registered,
+        "errors": errors,
+        "paths": out_paths,
+        "cleaned_up": cleaned_up,
+    }
 
 
 def _synthesis_dest_path(kind: str, entity: str | None) -> Path:

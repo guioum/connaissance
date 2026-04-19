@@ -218,6 +218,7 @@ def plan(db: TrackingDB | None = None, source: str | None = None) -> dict:
 def prepare(paths: list[str] | str = "all", mode: str = "batch",
             source: str | None = None,
             output_file: str | None = None,
+            preference: str = "auto",
             db: TrackingDB | None = None) -> dict:
     """Construire les requêtes pour `mcp__claude_api__submit_batch`.
 
@@ -238,6 +239,13 @@ def prepare(paths: list[str] | str = "all", mode: str = "batch",
         d'un assistant avec des centaines de Ko de prompts ; l'appelant
         (ex. `claude-api submit_batch --input-file`) peut ensuite lire
         le fichier sans contamination.
+    preference : "auto" | "quality" | "economy"
+        Pilote l'heuristique centrale de choix de modèle
+        (``core.model_selection.choose_model``). ``auto`` : Sonnet sur
+        sources récentes / longues, Haiku sur courriels courts, notes
+        courtes et sources anciennes (> 18 mois). ``economy`` : Haiku
+        partout sauf documents longs et fils où il décroche. ``quality``
+        : Sonnet partout sauf notes très courtes.
 
     Returns
     -------
@@ -294,15 +302,34 @@ def prepare(paths: list[str] | str = "all", mode: str = "batch",
         user_text = _substitute(user_tmpl, variables)
         total_input_chars += len(system_tmpl) + len(user_text)
 
+        # Heuristique centrale de choix de modèle (core.model_selection).
+        # Date de référence : champ `date` métier s'il existe, sinon `created`.
+        from connaissance.core.model_selection import choose_model
+        choice = choose_model(
+            source_type=source_type,
+            content_length=len(body),
+            reference_date=fm.get("date") or fm.get("created"),
+            preference=preference,  # type: ignore[arg-type]
+        )
+
         requests.append({
             "custom_id": _custom_id(_rel_transcription(trans_path)),
             "system": system_tmpl,
             "user": user_text,
-            "model": DEFAULT_MODEL,
+            "model": choice["model"],
             "max_tokens": DEFAULT_MAX_TOKENS,
             "source_type": source_type,
             "source_path": _rel_transcription(trans_path),
+            "model_tier": choice["tier"],
+            "model_reason": choice["reason"],
         })
+
+    # Tri stable par source_type : regroupe les requests qui partagent le même
+    # `system` prompt. Côté claude-api-mcp, le système est envoyé avec
+    # `cache_control: ephemeral` ; le tri maximise les cache hits à l'intérieur
+    # d'un même lot (batch comme direct) car Anthropic compare le préfixe du
+    # message pour décider du cache.
+    requests.sort(key=lambda r: r.get("source_type", ""))
 
     estimated_tokens = total_input_chars // 4  # ~4 chars/token
     payload = {
@@ -310,18 +337,24 @@ def prepare(paths: list[str] | str = "all", mode: str = "batch",
         "total": len(requests),
         "estimated_input_tokens": estimated_tokens,
         "mode": mode,
+        "preference": preference,
     }
 
     def _summary(p: dict) -> dict:
         src_types: dict[str, int] = {}
+        tiers: dict[str, int] = {}
         for r in p["requests"]:
             st = r.get("source_type", "?")
             src_types[st] = src_types.get(st, 0) + 1
+            t = r.get("model_tier", "?")
+            tiers[t] = tiers.get(t, 0) + 1
         return {
             "total": p["total"],
             "estimated_input_tokens": p["estimated_input_tokens"],
             "mode": p["mode"],
             "source_types": src_types,
+            "model_tiers": tiers,
+            "preference": preference,
         }
 
     from connaissance.core.output_file import write_or_inline
@@ -613,6 +646,25 @@ def register_from_results_file(results_file: str,
             "paths": [],
         }
 
+    # Métadonnées de requête par custom_id (modèle, source_type) pour alimenter
+    # le journal de coûts. Le requests_file les connaît ; les résultats API non.
+    meta_by_id: dict[str, dict] = {}
+    if requests_file:
+        try:
+            req_p = Path(requests_file).expanduser()
+            if req_p.exists():
+                rd = json.loads(req_p.read_text(encoding="utf-8"))
+                for r in (rd if isinstance(rd, list) else rd.get("requests", [])):
+                    cid = r.get("custom_id")
+                    if cid:
+                        meta_by_id[cid] = {
+                            "model": r.get("model"),
+                            "source_type": r.get("source_type"),
+                            "source_path": r.get("source_path"),
+                        }
+        except (OSError, json.JSONDecodeError):
+            pass
+
     registered = 0
     errors: list[dict] = []
     paths: list[dict] = []
@@ -642,6 +694,19 @@ def register_from_results_file(results_file: str,
         else:
             registered += 1
             paths.append({"custom_id": custom_id, "path": result["path"]})
+            # Journaliser le coût réel si l'API a retourné un usage
+            usage = item.get("usage")
+            if isinstance(usage, dict):
+                meta = meta_by_id.get(custom_id, {})
+                db.log_usage(
+                    operation="resume",
+                    usage=usage,
+                    source_type=result.get("source_type") or meta.get("source_type"),
+                    source_path=src_path or meta.get("source_path"),
+                    dest_path=result.get("path"),
+                    custom_id=custom_id,
+                    model=meta.get("model"),
+                )
 
     # Cleanup : supprimer les fichiers de transit si tout s'est bien passé.
     # On garde les fichiers quand il y a des erreurs pour permettre le debug
