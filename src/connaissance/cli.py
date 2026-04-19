@@ -198,6 +198,8 @@ def _cmd_synthesis(args) -> Any:
         return synthesis.aliases_candidates(args.entity)
     if args.verb == "relations-candidates":
         return synthesis.relations_candidates(args.entity)
+    if args.verb == "entity-paths":
+        return synthesis.entity_paths(args.entity)
     if args.verb == "register":
         # Mode moderne : content + kind (+ entity). Le contenu peut arriver
         # via --content, --content-file, ou stdin (si --content-stdin).
@@ -468,6 +470,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_syn_ac.add_argument("--entity", type=str, required=True)
     p_syn_rc = p_syn_verbs.add_parser("relations-candidates")
     p_syn_rc.add_argument("--entity", type=str, required=True)
+    p_syn_ep = p_syn_verbs.add_parser("entity-paths")
+    p_syn_ep.add_argument("--entity", type=str, required=True)
     p_syn_reg = p_syn_verbs.add_parser("register")
     # Mode moderne : --kind + (optionnel) --entity + contenu
     p_syn_reg.add_argument("--kind", dest="kind",

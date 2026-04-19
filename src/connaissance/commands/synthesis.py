@@ -193,6 +193,41 @@ def relations_candidates(entity: str) -> dict:
     return {"entity": entity, "candidates": candidates}
 
 
+def entity_paths(entity: str) -> dict:
+    """Retourner les chemins canoniques des résumés d'une entité.
+
+    Scanne ``Résumés/{Documents,Courriels,Notes}/{entity_type}/{entity_slug}/``
+    et ne retourne que les dossiers qui existent — pas d'invention de
+    chemins par le LLM. Utilisé par la skill ``synthetiser`` pour alimenter
+    la section « Liens » des fiches de façon déterministe.
+
+    Retourne : ``{entity, paths: [{source, rel_path, count}]}`` où
+    ``rel_path`` est toujours relatif à ``~/Connaissance/`` avec la
+    capitalisation exacte (``Résumés/Documents/organismes/…``).
+    """
+    try:
+        entity_type, entity_slug = entity.split("/", 1)
+    except ValueError:
+        return {"entity": entity, "paths": [], "error": "format 'type/slug' attendu"}
+
+    out: list[dict] = []
+    for source_label in ("Documents", "Courriels", "Notes"):
+        entity_dir = RESUMES / source_label / entity_type / entity_slug
+        if not entity_dir.is_dir():
+            continue
+        count = sum(1 for _ in entity_dir.rglob("*.md"))
+        if count == 0:
+            continue
+        rel = f"Résumés/{source_label}/{entity_type}/{entity_slug}/"
+        out.append({
+            "source": source_label.lower(),
+            "rel_path": rel,
+            "count": count,
+        })
+
+    return {"entity": entity, "paths": out}
+
+
 _VALID_KINDS = {"fiche", "chronologie", "moc", "digest", "index"}
 
 

@@ -752,6 +752,18 @@ server.registerTool(
 );
 
 server.registerTool(
+  "connaissance_synthesis_entity_paths",
+  {
+    description: "Return the canonical Résumés/ folder paths for a given entity — only folders that actually exist on disk. Use this to build the 'Liens' section of fiches deterministically, avoiding LLM hallucinations of wrong capitalization or non-existent subfolders.",
+    inputSchema: {
+      entity: z.string().describe("Entity identifier in 'type/slug' format (e.g., 'organismes/revenu-quebec')."),
+    },
+    annotations: { readOnlyHint: true },
+  },
+  async (args) => runAndFormat("synthesis", "entity-paths", ["--entity", args.entity])
+);
+
+server.registerTool(
   "connaissance_synthesis_register",
   {
     description: "Write a fiche / chronologie / MOC / digest / index and register it in tracking.db. The destination path is computed from `kind` + `entity` so Claude never needs to know the knowledge base root (which differs between native and cowork VM). Content is written to the correct location under Synthèse/.",
