@@ -158,7 +158,7 @@ def _find_original_document(resume_rel, ext_candidates=None):
     return None
 
 
-def apply_manifest(manifest_path, dry_run=False):
+def _apply_manifest(manifest_path, dry_run=False) -> dict:
     """Appliquer un manifeste d'organisation par entité.
 
     Accepte deux formats :
@@ -166,23 +166,30 @@ def apply_manifest(manifest_path, dry_run=False):
     - Enveloppe produite par `--generer-manifeste` :
       `{total, auto, alias_match, a_confirmer, entrees: [...]}`
     """
+    empty_result = {"moved": 0, "skipped": 0, "errors": 0}
     raw = json.loads(Path(manifest_path).read_text())
     if isinstance(raw, dict) and "entrees" in raw:
-        entries = raw["entrees"]
+        entries = raw["entrees"] or []
     elif isinstance(raw, list):
         entries = raw
     else:
-        print(f"✗ Format de manifeste non reconnu : attendu une liste "
-              f"ou un dict avec clé 'entrees'.")
-        return
-
-    db = TrackingDB()
+        raise ValueError(
+            "Format de manifeste non reconnu : attendu une liste "
+            "ou un dict avec clé 'entrees'."
+        )
 
     if not entries:
         print("Manifeste vide, rien à faire.", file=sys.stderr)
+        return empty_result
 
-        return
+    db = TrackingDB()
+    try:
+        return _apply_manifest_impl(entries, dry_run, db)
+    finally:
+        db.close()
 
+
+def _apply_manifest_impl(entries: list, dry_run: bool, db: TrackingDB) -> dict:
     print(f"\n{'='*60}", file=sys.stderr)
 
     print(f"  Organisation de {len(entries)} fichiers par entité", file=sys.stderr)
@@ -471,7 +478,10 @@ def enrich(manifest_path: str, qmd_results: list[dict]) -> dict:
     """
     path = Path(manifest_path)
     data = json.loads(path.read_text(encoding="utf-8"))
-    entries = data.get("entrees") if isinstance(data, dict) else data
+    if isinstance(data, dict):
+        entries = data.get("entrees") or []
+    else:
+        entries = data or []
 
     candidates_by_id = {item["id"]: item.get("candidates", []) for item in qmd_results}
 
@@ -496,7 +506,7 @@ def enrich(manifest_path: str, qmd_results: list[dict]) -> dict:
 
 def apply(manifest: str, dry_run: bool = False) -> dict:
     """Appliquer un manifeste (schema OrganizeApply)."""
-    result = apply_manifest(manifest, dry_run=dry_run) or {}
+    result = _apply_manifest(manifest, dry_run=dry_run)
     return {
         "moved": result.get("moved", 0),
         "skipped": result.get("skipped", 0),

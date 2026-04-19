@@ -128,7 +128,7 @@ def _classify_dir(dir_path, entries, file_counts):
 # ── Scan de l'arborescence ───────────────────────────────────────────────────
 
 
-def scan_directories(docs_dir, max_depth=3):
+def scan_directories(docs_dir, max_depth: int | None = 3):
     """Scanner l'arborescence et classifier chaque dossier.
 
     Scanne jusqu'à max_depth niveaux de profondeur. Les sous-dossiers de bundles
@@ -451,7 +451,7 @@ def scan(depth: int | None = 3) -> dict:
     config = load_config()
     if config is None:
         init_config_if_needed()
-        config = load_config()
+        config = load_config() or {}
 
     results = scan_directories(DOCUMENTS_DIR, max_depth=depth)
     report = generate_report(results, config)

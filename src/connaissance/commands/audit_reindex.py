@@ -112,7 +112,7 @@ def _fm_date(fm: dict, key: str) -> str | None:
     # datetime.datetime hérite de datetime.date, .isoformat() marche sur les deux
     iso = getattr(value, "isoformat", None)
     if callable(iso):
-        return iso()
+        return str(iso())
     return str(value)
 
 
@@ -378,8 +378,7 @@ def reindex_document_hashes(db: TrackingDB, dry_run: bool) -> dict:
 
     # Purger les hashes parasites (tous les file_type='source')
     if not dry_run:
-        db._conn.execute("DELETE FROM files WHERE file_type = 'source'")
-        db._conn.commit()
+        db.purge_source_hashes()
 
     try:
         from connaissance.commands.documents import _upsert_transcription_frontmatter as _upsert
@@ -479,19 +478,15 @@ def prune_orphans(db: TrackingDB, dry_run: bool) -> dict:
     préservée — seules les références aux fichiers inexistants sont purgées.
     """
     counts = {"total": 0}
-    rows = db._conn.execute("SELECT path, file_type FROM files").fetchall()
     orphans: list[str] = []
-    for row in rows:
-        path = row[0]
+    for path, file_type in db.list_all_files():
         if not (CONNAISSANCE / path).exists():
             orphans.append(path)
-            ft = row[1] or "autre"
+            ft = file_type or "autre"
             counts[ft] = counts.get(ft, 0) + 1
             counts["total"] += 1
     if not dry_run and orphans:
-        db._conn.executemany("DELETE FROM files WHERE path = ?",
-                             [(p,) for p in orphans])
-        db._conn.commit()
+        db.delete_files(orphans)
     return counts
 
 

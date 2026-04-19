@@ -1,6 +1,6 @@
 // MCP server wrapper for the `connaissance` CLI.
 //
-// Exposes 42 tools (mcp__connaissance__*) that shell-out to the
+// Exposes 46 tools (mcp__connaissance__*) that shell-out to the
 // `connaissance` Python CLI installed via `uv tool install` or `pip`.
 // Each tool maps 1:1 to a CLI subcommand `connaissance <group> <verb>`.
 //
@@ -12,8 +12,9 @@ import { z } from "zod";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { homedir } from "node:os";
-import { join } from "node:path";
-import { existsSync, mkdirSync } from "node:fs";
+import { join, dirname } from "node:path";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { randomBytes } from "node:crypto";
 
 /**
@@ -32,7 +33,7 @@ import { randomBytes } from "node:crypto";
  * (tracking DB, filtres, scoring — partent ensemble avec une
  * sauvegarde).
  */
-function transitDir() {
+const TRANSIT_DIR = (() => {
   const isMac = process.platform === "darwin";
   const base = isMac
     ? join(homedir(), "Library", "Application Support", "connaissance")
@@ -43,17 +44,16 @@ function transitDir() {
   const dir = join(base, "transit");
   mkdirSync(dir, { recursive: true });
   return dir;
-}
+})();
 
 /**
  * Génère un chemin persistant unique pour l'option `output_file` quand
- * l'appelant n'en fournit pas. Dossier : `~/Connaissance/.config/transit/`.
- * Format : `<kind>_<timestamp>_<id>.json`.
+ * l'appelant n'en fournit pas. Format : `<kind>_<timestamp>_<id>.json`.
  */
 function autoOutputFile(kind) {
   const id = randomBytes(4).toString("hex");
   const stamp = new Date().toISOString().replace(/[-:.]/g, "").slice(0, 15);
-  return join(transitDir(), `${kind}_${stamp}_${id}.json`);
+  return join(TRANSIT_DIR, `${kind}_${stamp}_${id}.json`);
 }
 
 const execFileAsync = promisify(execFile);
@@ -70,6 +70,20 @@ function findCli() {
 }
 
 const CLI = findCli();
+if (CLI === "connaissance") {
+  process.stderr.write(
+    "[connaissance-mcp] Warning: CLI binary not found at absolute path; " +
+    "relying on PATH resolution. Set CONNAISSANCE_CLI or install via " +
+    "`uv tool install git+https://github.com/guioum/connaissance` to suppress.\n"
+  );
+}
+
+// Derive the server version from package.json so it tracks releases
+// automatically rather than drifting as a hard-coded string.
+const __pkg = JSON.parse(
+  readFileSync(join(dirname(fileURLToPath(import.meta.url)), "package.json"), "utf-8")
+);
+const SERVER_VERSION = __pkg.version;
 
 async function runCli(group, verb, args = [], opts = {}) {
   const fullArgs = [group, verb, ...args];
@@ -103,7 +117,16 @@ async function runCli(group, verb, args = [], opts = {}) {
     // hors plage ignorés via bisect..."), des rapports humains de calibrage,
     // etc. — ce ne sont pas des erreurs, on les ignore silencieusement.
     if (!stdout || !stdout.trim()) return {};
-    return JSON.parse(stdout);
+    try {
+      return JSON.parse(stdout);
+    } catch (parseErr) {
+      // Un warning Python (ImportWarning, DeprecationWarning...) qui fuit
+      // sur stdout avant le JSON déclenchera ici — surfacer un message
+      // diagnostic plutôt qu'un `Unexpected token` opaque.
+      throw new Error(
+        `CLI stdout is not valid JSON (exit 0). First 200 chars: ${stdout.slice(0, 200)}`
+      );
+    }
   } catch (err) {
     // Wrap ENOENT with a clearer message — the CLI must be installed globally
     if (err.code === "ENOENT") {
@@ -159,7 +182,7 @@ function pushFlag(args, name, value) {
 
 const server = new McpServer({
   name: "connaissance",
-  version: "2.1.0",
+  version: SERVER_VERSION,
 });
 
 // ── Common schema snippets ─────────────────────────────────────
@@ -426,7 +449,7 @@ server.registerTool(
   },
   async (args) => {
     const a = emailsCommonArgs(args);
-    if (args.dry_run !== false) a.push("--dry-run");
+    if (args.dry_run) a.push("--dry-run");
     pushFlag(a, "only-domain", args.only_domain);
     pushFlag(a, "only-entity", args.only_entity);
     return runAndFormat("emails", "cleanup-obsolete", a);
@@ -507,7 +530,11 @@ server.registerTool(
       })).describe("Array of {id, candidates} — id matches entry.id or entry.resume_path."),
     },
   },
-  async (args) => runAndFormat("organize", "enrich", [args.manifest, "--qmd-results", JSON.stringify(args.qmd_results)])
+  async (args) => runAndFormat(
+    "organize", "enrich",
+    [args.manifest, "--qmd-results-stdin"],
+    { stdin: JSON.stringify(args.qmd_results) },
+  )
 );
 
 server.registerTool(
@@ -616,9 +643,9 @@ server.registerTool(
         "Pass a comma-separated string or an array of strings. Omit for 'all'. " +
         "Use the 'path' values from summarize_plan — NOT custom_ids."
       ),
-      mode: z.enum(["batch", "direct", "inline"]).default("direct").describe(
+      mode: z.enum(["batch", "direct"]).default("direct").describe(
         "Request format. Use 'direct' in all cases (including subagent processing). " +
-        "'inline' is accepted as an alias for 'direct'. 'batch' adds cache_control headers."
+        "'batch' adds cache_control headers for Anthropic's Message Batches API."
       ),
       source: z.enum(["document", "courriel", "note", "fil"]).optional().describe("Override source_type for template selection."),
       preference: z.enum(["auto", "quality", "economy"]).optional().describe(
@@ -650,9 +677,7 @@ server.registerTool(
     let pathsVal = args.paths;
     if (Array.isArray(pathsVal)) pathsVal = pathsVal.join(",");
     pushFlag(a, "paths", pathsVal);
-    // Normalize "inline" → "direct" (inline is a generation strategy, not a request format)
-    const mode = args.mode === "inline" ? "direct" : (args.mode ?? "direct");
-    pushFlag(a, "mode", mode);
+    pushFlag(a, "mode", args.mode ?? "direct");
     pushFlag(a, "source", args.source);
     pushFlag(a, "preference", args.preference);
     // Default : auto-generated output_file so prompts never enter the
@@ -718,13 +743,15 @@ server.registerTool(
       return runAndFormat("summarize", "register", a);
     }
     if (!args.custom_id || !args.content) {
-      throw new Error(
+      return errorResult(
         "connaissance_summarize_register: must pass either {custom_id, content} (single mode) or {from_results_file} (batch mode)."
       );
     }
-    const a = [args.custom_id, "--content", args.content];
+    // Pass content via stdin — a summary markdown blob (5-15 KB of PII from
+    // emails/docs) must never appear in process argv (visible in ps, logs).
+    const a = [args.custom_id, "--stdin"];
     pushFlag(a, "source-path", args.source_path);
-    return runAndFormat("summarize", "register", a);
+    return runAndFormat("summarize", "register", a, { stdin: args.content });
   }
 );
 
@@ -826,6 +853,15 @@ server.registerTool(
       if (args.requests_file) a.push("--requests-file", args.requests_file);
       if (args.no_cleanup) a.push("--no-cleanup");
       return runAndFormat("synthesis", "register", a);
+    }
+    // Single mode : kind AND content are required. Without this guard,
+    // kind=undefined becomes the literal string "undefined" on argv (argparse
+    // rejects it with a cryptic message) and content=undefined causes the
+    // CLI to wait forever on --content-stdin (10-minute timeout).
+    if (!args.kind || !args.content) {
+      return errorResult(
+        "connaissance_synthesis_register: single mode requires both {kind, content}. Use {from_results_file} for batch mode."
+      );
     }
     const a = ["--kind", args.kind];
     if (args.entity) a.push("--entity", args.entity);
@@ -945,7 +981,7 @@ server.registerTool(
   },
   async (args) => {
     const a = [];
-    if (args.dry_run !== false) a.push("--dry-run");
+    if (args.dry_run) a.push("--dry-run");
     return runAndFormat("audit", "archive-non-documents", a);
   }
 );
@@ -1020,6 +1056,7 @@ server.registerTool(
       add_domain_marketing: z.string().optional().describe("Comma-separated list."),
       remove_domain_marketing: z.string().optional(),
       add_domain_personnel: z.string().optional(),
+      remove_domain_personnel: z.string().optional().describe("Comma-separated domains to remove from domaines_personnels."),
       add_pattern_actionnable: z.string().optional().describe("Regex pattern."),
       add_pattern_promotionnel: z.string().optional().describe("Regex pattern."),
       set_weight: z.string().optional().describe("key1=val1,key2=val2"),
@@ -1032,10 +1069,12 @@ server.registerTool(
     pushFlag(a, "add-domain-marketing", args.add_domain_marketing);
     pushFlag(a, "remove-domain-marketing", args.remove_domain_marketing);
     pushFlag(a, "add-domain-personnel", args.add_domain_personnel);
+    pushFlag(a, "remove-domain-personnel", args.remove_domain_personnel);
     pushFlag(a, "add-pattern-actionnable", args.add_pattern_actionnable);
     pushFlag(a, "add-pattern-promotionnel", args.add_pattern_promotionnel);
     pushFlag(a, "set-weight", args.set_weight);
     pushFlag(a, "set-seuil", args.set_seuil);
+    // dry_run=true is the CLI's argparse default. Push --apply only to flip it.
     if (args.dry_run === false) a.push("--apply");
     return runAndFormat("config", "scoring-set", a);
   }
@@ -1082,10 +1121,14 @@ server.registerTool(
   },
   async (args) => {
     const a = [args.manifest];
-    if (args.patches) a.push("--patches", JSON.stringify(args.patches));
     pushFlag(a, "filter", args.filter);
     pushFlag(a, "set", args.set);
     pushFlag(a, "delete-filter", args.delete_filter);
+    // Pass patches via stdin to avoid argv size / ps-ef leak on large batches.
+    if (args.patches) {
+      a.push("--patches-stdin");
+      return runAndFormat("manifest", "patch", a, { stdin: JSON.stringify(args.patches) });
+    }
     return runAndFormat("manifest", "patch", a);
   }
 );

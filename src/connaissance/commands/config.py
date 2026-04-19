@@ -32,7 +32,7 @@ def _load_yaml_preserve_comments(path: Path):
     Retourne (parsed, yaml_instance_or_none).
     """
     try:
-        from ruamel.yaml import YAML
+        from ruamel.yaml import YAML  # pyright: ignore[reportMissingImports]
         yaml_inst = YAML()
         yaml_inst.preserve_quotes = True
         yaml_inst.indent(mapping=2, sequence=4, offset=2)
@@ -138,6 +138,21 @@ def scoring_set(dry_run: bool = True,
             except re.error as exc:
                 regex_errors.append(f"{p}: {exc}")
 
+    # Valider AVANT toute mutation — un seul pattern regex invalide doit
+    # rejeter le lot sans laisser de mutations partielles dans `data`.
+    if add_pattern_actionnable:
+        _validate_patterns(add_pattern_actionnable)
+    if add_pattern_promotionnel:
+        _validate_patterns(add_pattern_promotionnel)
+    if regex_errors:
+        return {
+            "diff": [],
+            "written": False,
+            "regex_errors": regex_errors,
+            "post_validation_ok": False,
+            "error": "patterns regex invalides — aucune mutation appliquée",
+        }
+
     if add_domain_marketing:
         _append_to_list("domaines_marketing", [d.lower() for d in add_domain_marketing])
     if remove_domain_marketing:
@@ -147,10 +162,8 @@ def scoring_set(dry_run: bool = True,
     if remove_domain_personnel:
         _remove_from_list("domaines_personnels", [d.lower() for d in remove_domain_personnel])
     if add_pattern_actionnable:
-        _validate_patterns(add_pattern_actionnable)
         _append_to_list("patterns_sujet_actionnable", add_pattern_actionnable)
     if add_pattern_promotionnel:
-        _validate_patterns(add_pattern_promotionnel)
         _append_to_list("patterns_sujet_promotionnel", add_pattern_promotionnel)
 
     if set_weight:
@@ -170,15 +183,6 @@ def scoring_set(dry_run: bool = True,
                 diff.append({"key": f"seuils.{k}", "op": "set", "before": before, "after": v})
                 seuils[k] = v
         data["seuils"] = seuils
-
-    if regex_errors:
-        return {
-            "diff": diff,
-            "written": False,
-            "regex_errors": regex_errors,
-            "post_validation_ok": False,
-            "error": "patterns regex invalides — aucune mutation appliquée",
-        }
 
     if not diff or dry_run:
         return {

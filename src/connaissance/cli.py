@@ -144,7 +144,15 @@ def _cmd_organize(args) -> Any:
     if args.verb == "plan":
         return organize.plan()
     if args.verb == "enrich":
-        qmd_results = json.loads(args.qmd_results) if args.qmd_results else []
+        if getattr(args, "qmd_results_stdin", False):
+            if sys.stdin.isatty():
+                raise SystemExit(
+                    "--qmd-results-stdin requiert un pipe : aucun contenu "
+                    "n'a été envoyé sur stdin."
+                )
+            qmd_results = json.loads(sys.stdin.read() or "[]")
+        else:
+            qmd_results = json.loads(args.qmd_results) if args.qmd_results else []
         return organize.enrich(args.manifest, qmd_results)
     if args.verb == "apply":
         return organize.apply(args.manifest, dry_run=args.dry_run)
@@ -187,7 +195,14 @@ def _cmd_summarize(args) -> Any:
                 requests_file=args.requests_file,
                 cleanup=not args.no_cleanup,
             )
-        content = sys.stdin.read() if args.stdin else (args.content or "")
+        if args.stdin:
+            if sys.stdin.isatty():
+                raise SystemExit(
+                    "--stdin requiert un pipe : aucun contenu n'a été envoyé sur stdin."
+                )
+            content = sys.stdin.read()
+        else:
+            content = args.content or ""
         return summarize.register(args.custom_id, content, source_path=args.source_path)
     raise SystemExit(f"verbe inconnu : summarize {args.verb}")
 
@@ -286,6 +301,8 @@ def _cmd_config(args) -> Any:
             atoms["remove_domain_marketing"] = args.remove_domain_marketing.split(",")
         if args.add_domain_personnel:
             atoms["add_domain_personnel"] = args.add_domain_personnel.split(",")
+        if args.remove_domain_personnel:
+            atoms["remove_domain_personnel"] = args.remove_domain_personnel.split(",")
         if args.add_pattern_actionnable:
             atoms["add_pattern_actionnable"] = [args.add_pattern_actionnable]
         if args.add_pattern_promotionnel:
@@ -305,7 +322,17 @@ def _cmd_config(args) -> Any:
 def _cmd_manifest(args) -> Any:
     from connaissance.commands import manifest
     if args.verb == "patch":
-        patches = json.loads(args.patches) if args.patches else None
+        if getattr(args, "patches_stdin", False):
+            if sys.stdin.isatty():
+                raise SystemExit(
+                    "--patches-stdin requiert un pipe : aucun contenu "
+                    "n'a été envoyé sur stdin."
+                )
+            patches = json.loads(sys.stdin.read() or "[]")
+        elif args.patches:
+            patches = json.loads(args.patches)
+        else:
+            patches = None
         return manifest.patch(
             args.manifest,
             patches=patches,
@@ -338,10 +365,8 @@ def build_parser() -> argparse.ArgumentParser:
         prog="connaissance",
         description="CLI déterministe du plugin connaissance.",
     )
-    parser.add_argument("--json", action="store_true", default=True,
-                        help="Sortie JSON (défaut)")
     parser.add_argument("--human", action="store_true",
-                        help="Sortie humaine lisible (debug)")
+                        help="Sortie humaine lisible (debug). Défaut : JSON.")
 
     sub = parser.add_subparsers(dest="group", required=True)
 
@@ -426,7 +451,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_org_verbs.add_parser("plan")
     p_org_enr = p_org_verbs.add_parser("enrich")
     p_org_enr.add_argument("manifest")
-    p_org_enr.add_argument("--qmd-results", type=str, default=None)
+    p_org_enr.add_argument("--qmd-results", type=str, default=None,
+                           help="JSON array inline. Volumineux : préférer "
+                                "--qmd-results-stdin pour éviter le ps -ef leak.")
+    p_org_enr.add_argument("--qmd-results-stdin", dest="qmd_results_stdin",
+                           action="store_true",
+                           help="Lire le JSON des résultats qmd depuis stdin.")
     p_org_apply = p_org_verbs.add_parser("apply")
     p_org_apply.add_argument("manifest")
     p_org_apply.add_argument("--dry-run", action="store_true")
@@ -592,6 +622,8 @@ def build_parser() -> argparse.ArgumentParser:
                            dest="remove_domain_marketing")
     p_cfg_set.add_argument("--add-domain-personnel", type=str, default=None,
                            dest="add_domain_personnel")
+    p_cfg_set.add_argument("--remove-domain-personnel", type=str, default=None,
+                           dest="remove_domain_personnel")
     p_cfg_set.add_argument("--add-pattern-actionnable", type=str, default=None,
                            dest="add_pattern_actionnable")
     p_cfg_set.add_argument("--add-pattern-promotionnel", type=str, default=None,
@@ -611,7 +643,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_mf_patch = p_mf_verbs.add_parser("patch")
     p_mf_patch.add_argument("manifest")
     p_mf_patch.add_argument("--patches", type=str, default=None,
-                            help="JSON array de patches ciblés")
+                            help="JSON array de patches ciblés. Pour les "
+                                 "lots volumineux, préférer --patches-stdin.")
+    p_mf_patch.add_argument("--patches-stdin", dest="patches_stdin",
+                            action="store_true",
+                            help="Lire le JSON array de patches depuis stdin.")
     p_mf_patch.add_argument("--filter", type=str, default=None,
                             help="k1=v1,k2=v2 pour patch en masse")
     p_mf_patch.add_argument("--set", type=str, default=None,

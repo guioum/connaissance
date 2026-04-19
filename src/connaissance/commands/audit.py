@@ -190,26 +190,24 @@ def verifier_doublons() -> list[dict]:
     (c'est le couplage normal).
     """
     problemes = []
-    db = TrackingDB()
+    with TrackingDB() as db:
+        # Scanner les message-ids dupliqués PAR file_type
+        rows = db._conn.execute(
+            """SELECT message_id, file_type, GROUP_CONCAT(path, '|') as paths, COUNT(*) as n
+               FROM files
+               WHERE message_id IS NOT NULL AND message_id != '' AND message_id != '<unknown>'
+               GROUP BY message_id, file_type
+               HAVING n > 1"""
+        ).fetchall()
 
-    # Scanner les message-ids dupliqués PAR file_type
-    rows = db._conn.execute(
-        """SELECT message_id, file_type, GROUP_CONCAT(path, '|') as paths, COUNT(*) as n
-           FROM files
-           WHERE message_id IS NOT NULL AND message_id != '' AND message_id != '<unknown>'
-           GROUP BY message_id, file_type
-           HAVING n > 1"""
-    ).fetchall()
+        for row in rows:
+            problemes.append({
+                "message_id": row["message_id"],
+                "file_type": row["file_type"],
+                "fichiers": row["paths"].split("|"),
+                "count": row["n"],
+            })
 
-    for row in rows:
-        problemes.append({
-            "message_id": row["message_id"],
-            "file_type": row["file_type"],
-            "fichiers": row["paths"].split("|"),
-            "count": row["n"],
-        })
-
-    db.close()
     return problemes
 
 

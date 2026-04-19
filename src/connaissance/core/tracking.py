@@ -201,13 +201,16 @@ class TrackingDB:
 
         Cherche dans source_path, dest_path et les details (message_id, hash).
         """
+        # Échapper les wildcards SQL (% et _) pour éviter qu'un identifiant
+        # contenant l'un d'eux ne produise des faux positifs dans LIKE.
+        escaped = identifier.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
         row = self._conn.execute(
-            """SELECT 1 FROM operations
-               WHERE operation = ? AND status = 'success'
-               AND (source_path = ? OR dest_path = ?
-                    OR details LIKE ?)
-               LIMIT 1""",
-            (operation, identifier, identifier, f'%{identifier}%')).fetchone()
+            r"""SELECT 1 FROM operations
+                WHERE operation = ? AND status = 'success'
+                AND (source_path = ? OR dest_path = ?
+                     OR details LIKE ? ESCAPE '\')
+                LIMIT 1""",
+            (operation, identifier, identifier, f'%{escaped}%')).fetchone()
         return row is not None
 
     def get_operations(self, operation=None, source_type=None, limit=100):
@@ -310,6 +313,26 @@ class TrackingDB:
             (str(path), hash_value, size))
         self._conn.commit()
 
+    def purge_source_hashes(self) -> None:
+        """Supprimer toutes les entrées file_type='source' (hashes de documents)."""
+        self._conn.execute("DELETE FROM files WHERE file_type = 'source'")
+        self._conn.commit()
+
+    def list_all_files(self) -> list[tuple[str, str | None]]:
+        """Retourner la liste `(path, file_type)` de toutes les entrées `files`."""
+        rows = self._conn.execute("SELECT path, file_type FROM files").fetchall()
+        return [(r[0], r[1]) for r in rows]
+
+    def delete_files(self, paths: list[str]) -> None:
+        """Supprimer les entrées `files` pour les chemins donnés (bulk)."""
+        if not paths:
+            return
+        self._conn.executemany(
+            "DELETE FROM files WHERE path = ?",
+            [(p,) for p in paths],
+        )
+        self._conn.commit()
+
     def scan_and_register_hashes(self, directory, extensions=None, min_size=1024):
         """Scanner un dossier, hasher chaque fichier, enregistrer les nouveaux.
 
@@ -340,7 +363,14 @@ class TrackingDB:
                 continue
 
             total += 1
-            h = _hashlib.sha256(f.read_bytes()).hexdigest()
+            hasher = _hashlib.sha256()
+            try:
+                with open(f, "rb") as fh:
+                    for chunk in iter(lambda: fh.read(8192), b""):
+                        hasher.update(chunk)
+            except OSError:
+                continue
+            h = hasher.hexdigest()
 
             if not self.has_hash(h):
                 self.register_hash(h, str(f), size)

@@ -760,15 +760,32 @@ def register(content: str | None = None,
         db = TrackingDB()
 
     # Mode hérité : pas de content → simple enregistrement DB (sans écriture).
+    # Inférer `file_type` depuis le chemin pour éviter de tout catégoriser en
+    # `"resume"` (ce qui fausse `stale_synthesis` / `missing_resumes` quand
+    # on enregistre une fiche ou une chronologie par cette voie).
     if content is None and rel_path:
-        db.register_file(rel_path, "resume",
+        rel_lower = rel_path.lower()
+        if "synthèse/" in rel_lower or "synthese/" in rel_lower:
+            if rel_lower.endswith("/fiche.md"):
+                file_type = "fiche"
+            elif rel_lower.endswith("/chronologie.md"):
+                file_type = "chronologie"
+            elif "/_index.md" in rel_lower or rel_lower.endswith("_moc.md"):
+                file_type = "moc"
+            elif "/digests/" in rel_lower:
+                file_type = "digest"
+            else:
+                file_type = "synthese"
+        else:
+            file_type = "resume"
+        db.register_file(rel_path, file_type,
                          source_type=source_type,
                          source_path=source_path)
-        db.log("connaissance", "resume",
+        db.log("connaissance", file_type,
                source_type=source_type,
                source_path=source_path,
                dest_path=rel_path)
-        return {"registered": 1, "file_type": "resume", "path": rel_path}
+        return {"registered": 1, "file_type": file_type, "path": rel_path}
 
     # Mode moderne : écriture + enregistrement.
     if content is None:
