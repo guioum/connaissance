@@ -555,17 +555,25 @@ def scan(since=None, until=None, output_file: str | None = None, db=None) -> dic
         "skipped": skipped_list,
     }
     from connaissance.core.output_file import write_or_inline
-    import re as _re
 
     def _summary(p: dict) -> dict:
         items = p["to_transcribe"]
-        # Répartition par année : extraire la première année plausible (1990-2099)
-        # depuis le chemin de chaque item. Évite à l'appelant de devoir ouvrir
-        # le fichier juste pour décider d'un filtre --since/--until.
+        # Répartition par année : on réutilise `_source_dates()` — exactement
+        # la même logique que le filtre `--since`/`--until` côté
+        # scan_documents (via filtres._check_date_file → birthtime/mtime du
+        # filesystem, fallback date dans le nom de fichier). C'est aussi la
+        # valeur qui se retrouve dans `created:` du frontmatter de
+        # transcription. Garantit la cohérence : « by_year dit 9 en 2026 »
+        # → `--since 2026-01-01 --until 2027-01-01` ramène exactement 9
+        # fichiers.
         year_counts: dict[str, int] = {}
         for it in items:
-            m = _re.search(r"\b(19[9]\d|20\d{2})\b", it.get("rel", ""))
-            key = m.group(1) if m else "inconnu"
+            source = it.get("source")
+            if not source:
+                year_counts["inconnu"] = year_counts.get("inconnu", 0) + 1
+                continue
+            created, _ = _source_dates(Path(source))
+            key = created[:4] if created and len(created) >= 4 and created[:4].isdigit() else "inconnu"
             year_counts[key] = year_counts.get(key, 0) + 1
         by_year = dict(sorted(year_counts.items()))
         # Échantillon de chemins (5 premiers) pour inspection rapide sans
