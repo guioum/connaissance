@@ -71,14 +71,33 @@ function findCli() {
 
 const CLI = findCli();
 
-async function runCli(group, verb, args = []) {
+async function runCli(group, verb, args = [], opts = {}) {
   const fullArgs = [group, verb, ...args];
+  const stdinPayload = opts.stdin;
   try {
-    const { stdout } = await execFileAsync(CLI, fullArgs, {
+    const childOpts = {
       env: { ...process.env },
       maxBuffer: 100 * 1024 * 1024, // 100 MB for large payloads (prompts, large extracts)
       timeout: 600_000, // 10 minutes (emails extract can be long)
-    });
+    };
+    let stdout;
+    if (typeof stdinPayload === "string") {
+      // execFileAsync does not expose stdin, so use spawn-like form via
+      // execFile's callback API wrapped manually.
+      stdout = await new Promise((resolve, reject) => {
+        const child = execFile(CLI, fullArgs, childOpts, (err, out, errOut) => {
+          if (err) {
+            err.stderr = errOut;
+            reject(err);
+          } else {
+            resolve(out);
+          }
+        });
+        child.stdin.end(stdinPayload);
+      });
+    } else {
+      ({ stdout } = await execFileAsync(CLI, fullArgs, childOpts));
+    }
     // Si on arrive ici, le CLI a exit avec code 0 — stdout contient le JSON
     // attendu. stderr peut contenir des logs de progression ("N messages
     // hors plage ignorés via bisect..."), des rapports humains de calibrage,
@@ -167,9 +186,9 @@ function emailsCommonArgs(args) {
 
 // Generic tool wrapper : runs the CLI command and returns the JSON result
 // as a text tool result. Errors are caught and returned as errorResult.
-async function runAndFormat(group, verb, args) {
+async function runAndFormat(group, verb, args, opts) {
   try {
-    const data = await runCli(group, verb, args);
+    const data = await runCli(group, verb, args, opts);
     return asToolResult(data);
   } catch (err) {
     return errorResult(`${group} ${verb} failed: ${safeError(err)}`);
@@ -735,17 +754,34 @@ server.registerTool(
 server.registerTool(
   "connaissance_synthesis_register",
   {
-    description: "Register a fiche / chronologie / MOC written by Claude in tracking.db.",
+    description: "Write a fiche / chronologie / MOC / digest / index and register it in tracking.db. The destination path is computed from `kind` + `entity` so Claude never needs to know the knowledge base root (which differs between native and cowork VM). Content is written to the correct location under Synthèse/.",
     inputSchema: {
-      rel_path: z.string().describe("Path relative to ~/Connaissance/ (e.g., 'Synthèse/organismes/arc/fiche.md')."),
-      source_type: z.enum(["document", "courriel", "note"]).describe("Source type category."),
-      source_path: z.string().describe("Path of the resume or transcription that triggered this synthesis."),
+      content: z.string().describe("Markdown content to write. Must include YAML frontmatter matching the template for the given kind."),
+      kind: z.enum(["fiche", "chronologie", "moc", "digest", "index"]).describe(
+        "Type of synthesis output. Determines the destination: "
+        + "fiche/chronologie → Synthèse/{entity_type}/{entity_slug}/{kind}.md ; "
+        + "moc → Synthèse/sujets/{entity}.md ; "
+        + "digest → Synthèse/rapports/digests/{entity or today}.md ; "
+        + "index → Synthèse/index.md"
+      ),
+      entity: z.string().optional().describe(
+        "Required for fiche/chronologie (format 'type/slug', e.g. 'personnes/jean-dupont'). "
+        + "Required for moc (category slug, e.g. 'banque'). "
+        + "Optional for digest (date YYYY-MM-DD, default today). Ignored for index."
+      ),
+      source_type: z.enum(["document", "courriel", "note", "synthese"]).optional().describe("Optional: origin category of the primary source that triggered this update (for tracking only)."),
+      source_path: z.string().optional().describe("Optional: path of a resume that triggered this synthesis (for tracking only)."),
     },
   },
-  async (args) => runAndFormat(
-    "synthesis", "register",
-    [args.rel_path, "--source-type", args.source_type, "--source-path", args.source_path]
-  )
+  async (args) => {
+    const a = ["--kind", args.kind];
+    if (args.entity) a.push("--entity", args.entity);
+    if (args.source_type) a.push("--source-type", args.source_type);
+    if (args.source_path) a.push("--source-path", args.source_path);
+    // Pass content via stdin to avoid argv size limits and shell escaping.
+    a.push("--content-stdin");
+    return runAndFormat("synthesis", "register", a, { stdin: args.content });
+  }
 );
 
 // ── audit ──────────────────────────────────────────────────────

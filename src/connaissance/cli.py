@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from pathlib import Path
 from typing import Any, Callable
 
 
@@ -198,7 +199,23 @@ def _cmd_synthesis(args) -> Any:
     if args.verb == "relations-candidates":
         return synthesis.relations_candidates(args.entity)
     if args.verb == "register":
-        return synthesis.register(args.rel_path, args.source_type, args.source_path)
+        # Mode moderne : content + kind (+ entity). Le contenu peut arriver
+        # via --content, --content-file, ou stdin (si --content-stdin).
+        content = None
+        if getattr(args, "content_stdin", False):
+            content = sys.stdin.read()
+        elif getattr(args, "content_file", None):
+            content = Path(args.content_file).read_text(encoding="utf-8")
+        elif getattr(args, "content", None):
+            content = args.content
+        return synthesis.register(
+            content=content,
+            kind=getattr(args, "kind", None),
+            entity=getattr(args, "entity", None),
+            rel_path=getattr(args, "rel_path", None),
+            source_type=getattr(args, "source_type", None),
+            source_path=getattr(args, "source_path", None),
+        )
     raise SystemExit(f"verbe inconnu : synthesis {args.verb}")
 
 
@@ -452,9 +469,27 @@ def build_parser() -> argparse.ArgumentParser:
     p_syn_rc = p_syn_verbs.add_parser("relations-candidates")
     p_syn_rc.add_argument("--entity", type=str, required=True)
     p_syn_reg = p_syn_verbs.add_parser("register")
-    p_syn_reg.add_argument("rel_path")
-    p_syn_reg.add_argument("--source-type", dest="source_type", required=True)
-    p_syn_reg.add_argument("--source-path", dest="source_path", required=True)
+    # Mode moderne : --kind + (optionnel) --entity + contenu
+    p_syn_reg.add_argument("--kind", dest="kind",
+                           choices=["fiche", "chronologie", "moc", "digest", "index"],
+                           default=None,
+                           help="Type de synthèse — détermine le chemin de destination.")
+    p_syn_reg.add_argument("--entity", dest="entity", default=None,
+                           help="fiche/chronologie : 'type/slug' ; moc : slug "
+                                "de catégorie ; digest : date YYYY-MM-DD (défaut : "
+                                "aujourd'hui) ; index : ignoré.")
+    p_syn_reg.add_argument("--content", dest="content", default=None,
+                           help="Markdown à écrire (alternatives : --content-file, --content-stdin).")
+    p_syn_reg.add_argument("--content-file", dest="content_file", default=None,
+                           help="Fichier dont le contenu sera écrit (évite les soucis d'échappement shell).")
+    p_syn_reg.add_argument("--content-stdin", dest="content_stdin", action="store_true",
+                           help="Lire le contenu depuis stdin.")
+    # Mode hérité : --rel-path + --source-type + --source-path (DB uniquement)
+    p_syn_reg.add_argument("--rel-path", dest="rel_path", default=None,
+                           help="[mode hérité] Chemin relatif à ~/Connaissance/ — "
+                                "enregistre seulement dans la DB, n'écrit pas de fichier.")
+    p_syn_reg.add_argument("--source-type", dest="source_type", default=None)
+    p_syn_reg.add_argument("--source-path", dest="source_path", default=None)
 
     # audit
     p_aud = sub.add_parser("audit")

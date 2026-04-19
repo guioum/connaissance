@@ -193,16 +193,111 @@ def relations_candidates(entity: str) -> dict:
     return {"entity": entity, "candidates": candidates}
 
 
-def register(rel_path: str, source_type: str, source_path: str,
+_VALID_KINDS = {"fiche", "chronologie", "moc", "digest", "index"}
+
+
+def _synthesis_dest_path(kind: str, entity: str | None) -> Path:
+    """Calculer le chemin relatif de destination dans ``Synthèse/``.
+
+    Conventions :
+      - fiche/chronologie → ``Synthèse/{entity_type}/{entity_slug}/{kind}.md``
+      - moc              → ``Synthèse/sujets/{entity}.md``
+      - digest           → ``Synthèse/rapports/digests/{YYYY-MM-DD}.md``
+        (``entity`` sert de date ; défaut : aujourd'hui)
+      - index            → ``Synthèse/index.md``
+    """
+    if kind in ("fiche", "chronologie"):
+        if not entity or "/" not in entity:
+            raise ValueError(
+                f"kind={kind} requiert --entity au format 'type/slug' "
+                "(ex: 'personnes/jean-dupont')"
+            )
+        etype, eslug = entity.split("/", 1)
+        return Path("Synthèse") / etype / eslug / f"{kind}.md"
+
+    if kind == "moc":
+        if not entity:
+            raise ValueError("kind=moc requiert --entity (slug de catégorie)")
+        return Path("Synthèse") / "sujets" / f"{entity}.md"
+
+    if kind == "digest":
+        from datetime import date
+        d = entity or date.today().isoformat()
+        return Path("Synthèse") / "rapports" / "digests" / f"{d}.md"
+
+    if kind == "index":
+        return Path("Synthèse") / "index.md"
+
+    raise ValueError(f"kind inconnu : {kind} (attendu : {sorted(_VALID_KINDS)})")
+
+
+def register(content: str | None = None,
+             kind: str | None = None,
+             entity: str | None = None,
+             rel_path: str | None = None,
+             source_type: str | None = None,
+             source_path: str | None = None,
              db: TrackingDB | None = None) -> dict:
-    """Enregistrer un résumé dans la DB."""
+    """Écrire une fiche/chronologie/MOC/digest et l'enregistrer dans la DB.
+
+    Deux modes :
+
+    1. **Mode moderne** (recommandé) : passer ``content`` + ``kind`` (+ ``entity``).
+       Le chemin de destination est calculé depuis ``kind`` / ``entity`` et
+       le fichier est écrit directement sous ``CONNAISSANCE_ROOT / Synthèse/…``.
+       Claude n'a jamais à connaître le chemin absolu de la base (important
+       pour cowork où le montage VirtioFS diffère entre VM et host).
+
+    2. **Mode hérité** (compat) : passer ``rel_path`` + ``source_type`` +
+       ``source_path`` — enregistre uniquement une ligne dans la DB. Conservé
+       pour ne pas casser les appels existants ; ne crée aucun fichier.
+    """
     if db is None:
         db = TrackingDB()
-    db.register_file(rel_path, "resume",
+
+    # Mode hérité : pas de content → simple enregistrement DB (sans écriture).
+    if content is None and rel_path:
+        db.register_file(rel_path, "resume",
+                         source_type=source_type,
+                         source_path=source_path)
+        db.log("connaissance", "resume",
+               source_type=source_type,
+               source_path=source_path,
+               dest_path=rel_path)
+        return {"registered": 1, "file_type": "resume", "path": rel_path}
+
+    # Mode moderne : écriture + enregistrement.
+    if content is None:
+        return {
+            "error": "content requis (mode moderne) ou rel_path requis (mode hérité)",
+        }
+    if not kind:
+        return {"error": "kind requis quand content est fourni"}
+    if kind not in _VALID_KINDS:
+        return {"error": f"kind invalide : {kind} (attendu : {sorted(_VALID_KINDS)})"}
+
+    try:
+        dest_rel = _synthesis_dest_path(kind, entity)
+    except ValueError as e:
+        return {"error": str(e)}
+
+    abs_path = CONNAISSANCE_ROOT / dest_rel
+    abs_path.parent.mkdir(parents=True, exist_ok=True)
+    abs_path.write_text(content, encoding="utf-8")
+
+    db.register_file(str(dest_rel), kind,
                      source_type=source_type,
                      source_path=source_path)
-    db.log("connaissance", "resume",
-           source_type=source_type,
+    db.log("connaissance", "synthese",
+           source_type=source_type or kind,
            source_path=source_path,
-           dest_path=rel_path)
-    return {"registered": 1, "file_type": "resume", "path": rel_path}
+           dest_path=str(dest_rel))
+
+    return {
+        "registered": 1,
+        "kind": kind,
+        "entity": entity,
+        "path": str(dest_rel),
+        "abs_path": str(abs_path),
+        "bytes": len(content.encode("utf-8")),
+    }
