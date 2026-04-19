@@ -379,7 +379,14 @@ class ManifestPatchItem(TypedDict, total=False):
     delete: bool
 
 
-class ManifestPatchResult(TypedDict):
+class ManifestPatchNotFound(TypedDict, total=False):
+    target: str
+    patch: dict
+    reason: str
+
+
+class ManifestPatchResult(TypedDict, total=False):
     manifest_path: str
     patches: list[ManifestPatchItem]
     updated: int
+    not_found: list[ManifestPatchNotFound]

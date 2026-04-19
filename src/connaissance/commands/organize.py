@@ -222,6 +222,20 @@ def _apply_manifest_impl(entries: list, dry_run: bool, db: TrackingDB) -> dict:
         new_name = entry["new_name"]  # sans extension, ex: "2025-09-01 avis-cotisation"
         confidence = entry.get("confidence", "high")
 
+        # Guard : routage incomplet → erreur, pas de crash. Un plan sain ne
+        # produit plus ce cas (cf. `construire_manifeste` qui exige entity_slug
+        # non vide pour status=auto), mais un manifeste patché à la main
+        # peut toujours arriver ici.
+        if not entity_type or not entity_slug or not new_name:
+            print(
+                f"  ✗ Entrée sans routage complet "
+                f"(entity_type={entity_type!r}, entity_slug={entity_slug!r}, "
+                f"new_name={new_name!r}) : {resume_path}",
+                file=sys.stderr,
+            )
+            errors += 1
+            continue
+
         # Calculer le chemin relatif du résumé par rapport à Résumés/{Source}/
         source_label = source.capitalize()
         try:
@@ -392,8 +406,14 @@ def generer_manifeste():
             else:
                 new_name = md_file.stem
 
-            # Déterminer le statut
-            if confidence == "high" and entity_type != "inconnus":
+            # Déterminer le statut. "auto" exige que TOUS les champs de
+            # routage soient présents : sinon `apply` planterait au
+            # `RESUMES / entity_type / entity_slug / ...` (Path ne concatène
+            # pas None/"").
+            if (confidence == "high"
+                    and entity_type
+                    and entity_type != "inconnus"
+                    and entity_slug):
                 status = "auto"
             else:
                 # Chercher un alias
