@@ -64,6 +64,7 @@ CREATE TABLE IF NOT EXISTS files (
     message_id TEXT,
     hash TEXT,
     mtime REAL,
+    size INTEGER,
     updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%S', 'now', 'localtime'))
 );
 
@@ -72,6 +73,8 @@ CREATE INDEX IF NOT EXISTS idx_files_file_type ON files(file_type);
 CREATE INDEX IF NOT EXISTS idx_files_entity ON files(entity_type, entity_slug);
 CREATE INDEX IF NOT EXISTS idx_files_message_id ON files(message_id);
 CREATE INDEX IF NOT EXISTS idx_files_hash ON files(hash);
+-- idx_files_size créé dans _migrate() après ALTER TABLE ADD COLUMN size,
+-- pour rester compatible avec les DB v2.13.0 et antérieures.
 
 CREATE TABLE IF NOT EXISTS llm_usage (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -151,7 +154,22 @@ class TrackingDB:
         self._conn.execute("PRAGMA synchronous=NORMAL")
         self._conn.execute("PRAGMA cache_size=-8000")
         self._conn.executescript(SCHEMA)
+        self._migrate()
         self._conn.commit()
+
+    def _migrate(self):
+        """Migrations légères pour bases existantes.
+
+        ``CREATE TABLE IF NOT EXISTS`` ne modifie pas une table déjà créée
+        avec un schéma plus ancien. On ajoute ici les colonnes manquantes
+        et leurs index associés. Tout est idempotent.
+        """
+        cols = {r[1] for r in self._conn.execute("PRAGMA table_info(files)").fetchall()}
+        if "size" not in cols:
+            self._conn.execute("ALTER TABLE files ADD COLUMN size INTEGER")
+        # Index size créé ici (pas dans SCHEMA) pour rester compatible avec
+        # les DB créées avant l'ajout de la colonne.
+        self._conn.execute("CREATE INDEX IF NOT EXISTS idx_files_size ON files(size)")
 
     def _cleanup_fuse_hidden(self):
         """Supprimer les fichiers .fuse_hidden* orphelins du dossier de la DB.
@@ -231,7 +249,8 @@ class TrackingDB:
 
     def register_file(self, path, file_type, source_type=None, source_path=None,
                       entity_type=None, entity_slug=None, created=None,
-                      modified=None, message_id=None, hash=None, mtime=None):
+                      modified=None, message_id=None, hash=None, mtime=None,
+                      size=None):
         """Enregistrer ou mettre à jour un fichier suivi."""
         # Normalize message_id : strip whitespace au cas où le frontmatter YAML
         # aurait été parsé avec un header multi-ligne (RFC 5322 folded header).
@@ -240,8 +259,8 @@ class TrackingDB:
             message_id = message_id.strip()
         self._conn.execute(
             """INSERT INTO files (path, file_type, source_type, source_path,
-               entity_type, entity_slug, created, modified, message_id, hash, mtime)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+               entity_type, entity_slug, created, modified, message_id, hash, mtime, size)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                ON CONFLICT(path) DO UPDATE SET
                file_type=excluded.file_type,
                source_type=COALESCE(excluded.source_type, source_type),
@@ -253,9 +272,10 @@ class TrackingDB:
                message_id=COALESCE(excluded.message_id, message_id),
                hash=COALESCE(excluded.hash, hash),
                mtime=COALESCE(excluded.mtime, mtime),
+               size=COALESCE(excluded.size, size),
                updated_at=strftime('%Y-%m-%dT%H:%M:%S', 'now', 'localtime')""",
             (str(path), file_type, source_type, str(source_path) if source_path else None,
-             entity_type, entity_slug, created, modified, message_id, hash, mtime))
+             entity_type, entity_slug, created, modified, message_id, hash, mtime, size))
         self._conn.commit()
 
     def get_file(self, path):
@@ -297,21 +317,139 @@ class TrackingDB:
             (hash_value,)).fetchone()
         return dict(row)["path"] if row else None
 
-    def register_hash(self, hash_value, path, size=0):
+    def has_size(self, size: int) -> bool:
+        """Vérifier si une taille de fichier est présente dans l'index.
+
+        Préfiltre JIT : un fichier candidat ne peut être un doublon que si une
+        autre entrée partage sa taille. Permet d'éviter le hash quand la taille
+        est unique.
+        """
+        row = self._conn.execute(
+            "SELECT 1 FROM files WHERE size = ? LIMIT 1", (int(size),)).fetchone()
+        return row is not None
+
+    def files_with_size(self, size: int,
+                        exclude_path: str | None = None) -> list[dict]:
+        """Lister les entrées partageant une taille donnée.
+
+        Retourne des dicts ``{path, size, mtime, hash, file_type}``. Utilisé
+        pour résoudre une collision de taille en hash ciblé.
+        """
+        rows = self._conn.execute(
+            """SELECT path, size, mtime, hash, file_type
+               FROM files WHERE size = ?""", (int(size),)).fetchall()
+        out = []
+        for r in rows:
+            d = dict(r)
+            if exclude_path and d["path"] == exclude_path:
+                continue
+            out.append(d)
+        return out
+
+    def upsert_stat(self, path, size: int, mtime: float,
+                    file_type: str = "source") -> None:
+        """Enregistrer ``(path, size, mtime)`` sans toucher au hash (stat-only).
+
+        Si le couple ``(size, mtime)`` a changé par rapport à la ligne existante,
+        invalide le ``hash`` (NULL) — le fichier a été modifié, l'ancien hash
+        ne s'applique plus.
+        """
+        row = self._conn.execute(
+            "SELECT size, mtime FROM files WHERE path = ?", (str(path),)).fetchone()
+        if row is not None:
+            old = dict(row)
+            changed = (old.get("size") != int(size)
+                       or old.get("mtime") != float(mtime))
+            if changed:
+                self._conn.execute(
+                    """UPDATE files SET size = ?, mtime = ?, hash = NULL,
+                       updated_at = strftime('%Y-%m-%dT%H:%M:%S', 'now', 'localtime')
+                       WHERE path = ?""",
+                    (int(size), float(mtime), str(path)))
+            else:
+                self._conn.execute(
+                    """UPDATE files SET
+                       updated_at = strftime('%Y-%m-%dT%H:%M:%S', 'now', 'localtime')
+                       WHERE path = ?""",
+                    (str(path),))
+        else:
+            self._conn.execute(
+                """INSERT INTO files (path, file_type, size, mtime)
+                   VALUES (?, ?, ?, ?)""",
+                (str(path), file_type, int(size), float(mtime)))
+        self._conn.commit()
+
+    def register_hash(self, hash_value, path, size=0, mtime: float | None = None):
         """Enregistrer un hash SHA256 dans la table files (type 'source').
 
         Utilisé pour la déduplication : les documents indexés par hash
-        ne seront pas re-transcrits ni re-extraits comme PJ.
+        ne seront pas re-transcrits ni re-extraits comme PJ. ``size`` et
+        ``mtime`` (si fournis) alimentent le cache JIT pour éviter de
+        rehasher le fichier aux runs suivants.
         """
         self._conn.execute(
-            """INSERT INTO files (path, file_type, hash, mtime)
-               VALUES (?, 'source', ?, ?)
+            """INSERT INTO files (path, file_type, hash, size, mtime)
+               VALUES (?, 'source', ?, ?, ?)
                ON CONFLICT(path) DO UPDATE SET
                hash=excluded.hash,
-               mtime=excluded.mtime,
+               size=COALESCE(excluded.size, size),
+               mtime=COALESCE(excluded.mtime, mtime),
                updated_at=strftime('%Y-%m-%dT%H:%M:%S', 'now', 'localtime')""",
-            (str(path), hash_value, size))
+            (str(path), hash_value, int(size) if size else None, mtime))
         self._conn.commit()
+
+    def get_or_compute_hash(self, path,
+                            compute_fn=None) -> str | None:
+        """Récupérer le hash d'un fichier depuis le cache, ou le calculer.
+
+        Cœur du pipeline JIT :
+
+        - ``stat()`` le fichier. Si la ligne DB existe avec ``(size, mtime)``
+          identiques et un ``hash`` non NULL, retourner ce hash sans lire le
+          fichier.
+        - Sinon, lire + hasher via ``compute_fn(path) -> str | None``
+          (défaut : SHA256 chunké), persister ``(hash, size, mtime)``.
+
+        Retourne ``None`` si le fichier est inaccessible.
+        """
+        try:
+            st = Path(path).stat()
+        except OSError:
+            return None
+        size = int(st.st_size)
+        mtime = float(st.st_mtime)
+
+        row = self._conn.execute(
+            "SELECT hash, size, mtime FROM files WHERE path = ?",
+            (str(path),)).fetchone()
+        if row is not None:
+            d = dict(row)
+            if (d.get("hash")
+                    and d.get("size") == size
+                    and d.get("mtime") == mtime):
+                return d["hash"]
+
+        if compute_fn is None:
+            import hashlib as _hashlib
+
+            def _default_compute(p):
+                h = _hashlib.sha256()
+                try:
+                    with open(p, "rb") as fh:
+                        for chunk in iter(lambda: fh.read(8192), b""):
+                            h.update(chunk)
+                    return h.hexdigest()
+                except OSError:
+                    return None
+            compute = _default_compute
+        else:
+            compute = compute_fn
+
+        h = compute(path)
+        if h is None:
+            return None
+        self.register_hash(h, str(path), size=size, mtime=mtime)
+        return h
 
     def purge_source_hashes(self) -> None:
         """Supprimer toutes les entrées file_type='source' (hashes de documents)."""
@@ -333,22 +471,25 @@ class TrackingDB:
         )
         self._conn.commit()
 
-    def scan_and_register_hashes(self, directory, extensions=None, min_size=1024):
-        """Scanner un dossier, hasher chaque fichier, enregistrer les nouveaux.
+    def scan_and_register_stats(self, directory, extensions=None, min_size=1024):
+        """Scanner un dossier et enregistrer ``(path, size, mtime)`` sans hasher.
 
-        Returns (added, total) counts.
+        Mode JIT : ne lit jamais le contenu. Les hashes seront calculés à la
+        demande par ``get_or_compute_hash`` quand le pipeline en aura besoin
+        (collision de taille, promotion PJ, vérification source_changed).
+
+        Returns ``(updated, unchanged, total)`` counts.
         """
-        import hashlib as _hashlib
-
         if extensions is None:
             extensions = {".pdf", ".png", ".jpg", ".jpeg", ".heic", ".webp",
                           ".tiff", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx"}
 
         directory = Path(directory)
         if not directory.exists():
-            return 0, 0
+            return 0, 0, 0
 
-        added = 0
+        updated = 0
+        unchanged = 0
         total = 0
         for f in sorted(directory.rglob("*")):
             if not f.is_file():
@@ -356,27 +497,35 @@ class TrackingDB:
             if f.suffix.lower() not in extensions:
                 continue
             try:
-                size = f.stat().st_size
+                st = f.stat()
             except OSError:
                 continue
+            size = st.st_size
             if size < min_size:
                 continue
 
             total += 1
-            hasher = _hashlib.sha256()
-            try:
-                with open(f, "rb") as fh:
-                    for chunk in iter(lambda: fh.read(8192), b""):
-                        hasher.update(chunk)
-            except OSError:
-                continue
-            h = hasher.hexdigest()
+            row = self._conn.execute(
+                "SELECT size, mtime FROM files WHERE path = ?", (str(f),)
+            ).fetchone()
+            if row is not None:
+                d = dict(row)
+                if (d.get("size") == int(size)
+                        and d.get("mtime") == float(st.st_mtime)):
+                    unchanged += 1
+                    continue
+            self.upsert_stat(f, size, st.st_mtime, file_type="source")
+            updated += 1
 
-            if not self.has_hash(h):
-                self.register_hash(h, str(f), size)
-                added += 1
+        return updated, unchanged, total
 
-        return added, total
+    # Alias rétrocompatible : ancien nom, nouvelle sémantique stat-only JIT.
+    # Les hashes ne sont plus pré-calculés ici ; ils se matérialisent à la
+    # demande via ``get_or_compute_hash``.
+    def scan_and_register_hashes(self, directory, extensions=None, min_size=1024):
+        updated, _unchanged, total = self.scan_and_register_stats(
+            directory, extensions=extensions, min_size=min_size)
+        return updated, total
 
     def missing_resumes(self, source_type=None, since=None, until=None):
         """Trouver les transcriptions sans résumé correspondant.

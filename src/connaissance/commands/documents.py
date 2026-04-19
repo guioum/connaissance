@@ -27,7 +27,7 @@ TRANSCRIPTIONS_DIR = BASE_PATH / "Connaissance" / "Transcriptions" / "Documents"
 # mtime) et injectés pour que le pipeline puisse filtrer par date métier
 # sans avoir à inventer de fallback sur le nom de fichier.
 TRANSCRIPTION_FRONTMATTER_FIELDS = (
-    "source", "source_hash", "source_size", "transcribed_at",
+    "source", "source_hash", "source_size", "source_mtime", "transcribed_at",
     "created", "modified",
 )
 
@@ -153,11 +153,14 @@ def _merge_frontmatter(content: str, new_fields: dict) -> str:
 
 def _upsert_transcription_frontmatter(trans_path: Path, source_path: Path,
                                       file_hash: str | None,
-                                      source_size: int | None) -> None:
+                                      source_size: int | None,
+                                      source_mtime: float | None = None) -> None:
     """Injecter ou mettre à jour le frontmatter canonique d'une transcription.
 
     Idempotent : ré-exécutable sans effet secondaire. Les champs non standards
-    d'un frontmatter existant sont préservés.
+    d'un frontmatter existant sont préservés. ``source_mtime`` est le mtime
+    POSIX du fichier source au moment de la transcription — utilisé par
+    ``scan_documents`` comme gate rapide avant rehash.
     """
     if not trans_path.exists():
         return
@@ -168,6 +171,11 @@ def _upsert_transcription_frontmatter(trans_path: Path, source_path: Path,
         source_rel = str(source_path)
 
     created, modified = _source_dates(source_path)
+    if source_mtime is None:
+        try:
+            source_mtime = source_path.stat().st_mtime
+        except OSError:
+            source_mtime = None
 
     # Lire le frontmatter existant pour décider si `transcribed_at` est à
     # (re)mettre à jour : on veut un horodatage stable tant que le hash de
@@ -209,6 +217,7 @@ def _upsert_transcription_frontmatter(trans_path: Path, source_path: Path,
         "source": source_rel,
         "source_hash": new_hash_str,
         "source_size": source_size if source_size is not None else None,
+        "source_mtime": source_mtime if source_mtime is not None else None,
         "transcribed_at": transcribed_at,
         "created": created,
         "modified": modified,
@@ -292,8 +301,48 @@ def backlog_count(since=None, until=None) -> dict:
     }
 
 
+def _read_transcription_frontmatter(trans_path: Path) -> dict | None:
+    """Lire et parser le frontmatter YAML d'une transcription. None sinon."""
+    try:
+        content = trans_path.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    if not content.startswith("---"):
+        return None
+    end = content.find("\n---", 4)
+    if end <= 0:
+        return None
+    try:
+        fm = yaml.safe_load(content[4:end])
+    except yaml.YAMLError:
+        return None
+    return fm if isinstance(fm, dict) else None
+
+
+def _fm_source_hash(fm: dict) -> str | None:
+    """Extraire le hash sans préfixe ``sha256:`` d'un frontmatter."""
+    raw = fm.get("source_hash")
+    if not raw:
+        return None
+    h = str(raw)
+    return h[len("sha256:"):] if h.startswith("sha256:") else h
+
+
 def scan_documents(since=None, until=None, db=None):
-    """Scanner ~/Documents/ et retourner les fichiers à transcrire."""
+    """Scanner ~/Documents/ en mode JIT : zéro hash tant qu'il n'est pas requis.
+
+    Règles :
+
+    1. **Transcription existante** : gate par ``(size, mtime)`` du frontmatter.
+       Si identiques à la source actuelle, aucun hash n'est calculé.
+       Sinon, rehasher pour confirmer — protège contre les ``touch`` sans
+       changement de contenu. Si le hash diffère → ``source_changed``.
+
+    2. **Nouveau fichier** : dedup par préfiltre taille. Si aucune entrée
+       en DB ne partage la taille, aucun hash n'est calculé. En cas de
+       collision de taille, hasher le candidat et matérialiser les hashes
+       manquants des entrées collisionnantes via ``get_or_compute_hash``.
+    """
     if not DOCUMENTS_DIR.exists():
         return [], {}
 
@@ -313,42 +362,72 @@ def scan_documents(since=None, until=None, db=None):
             skipped[reason] = skipped.get(reason, 0) + 1
             continue
 
-        # Transcription existante (miroir)
+        try:
+            st = f.stat()
+        except OSError:
+            skipped["stat_error"] = skipped.get("stat_error", 0) + 1
+            continue
+        size = st.st_size
+        mtime = st.st_mtime
+
         rel = f.relative_to(DOCUMENTS_DIR)
         trans_path = TRANSCRIPTIONS_DIR / rel.with_suffix(".md")
         if trans_path.exists():
-            # Vérifier si le source a changé (PDF remplacé) : comparer le hash
-            # du frontmatter canonique avec le hash actuel du fichier source.
-            file_hash = hash_file(f)
-            if file_hash:
-                stored_hash = None
-                try:
-                    content = trans_path.read_text(encoding="utf-8")
-                    if content.startswith("---"):
-                        end = content.find("\n---", 4)
-                        if end > 0:
-                            fm = yaml.safe_load(content[4:end])
-                            if isinstance(fm, dict) and fm.get("source_hash"):
-                                h = str(fm["source_hash"])
-                                stored_hash = h[len("sha256:"):] if h.startswith("sha256:") else h
-                except (OSError, yaml.YAMLError):
-                    pass
-                if stored_hash and stored_hash != file_hash:
-                    to_process.append({
-                        "source": str(f),
-                        "transcription": str(trans_path),
-                        "rel": str(rel),
-                        "size": f.stat().st_size,
-                        "hash": file_hash,
-                        "reason": "source_changed",
-                    })
-                    continue
+            # Gate JIT : (size, mtime) = (source_size, source_mtime) du
+            # frontmatter → source inchangée, pas de hash à calculer.
+            fm = _read_transcription_frontmatter(trans_path) or {}
+            fm_size = fm.get("source_size")
+            fm_mtime = fm.get("source_mtime")
+            if (isinstance(fm_size, int) and fm_size == size
+                    and fm_mtime is not None
+                    and float(fm_mtime) == mtime):
+                skipped["existant"] = skipped.get("existant", 0) + 1
+                continue
+
+            # (size, mtime) divergent → hash-confirm avant de déclencher
+            # une ré-OCR coûteuse. Couvre le cas `touch` sans changement
+            # réel (mtime a bougé mais contenu identique).
+            file_hash = db.get_or_compute_hash(f)
+            stored_hash = _fm_source_hash(fm)
+            if file_hash and stored_hash and stored_hash == file_hash:
+                # Contenu inchangé (hash identique malgré mtime différent) :
+                # pas de ré-OCR. Le frontmatter sera re-synchronisé au
+                # prochain register via audit_reindex (nouveau source_mtime).
+                skipped["existant"] = skipped.get("existant", 0) + 1
+                continue
+            if file_hash and stored_hash and stored_hash != file_hash:
+                to_process.append({
+                    "source": str(f),
+                    "transcription": str(trans_path),
+                    "rel": str(rel),
+                    "size": size,
+                    "hash": file_hash,
+                    "reason": "source_changed",
+                })
+                continue
+            # Frontmatter absent ou incomplet : traiter comme existant
+            # (backfill du frontmatter par audit_reindex, pas par scan).
             skipped["existant"] = skipped.get("existant", 0) + 1
             continue
 
-        # Déduplication SHA256 via la DB de tracking
-        file_hash = hash_file(f)
-        if file_hash and db.has_hash(file_hash):
+        # Pas de transcription miroir : dedup par préfiltre taille.
+        # Si aucune entrée en DB ne partage cette taille, pas de doublon
+        # possible → on saute le hash.
+        candidates = db.files_with_size(size, exclude_path=str(f))
+        file_hash: str | None = None
+        is_duplicate = False
+        if candidates:
+            file_hash = db.get_or_compute_hash(f)
+            if file_hash:
+                for c in candidates:
+                    c_hash = c.get("hash")
+                    if c_hash is None:
+                        # Matérialiser le hash du candidat au besoin
+                        c_hash = db.get_or_compute_hash(Path(c["path"]))
+                    if c_hash and c_hash == file_hash:
+                        is_duplicate = True
+                        break
+        if is_duplicate:
             skipped["hash_connu"] = skipped.get("hash_connu", 0) + 1
             continue
 
@@ -356,7 +435,7 @@ def scan_documents(since=None, until=None, db=None):
             "source": str(f),
             "transcription": str(trans_path),
             "rel": str(rel),
-            "size": f.stat().st_size,
+            "size": size,
             "hash": file_hash,
         })
 
@@ -368,21 +447,26 @@ def register_document(db, source_path, transcription_path, file_hash=None):
     source_path = Path(source_path)
     transcription_path = Path(transcription_path)
 
-    if not file_hash:
-        file_hash = hash_file(source_path)
-
     try:
-        source_size = source_path.stat().st_size if source_path.exists() else None
+        st = source_path.stat() if source_path.exists() else None
     except OSError:
-        source_size = None
+        st = None
+    source_size = st.st_size if st is not None else None
+    source_mtime = st.st_mtime if st is not None else None
+
+    if not file_hash:
+        # Passe via le cache JIT : si la DB a déjà ce hash pour (path, size,
+        # mtime), on évite une relecture complète du fichier.
+        file_hash = db.get_or_compute_hash(source_path)
 
     # Injecter le frontmatter canonique dans le fichier transcription.
-    # Source de vérité pour source/hash/size ; la DB est un index dérivé.
+    # Source de vérité pour source/hash/size/mtime ; la DB est un index dérivé.
     _upsert_transcription_frontmatter(transcription_path, source_path,
-                                      file_hash, source_size)
+                                      file_hash, source_size, source_mtime)
 
     if file_hash:
-        db.register_hash(file_hash, str(source_path), source_size or 0)
+        db.register_hash(file_hash, str(source_path),
+                         size=source_size or 0, mtime=source_mtime)
 
     try:
         rel = str(transcription_path.relative_to(BASE_PATH / "Connaissance"))
@@ -592,8 +676,9 @@ def register_existing(db):
                 original = candidate
                 break
 
-        file_hash = hash_file(original) if original else None
-        register_document(db, original or trans, trans, file_hash)
+        # register_document récupère/calcule le hash via get_or_compute_hash,
+        # donc on ne précalcule rien ici (évite un hash par transcription).
+        register_document(db, original or trans, trans, file_hash=None)
         count += 1
 
     return count

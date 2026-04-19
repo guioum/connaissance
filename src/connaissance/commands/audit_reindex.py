@@ -43,6 +43,14 @@ SOURCE_TYPE_MAP = {
 }
 
 
+def _fm_source_hash_str(raw) -> str | None:
+    """Normaliser un ``source_hash`` : accepte ``sha256:xxx`` ou ``xxx``."""
+    if not raw:
+        return None
+    h = str(raw)
+    return h[len("sha256:"):] if h.startswith("sha256:") else h
+
+
 def parse_frontmatter(md_text: str) -> dict:
     """Extraire le frontmatter YAML d'un .md. Retourne {} si absent ou cassé."""
     if not md_text.startswith("---"):
@@ -155,19 +163,32 @@ def reindex_transcriptions(db: TrackingDB, dry_run: bool) -> dict:
                                 if not _Path(source_rel).is_absolute()
                                 else _Path(source_rel))
                     from connaissance.commands.documents import (
-                        _upsert_transcription_frontmatter, hash_file,
+                        _upsert_transcription_frontmatter,
                     )
                     try:
-                        size = src_path.stat().st_size
-                        hash_val = hash_file(src_path)
+                        st = src_path.stat()
+                        size = st.st_size
+                        mtime = st.st_mtime
                     except OSError:
-                        # Source introuvable : _upsert utilisera le fallback
-                        # `_date_from_filename` pour `created`.
                         size = None
-                        hash_val = None
+                        mtime = None
+                    # Gate JIT : si le frontmatter connaît déjà
+                    # (source_size, source_mtime) et qu'ils coïncident avec le
+                    # filesystem, aucun hash à recalculer (backfill-only flow).
+                    fm_size = fm.get("source_size")
+                    fm_mtime = fm.get("source_mtime")
+                    if (size is not None and mtime is not None
+                            and isinstance(fm_size, int) and fm_size == size
+                            and fm_mtime is not None
+                            and float(fm_mtime) == mtime
+                            and fm.get("source_hash")):
+                        hash_val = _fm_source_hash_str(fm.get("source_hash"))
+                    else:
+                        hash_val = (db.get_or_compute_hash(src_path)
+                                    if size is not None else None)
                     before = f.read_text(encoding="utf-8", errors="ignore")
                     _upsert_transcription_frontmatter(
-                        f, src_path, hash_val, size,
+                        f, src_path, hash_val, size, mtime,
                     )
                     after = f.read_text(encoding="utf-8", errors="ignore")
                     if before != after:
@@ -300,19 +321,6 @@ OCR_SOURCE_EXTENSIONS = (
 )
 
 
-def _hash_file(path: Path) -> str | None:
-    """Calculer le SHA256 d'un fichier."""
-    import hashlib
-    h = hashlib.sha256()
-    try:
-        with open(path, "rb") as f:
-            for chunk in iter(lambda: f.read(8192), b""):
-                h.update(chunk)
-        return h.hexdigest()
-    except OSError:
-        return None
-
-
 def _find_source_candidates(trans_path: Path) -> list[Path]:
     """Trouver les fichiers sources candidats pour une transcription via glob.
 
@@ -355,14 +363,20 @@ def _parse_transcription_frontmatter(content: str) -> dict | None:
 def reindex_document_hashes(db: TrackingDB, dry_run: bool) -> dict:
     """Repopuler l'index de hash depuis les transcriptions existantes.
 
-    Stratégie :
+    Stratégie JIT :
+
     1. Purger les hashes existants (DELETE FROM files WHERE file_type='source')
        pour éliminer les parasites d'un scan précédent annulé.
     2. Itérer sur Transcriptions/Documents/**/*.md :
-       a. Lire le frontmatter. Si présent avec source+source_hash : utiliser.
-       b. Sinon : fallback glob sur la convention mirror, puis backfiller le
-          frontmatter de la transcription au passage (idempotent).
-    3. Appeler db.register_hash() pour chaque source identifiée.
+       a. Lire le frontmatter. Si ``source`` + ``source_hash`` + ``source_size``
+          + ``source_mtime`` sont présents et cohérents avec le filesystem
+          de la source → réutiliser le hash du frontmatter sans lire le
+          fichier (cas courant : zéro hash recalculé).
+       b. Si incohérent ou absent → ``get_or_compute_hash`` (cache DB puis
+          recalcul si besoin). Backfiller le frontmatter.
+       c. Si aucune source → fallback glob sur la convention miroir.
+    3. ``register_hash()`` enregistre le hash identifié en persistant
+       ``(size, mtime)`` — sert de cache pour les runs suivants.
     """
     counts = {
         "transcriptions_processed": 0,
@@ -400,25 +414,46 @@ def reindex_document_hashes(db: TrackingDB, dry_run: bool) -> dict:
         source_path: Path | None = None
         file_hash: str | None = None
         source_size: int | None = None
+        source_mtime: float | None = None
 
         if fm and fm.get("source") and fm.get("source_hash"):
             # Chemin rapide : tout est dans le frontmatter
             source_rel = str(fm["source"])
             candidate = BASE_PATH / source_rel
-            hash_str = str(fm["source_hash"])
-            # Accepter "sha256:abc..." ou "abc..."
-            if hash_str.startswith("sha256:"):
-                file_hash = hash_str[len("sha256:"):]
-            else:
-                file_hash = hash_str
-            source_size = fm.get("source_size")
-            if candidate.exists():
-                source_path = candidate
-                counts["from_frontmatter"] += 1
-            else:
-                # Frontmatter pointe vers une source qui n'existe plus
+            fm_hash = _fm_source_hash_str(fm.get("source_hash"))
+            fm_size = fm.get("source_size")
+            fm_mtime = fm.get("source_mtime")
+
+            if not candidate.exists():
                 counts["orphans"] += 1
                 continue
+
+            source_path = candidate
+            counts["from_frontmatter"] += 1
+
+            # Gate JIT : (size, mtime) du filesystem == frontmatter → fm_hash
+            # est encore valide, aucune lecture nécessaire.
+            try:
+                st = candidate.stat()
+                source_size = st.st_size
+                source_mtime = st.st_mtime
+            except OSError:
+                counts["orphans"] += 1
+                continue
+
+            if (isinstance(fm_size, int) and fm_size == source_size
+                    and fm_mtime is not None
+                    and float(fm_mtime) == source_mtime
+                    and fm_hash):
+                file_hash = fm_hash
+            else:
+                # Source modifiée depuis la transcription : recalculer le hash
+                # (cache JIT via get_or_compute_hash) et rafraîchir le
+                # frontmatter.
+                file_hash = db.get_or_compute_hash(candidate)
+                if not dry_run and _upsert is not None and file_hash:
+                    _upsert(trans, candidate, file_hash, source_size, source_mtime)
+                    counts["backfilled"] += 1
         else:
             # Fallback glob : convention mirror
             candidates = _find_source_candidates(trans)
@@ -428,38 +463,37 @@ def reindex_document_hashes(db: TrackingDB, dry_run: bool) -> dict:
             # Enregistrer le hash de chaque candidat (cas rare de stems
             # multi-extensions). Premier candidat sert aussi au backfill.
             for source in candidates:
-                h = _hash_file(source)
+                try:
+                    st = source.stat()
+                except OSError:
+                    continue
+                h = db.get_or_compute_hash(source)
                 if not h:
                     continue
+                # register_hash déjà fait par get_or_compute_hash (via le
+                # upsert interne) — mais on garantit file_type='source' avec
+                # le nouveau cache.
                 if not dry_run:
-                    try:
-                        size = source.stat().st_size
-                    except OSError:
-                        size = 0
-                    db.register_hash(h, str(source), size)
+                    db.register_hash(h, str(source),
+                                     size=st.st_size, mtime=st.st_mtime)
                 counts["registered"] += 1
                 if source_path is None:
                     source_path = source
                     file_hash = h
-                    try:
-                        source_size = source.stat().st_size
-                    except OSError:
-                        source_size = None
+                    source_size = st.st_size
+                    source_mtime = st.st_mtime
 
             # Backfiller le frontmatter de la transcription pour accélérer
             # les runs suivants. Idempotent.
             if not dry_run and _upsert is not None and source_path is not None:
-                _upsert(trans, source_path, file_hash, source_size)
+                _upsert(trans, source_path, file_hash, source_size, source_mtime)
                 counts["backfilled"] += 1
             continue
 
         # Chemin rapide : enregistrer le hash du source identifié via frontmatter
         if source_path is not None and file_hash and not dry_run:
-            try:
-                size = source_size if source_size is not None else source_path.stat().st_size
-            except OSError:
-                size = 0
-            db.register_hash(file_hash, str(source_path), size)
+            db.register_hash(file_hash, str(source_path),
+                             size=source_size or 0, mtime=source_mtime)
             counts["registered"] += 1
 
     return counts

@@ -7,8 +7,6 @@ Expose :
 from __future__ import annotations
 import sys
 
-import hashlib
-import json
 import re
 import shutil
 from pathlib import Path
@@ -23,18 +21,6 @@ PROMOTED_DIR = DOCUMENTS_DIR / "promus"
 
 DOCUMENT_EXTENSIONS = {".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".csv"}
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".heic", ".webp", ".tiff", ".gif", ".bmp"}
-
-
-def hash_file(path):
-    """Calculer le SHA256 d'un fichier."""
-    h = hashlib.sha256()
-    try:
-        with open(path, "rb") as f:
-            for chunk in iter(lambda: f.read(8192), b""):
-                h.update(chunk)
-        return h.hexdigest()
-    except OSError:
-        return None
 
 
 # --- Scan des PJ à promouvoir ---
@@ -69,7 +55,12 @@ def scan_promotable():
 
 
 def promote(db, dry_run=False):
-    """Promouvoir les PJ documents vers ~/Documents/promus/."""
+    """Promouvoir les PJ documents vers ~/Documents/promus/.
+
+    Hash paresseux : on ne hashe la PJ que s'il existe déjà une entrée en DB
+    de même taille (collision possible). Sans collision, la PJ est unique —
+    on la copie et on enregistre son hash à la volée.
+    """
     items = scan_promotable()
     if not items:
         print("Aucune PJ document à promouvoir.", file=sys.stderr)
@@ -84,11 +75,14 @@ def promote(db, dry_run=False):
 
     for item in items:
         src = item["path"]
-        file_hash = hash_file(src)
         dest = PROMOTED_DIR / src.name
 
-        # Vérifier si déjà dans la DB (document déjà connu par hash)
-        existing = db.has_hash(file_hash) if file_hash else None
+        # Préfiltre taille : pas de collision possible → pas de hash au scan.
+        existing = None
+        file_hash: str | None = None
+        if db.has_size(item["size"]):
+            file_hash = db.get_or_compute_hash(src)
+            existing = db.has_hash(file_hash) if file_hash else None
         if existing:
             print(f"  ○ {src.name} — déjà connu ({Path(existing).name})", file=sys.stderr)
 
@@ -106,8 +100,18 @@ def promote(db, dry_run=False):
         if not dest.exists():
             shutil.copy2(str(src), str(dest))
 
+        # Hash calculé à l'enregistrement (pour la dest), paresseux :
+        # get_or_compute_hash bénéficie du cache (path, size, mtime) sur la
+        # source si déjà hashée au préfiltre.
+        if file_hash is None:
+            file_hash = db.get_or_compute_hash(dest)
         if file_hash:
-            db.register_hash(file_hash, str(dest), item["size"])
+            try:
+                st = dest.stat()
+                db.register_hash(file_hash, str(dest),
+                                 size=st.st_size, mtime=st.st_mtime)
+            except OSError:
+                db.register_hash(file_hash, str(dest), size=item["size"])
         db.log("connaissance", "promote_attachment",
                source_type=item["source"],
                source_path=str(src),
@@ -127,6 +131,10 @@ def scan_duplicates(db):
 
     Ne scanne PAS tout ~/Documents/ — compare uniquement les fichiers
     dans Attachments/ des transcriptions avec les hashes déjà en DB.
+
+    Hash paresseux : on ne hashe une PJ que si une entrée DB partage sa
+    taille (collision possible). Sans collision, aucun doublon n'est possible,
+    pas de hash calculé.
     """
     duplicates = []
 
@@ -142,11 +150,20 @@ def scan_duplicates(db):
                 if not f.is_file():
                     continue
 
-                file_hash = hash_file(f)
+                try:
+                    size = f.stat().st_size
+                except OSError:
+                    continue
+
+                # Préfiltre taille : pas de ligne DB de même taille → pas
+                # de doublon possible, aucun hash à calculer.
+                if not db.has_size(size):
+                    continue
+
+                file_hash = db.get_or_compute_hash(f)
                 if not file_hash:
                     continue
 
-                # Vérifier si ce hash existe déjà comme document dans la DB
                 existing = db.has_hash(file_hash)
                 if existing and str(f) != existing:
                     duplicates.append({
