@@ -57,6 +57,9 @@ def _cmd_emails(args) -> Any:
     if args.verb == "stats":
         return emails.stats(account=args.account, folder=args.folder,
                             since=since, until=until)
+    if args.verb == "backlog-count":
+        return emails.backlog_count(account=args.account, folder=args.folder,
+                                    since=since, until=until)
     if args.verb == "extract":
         return emails.extract(account=args.account, folder=args.folder,
                               since=since, until=until,
@@ -359,7 +362,7 @@ def build_parser() -> argparse.ArgumentParser:
     # emails
     p_em = sub.add_parser("emails")
     p_em_verbs = p_em.add_subparsers(dest="verb", required=True)
-    for verb in ("stats", "extract", "threads", "calibrate", "senders", "cleanup-obsolete"):
+    for verb in ("stats", "backlog-count", "extract", "threads", "calibrate", "senders", "cleanup-obsolete"):
         vp = p_em_verbs.add_parser(verb)
         vp.add_argument("--account", type=str, default=None)
         vp.add_argument("--folder", type=str, default=None)

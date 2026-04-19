@@ -1065,6 +1065,74 @@ def _collect_mbox_files(account=None, folder=None):
     return sorted(search_root.rglob("*.mbox"))
 
 
+def backlog_count(account=None, folder=None, since=None, until=None) -> dict:
+    """Compte rapide des courriels dans chaque dossier mbox via l'index imap-backup.
+
+    **Ne parse AUCUN message** — utilise seulement l'index `.imap` (JSON)
+    d'imap-backup et `_bisect_imap_index` pour compter les entrées dans la
+    plage `since`/`until`. Pas de scoring, pas de dedup contre `tracking.db`.
+
+    Retourne une **borne supérieure** des courriels extractibles (certains
+    seraient filtrés par scoring ou déjà présents en DB). Conçu pour
+    `pipeline_detect`-style overviews où `extract --dry-run` timeoute sur
+    une base chargée.
+
+    Pour un compte exact avec scoring + dedup, utiliser `emails extract
+    --dry-run` ou `emails stats` (lent).
+    """
+    since, until = _parse_dates(since, until)
+    mbox_files = _collect_mbox_files(account, folder)
+    filtres = Filtres()
+
+    folders_out: list[dict] = []
+    total_in_range = 0
+    unindexed_folders: list[str] = []
+    for mbox_path in mbox_files:
+        if "_extraction" in str(mbox_path):
+            continue
+        if filtres.is_courriel_folder_ignored(mbox_path.stem):
+            continue
+
+        imap_index = _load_imap_index(mbox_path)
+        try:
+            name = str(mbox_path.relative_to(ARCHIVES_ROOT))
+        except ValueError:
+            name = str(mbox_path)
+
+        if imap_index is None:
+            # Mbox sans .imap (ex. import manuel) — impossible à compter vite.
+            unindexed_folders.append(name)
+            continue
+
+        if since or until:
+            start_idx = _bisect_imap_index(imap_index, mbox_path, since, find_first=True) if since else 0
+            end_idx = _bisect_imap_index(imap_index, mbox_path, until, find_first=True) if until else len(imap_index)
+            count = max(0, end_idx - start_idx)
+        else:
+            count = len(imap_index)
+
+        if count == 0:
+            continue
+        folders_out.append({
+            "name": name,
+            "count_in_range": count,
+            "total_in_archive": len(imap_index),
+        })
+        total_in_range += count
+
+    folders_out.sort(key=lambda f: f["count_in_range"], reverse=True)
+    return {
+        "folders": folders_out,
+        "total_in_range": total_in_range,
+        "unindexed_folders": unindexed_folders,
+        "note": (
+            "Borne supérieure du backlog courriel : pas de scoring ni de "
+            "dedup vs tracking.db. Pour un compte exact, lancer "
+            "`emails_extract --dry-run`."
+        ),
+    }
+
+
 def stats(account=None, folder=None, since=None, until=None) -> dict:
     """Compte des courriels par dossier mbox (schema EmailsStats)."""
     since, until = _parse_dates(since, until)

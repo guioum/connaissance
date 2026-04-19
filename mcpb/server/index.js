@@ -1,6 +1,6 @@
 // MCP server wrapper for the `connaissance` CLI.
 //
-// Exposes 45 tools (mcp__connaissance__*) that shell-out to the
+// Exposes 46 tools (mcp__connaissance__*) that shell-out to the
 // `connaissance` Python CLI installed via `uv tool install` or `pip`.
 // Each tool maps 1:1 to a CLI subcommand `connaissance <group> <verb>`.
 //
@@ -354,11 +354,21 @@ server.registerTool(
 server.registerTool(
   "connaissance_emails_stats",
   {
-    description: "Count emails per mbox folder without extracting. Useful to estimate workload.",
+    description: "Count emails per mbox folder without extracting, but STILL PARSES each message (slow on loaded accounts — can exceed MCP 60s timeout). For a fast overview backlog, prefer `connaissance_emails_backlog_count`.",
     inputSchema: emailsCommonSchema,
     annotations: { readOnlyHint: true },
   },
   async (args) => runAndFormat("emails", "stats", emailsCommonArgs(args))
+);
+
+server.registerTool(
+  "connaissance_emails_backlog_count",
+  {
+    description: "FAST email backlog count per mbox folder using only the imap-backup .imap index (no message parsing, no scoring, no dedup vs tracking.db). Returns an upper bound of extractable emails per folder within the date range. Designed as a timeout-safe alternative to emails_stats / emails_extract --dry-run for pipeline overviews. For an exact count with scoring, use emails_extract --dry-run.",
+    inputSchema: emailsCommonSchema,
+    annotations: { readOnlyHint: true },
+  },
+  async (args) => runAndFormat("emails", "backlog-count", emailsCommonArgs(args))
 );
 
 server.registerTool(
