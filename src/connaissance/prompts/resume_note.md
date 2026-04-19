@@ -29,6 +29,21 @@ Format :
 - Tâche ouverte : `- [ ] Description — échéance YYYY-MM-DD | inconnue`
 - Tâche complétée : `- [x] Description — YYYY-MM-DD`
 
+## Règles — date (sert à nommer le fichier)
+
+Le champ `date` représente **la date qui décrit le mieux le contenu de la note**. C'est cette date qui renomme le fichier à l'organisation.
+
+Règles (appliquer dans l'ordre) :
+
+| Priorité | Contexte | Date à prendre |
+|---|---|---|
+| 1 | La note mentionne explicitement une date dans son titre ou son corps (ex: « 2024-03-15 — Réunion Truc ») | Cette date |
+| 2 | La note porte sur un événement précis (rendez-vous, réunion, appel) | **Date de l'événement** |
+| 3 | La note liste des tâches datées dans une période | **Date la plus tôt** de la période |
+| 4 | Rien d'exploitable dans le contenu | `{{created}}` tronqué à `YYYY-MM-DD` |
+
+**Ne jamais prendre** : une date d'échéance isolée au milieu d'une note généraliste (ça va dans la section Actions, pas dans `date:`).
+
 ## Format de sortie
 
 Ta réponse complète est UN fichier markdown. Commence-la directement par `---`

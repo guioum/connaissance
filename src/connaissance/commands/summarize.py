@@ -392,6 +392,58 @@ def register(custom_id: str, content: str,
             "error": "pas de champ source dans le frontmatter",
         }
 
+    # Propagation déterministe des dates : created/modified doivent venir
+    # de la transcription (qui les tient elle-même de la source), pas du
+    # LLM qui peut oublier de les recopier ou les halluciner. On lit la
+    # transcription, on écrase les valeurs du résumé avec celles de la
+    # transcription, et on reconstruit le frontmatter YAML.
+    trans_abs = CONNAISSANCE_ROOT / source_rel
+    trans_fm: dict = {}
+    if trans_abs.exists():
+        try:
+            trans_content = trans_abs.read_text(encoding="utf-8")
+            if trans_content.startswith("---"):
+                t_end = trans_content.find("\n---", 4)
+                if t_end > 0:
+                    try:
+                        trans_fm = yaml.safe_load(trans_content[4:t_end]) or {}
+                        if not isinstance(trans_fm, dict):
+                            trans_fm = {}
+                    except yaml.YAMLError:
+                        trans_fm = {}
+        except OSError:
+            trans_fm = {}
+
+    propagated_fields: dict = {}
+    for key in ("created", "modified"):
+        val = trans_fm.get(key)
+        if val is None:
+            continue
+        # YAML auto-parse les "2024-03-15T12:00:00" en datetime : on reformate
+        # en chaîne ISO pour garder le format uniforme dans tout le pipeline.
+        if hasattr(val, "strftime"):
+            val = val.strftime("%Y-%m-%dT%H:%M:%S")
+        else:
+            val = str(val)
+        propagated_fields[key] = val
+
+    if propagated_fields and fm:
+        # Fusionner : garder tout le frontmatter existant sauf les champs
+        # propagés qu'on écrase. Forcer les valeurs string pour éviter
+        # que YAML ré-émette "2024-03-15 12:00:00" (sans T) à la place de
+        # l'ISO canonique.
+        fm_merged = dict(fm)
+        for k, v in list(fm_merged.items()):
+            if hasattr(v, "strftime"):
+                fm_merged[k] = v.strftime("%Y-%m-%dT%H:%M:%S") if hasattr(v, "hour") else v.isoformat()
+        fm_merged.update(propagated_fields)
+        # Reconstruire le content avec le nouveau frontmatter, en préservant
+        # le body tel quel.
+        new_fm_text = yaml.safe_dump(fm_merged, sort_keys=False,
+                                     allow_unicode=True, default_flow_style=False,
+                                     default_style=None).strip()
+        content = f"---\n{new_fm_text}\n---\n{body}"
+
     # Construire le chemin miroir du résumé
     src_path = Path(str(source_rel))
     try:
@@ -404,6 +456,48 @@ def register(custom_id: str, content: str,
     resume_abs = CONNAISSANCE_ROOT / resume_rel
     resume_abs.parent.mkdir(parents=True, exist_ok=True)
     resume_abs.write_text(content, encoding="utf-8")
+
+    # Back-propagation : écrire le `date` (sémantique, déduit par le LLM)
+    # dans le frontmatter de la transcription pour que la chaîne
+    # source → transcription → résumé partage une seule date métier. Utile
+    # pour les outils externes qui lisent la transcription, et pour les
+    # re-registrations (on peut à terme préserver la date stable).
+    # On fusionne seulement si la valeur est non vide et si elle diffère
+    # de ce que la transcription a déjà — évite les writes inutiles.
+    resume_fm_after_merge: dict = {}
+    try:
+        # Re-parse du frontmatter final (après override created/modified)
+        if content.startswith("---"):
+            e = content.find("\n---", 4)
+            if e > 0:
+                resume_fm_after_merge = yaml.safe_load(content[4:e]) or {}
+                if not isinstance(resume_fm_after_merge, dict):
+                    resume_fm_after_merge = {}
+    except yaml.YAMLError:
+        resume_fm_after_merge = {}
+
+    resume_date = resume_fm_after_merge.get("date")
+    if resume_date is not None and trans_abs.exists():
+        if hasattr(resume_date, "strftime"):
+            resume_date_str = resume_date.strftime("%Y-%m-%d") if not hasattr(resume_date, "hour") else resume_date.strftime("%Y-%m-%d")
+        else:
+            resume_date_str = str(resume_date)[:10]  # tronquer à YYYY-MM-DD
+        existing_trans_date = trans_fm.get("date")
+        existing_str = ""
+        if existing_trans_date is not None:
+            if hasattr(existing_trans_date, "strftime"):
+                existing_str = existing_trans_date.strftime("%Y-%m-%d") if not hasattr(existing_trans_date, "hour") else existing_trans_date.strftime("%Y-%m-%d")
+            else:
+                existing_str = str(existing_trans_date)[:10]
+        if resume_date_str and resume_date_str != existing_str:
+            try:
+                from connaissance.commands.documents import _merge_frontmatter
+                trans_content = trans_abs.read_text(encoding="utf-8")
+                new_trans = _merge_frontmatter(trans_content, {"date": resume_date_str})
+                if new_trans != trans_content:
+                    trans_abs.write_text(new_trans, encoding="utf-8")
+            except OSError:
+                pass
 
     # Déduire source_type — priorité au `type:` du frontmatter du résumé,
     # puis fallback sur le chemin de la source quand la valeur est absente
@@ -426,6 +520,8 @@ def register(custom_id: str, content: str,
         "resume",
         source_type=source_type,
         source_path=str(source_rel),
+        created=propagated_fields.get("created"),
+        modified=propagated_fields.get("modified"),
     )
     db.log("connaissance", "resume",
            source_type=source_type,

@@ -75,6 +75,29 @@ Choisir UNE SEULE catégorie. Appliquer les règles dans l'ordre, s'arrêter à 
 - Utiliser l'acronyme courant si l'entité en a un.
 - Exemples : `Agence du revenu du Canada` → `arc`, `Marie Lefebvre` → `marie-lefebvre`, `Banque Nationale` → `banque-nationale`.
 
+## Règles — date (la plus importante : sert à nommer le fichier)
+
+Le champ `date` représente **la date qui décrit le mieux le document**. Elle doit être présente dans le contenu, au format `YYYY-MM-DD`. C'est cette date qui renomme le fichier lors de l'organisation — si elle est fausse, le fichier est mal daté partout.
+
+Règles (appliquer dans l'ordre, s'arrêter à la première qui matche) :
+
+| Priorité | Contexte | Date à prendre |
+|---|---|---|
+| 1 | Facture, reçu, relevé bancaire | **Date d'émission** du document (jamais la date d'échéance ni la date de paiement) |
+| 2 | Contrat, convention, engagement | **Date de signature** (ou `Fait à ... le ...`) |
+| 3 | Avis officiel (gouvernement, tribunal) | **Date de l'avis** / de la décision |
+| 4 | Feuillet fiscal (T4, T5, etc.) | **Année fiscale** au 31 décembre (ex: T4 2024 → `2024-12-31`) |
+| 5 | Rapport couvrant une période (ex: « du 2024-03-01 au 2024-03-31 ») | **Date de début** de la période |
+| 6 | Lettre, courrier daté | **Date au haut du courrier** |
+| 7 | Article, publication | **Date de publication** |
+| 8 | Aucun des cas ci-dessus mais une date figure dans le contenu | La date la plus **représentative du sujet principal** (pas une date accessoire) |
+| 9 | Aucune date exploitable dans le contenu | `{{created}}` (date de création de la source) tronqué à `YYYY-MM-DD` |
+
+**Contre-exemples à éviter** :
+- Facture Hydro « émise le 2024-03-15, à payer avant le 2024-04-10 » → `2024-03-15` (PAS `2024-04-10`).
+- Relevé bancaire « période du 2024-02-01 au 2024-02-29, imprimé le 2024-03-05 » → `2024-02-01` (PAS `2024-03-05`, PAS `2024-02-29`).
+- Contrat signé le 2024-01-10 et prenant effet le 2024-02-01 → `2024-01-10` (signature, pas prise d'effet).
+
 ## Règles — section Actions
 
 INCLURE : tâches concrètes avec verbe à l'infinitif, format `- [ ] Description — échéance YYYY-MM-DD` ou `— échéance inconnue`.

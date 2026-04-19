@@ -129,10 +129,22 @@ def _merge_frontmatter(content: str, new_fields: dict) -> str:
             except yaml.YAMLError:
                 existing = {}
             existing.update(updates)
+            # Forcer les valeurs datetime/date en chaîne ISO avec T — sinon
+            # yaml.safe_dump ré-émet "2024-03-15 12:00:00" (espace, YAML
+            # canonique) au lieu de "2024-03-15T12:00:00" (ISO 8601).
+            for k, v in list(existing.items()):
+                if hasattr(v, "strftime"):
+                    existing[k] = (v.strftime("%Y-%m-%dT%H:%M:%S")
+                                   if hasattr(v, "hour") else v.isoformat())
             new_fm = yaml.safe_dump(existing, sort_keys=False,
                                     allow_unicode=True, default_flow_style=False).strip()
             return f"---\n{new_fm}\n---\n{content[body_start:]}"
 
+    # Pas de frontmatter existant : idem, normaliser les datetime dans updates.
+    for k, v in list(updates.items()):
+        if hasattr(v, "strftime"):
+            updates[k] = (v.strftime("%Y-%m-%dT%H:%M:%S")
+                          if hasattr(v, "hour") else v.isoformat())
     new_fm = yaml.safe_dump(updates, sort_keys=False,
                             allow_unicode=True, default_flow_style=False).strip()
     separator = "\n\n" if content else "\n"
