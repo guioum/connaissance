@@ -447,6 +447,22 @@ def register_document(db, source_path, transcription_path, file_hash=None):
     source_path = Path(source_path)
     transcription_path = Path(transcription_path)
 
+    # Garde-fou : la transcription doit être sous TRANSCRIPTIONS_DIR. Sinon
+    # le scan et summarize_plan (qui miroirent source → TRANSCRIPTIONS_DIR /
+    # rel) ne la retrouveront pas, et le backlog divergera silencieusement
+    # du disque — cas vécu le 2026-04-19 avec un batch OCR écrit sous
+    # ~/Connaissance/Transcriptions/ au lieu de .../Transcriptions/Documents/.
+    try:
+        transcription_resolved = transcription_path.expanduser().resolve()
+        transcription_resolved.relative_to(TRANSCRIPTIONS_DIR.resolve())
+    except ValueError:
+        raise ValueError(
+            f"transcription_path doit être sous {TRANSCRIPTIONS_DIR} "
+            f"(reçu : {transcription_path}). Vérifier l'`output` passé à "
+            f"`ocr_batch_results` / `ocr_process_file` — il doit inclure "
+            f"le segment `Documents/`."
+        )
+
     try:
         st = source_path.stat() if source_path.exists() else None
     except OSError:

@@ -2,7 +2,7 @@
   "$schema": "https://raw.githubusercontent.com/anthropics/mcpb/main/schemas/mcpb-manifest-v0.4.schema.json",
   "manifest_version": "0.4",
   "name": "connaissance",
-  "version": "2.14.0",
+  "version": "2.14.1",
   "description": "Personal knowledge base CLI + MCP — transcription, summarization, entity organization, synthesis, audit, actions. 48 tools mapping to the connaissance CLI subcommands. Requires the connaissance CLI installed via `uv tool install git+https://github.com/guioum/connaissance`. Anthropic API calls (summaries, syntheses) are delegated to the companion MCP `claude-api-mcp` which consumes ANTHROPIC_API_KEY from its own configuration.",
   "author": { "name": "guioum" },
   "server": {
