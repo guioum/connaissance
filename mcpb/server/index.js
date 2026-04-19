@@ -1,6 +1,6 @@
 // MCP server wrapper for the `connaissance` CLI.
 //
-// Exposes 46 tools (mcp__connaissance__*) that shell-out to the
+// Exposes 45 tools (mcp__connaissance__*) that shell-out to the
 // `connaissance` Python CLI installed via `uv tool install` or `pip`.
 // Each tool maps 1:1 to a CLI subcommand `connaissance <group> <verb>`.
 //
@@ -265,25 +265,12 @@ server.registerTool(
   }
 );
 
-server.registerTool(
-  "connaissance_pipeline_simulate",
-  {
-    description: "Composite dry-run covering BOTH (a) the DB backlog — transcriptions already present that need summaries/syntheses — and (b) the SOURCES — documents, emails and notes on disk/IMAP/Apple Notes that have not been imported yet. Returns {detect, costs, sources_to_transcribe: {documents, courriels, notes}}. " +
-      "This is the canonical tool to answer « qu'y a-t-il à faire sur la base ? » or « y a-t-il des notes/courriels à transcrire ? » — relying on detect alone misses the sources-side backlog (they aren't in the DB until transcribed). " +
-      "When the user scopes the update to a time window (« pour 2026 »), ALWAYS pass 'since'/'until' — otherwise the preview will show the full historical backlog and lead to a wrong next step.",
-    inputSchema: {
-      mode: z.enum(["batch", "interactif"]).default("batch"),
-      ...dateRangeSchema,
-    },
-    annotations: { readOnlyHint: true },
-  },
-  async (args) => {
-    const a = ["--mode", args.mode ?? "batch"];
-    pushFlag(a, "since", args.since);
-    pushFlag(a, "until", args.until);
-    return runAndFormat("pipeline", "simulate", a);
-  }
-);
+// NOTE — pipeline_simulate was removed in v2.11.0. The aggregator ran
+// documents_scan + notes_scan + emails_extract --dry-run + pipeline_detect
+// + pipeline_costs sequentially server-side and routinely exceeded the
+// 60s MCP client timeout on loaded bases. The skill `pipeline` composes
+// these sub-tools in parallel instead — same coverage, no timeout risk,
+// one source of truth.
 
 // ── documents ──────────────────────────────────────────────────
 

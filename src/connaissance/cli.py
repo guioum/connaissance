@@ -99,43 +99,6 @@ def _cmd_pipeline(args) -> Any:
     if args.verb == "costs":
         return pipeline.costs(mode=args.mode, since=since, until=until,
                               real=getattr(args, "real", False))
-    if args.verb == "simulate":
-        from connaissance.commands import documents, emails, notes
-        from connaissance.core.paths import transit_file
-        # Auto-output pour documents_scan et notes_scan (payloads volumineux).
-        # Ecrit dans le transit dir persistant (survit aux redémarrages Claude).
-        # Pour emails, utiliser extract --dry-run qui retourne juste des counts.
-        docs = documents.scan(since=since, until=until,
-                              output_file=str(transit_file("pipeline_sim_docs")))
-        nts = notes.scan(since=since, until=until,
-                         output_file=str(transit_file("pipeline_sim_notes")))
-        try:
-            mails = emails.extract(since=since, until=until, dry_run=True)
-        except Exception as e:
-            mails = {"error": str(e)}
-        return {
-            "detect": pipeline.detect(since=since, until=until),
-            "costs": pipeline.costs(mode=args.mode, since=since, until=until),
-            "sources_to_transcribe": {
-                "documents": {
-                    "to_transcribe": docs.get("total_to_transcribe", 0),
-                    "skipped_total": docs.get("total_skipped", 0),
-                    "by_year": docs.get("by_year", {}),
-                    "output_file": docs.get("output_file"),
-                },
-                "courriels": {
-                    "to_extract": mails.get("extracted", 0),
-                    "already_present": mails.get("dedup_skipped", 0),
-                    "filtered": mails.get("filtered", []),
-                },
-                "notes": {
-                    "to_copy": nts.get("total_to_copy", 0),
-                    "skipped_total": nts.get("total_skipped", 0),
-                    "by_year": nts.get("by_year", {}),
-                    "output_file": nts.get("output_file"),
-                },
-            },
-        }
     raise SystemExit(f"verbe inconnu : pipeline {args.verb}")
 
 
@@ -441,10 +404,6 @@ def build_parser() -> argparse.ArgumentParser:
                                    "llm_usage) au lieu de l'estimation "
                                    "forfaitaire.")
     add_date_range(p_pipe_costs)
-    p_pipe_sim = p_pipe_verbs.add_parser("simulate")
-    p_pipe_sim.add_argument("--mode", type=str, default="batch")
-    add_date_range(p_pipe_sim)
-
     # organize
     p_org = sub.add_parser("organize")
     p_org_verbs = p_org.add_subparsers(dest="verb", required=True)
