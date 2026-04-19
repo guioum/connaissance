@@ -752,6 +752,16 @@ server.registerTool(
 );
 
 server.registerTool(
+  "connaissance_synthesis_list_all",
+  {
+    description: "Return a full inventory of Synthèse/: all fiches (personnes + organismes) with parsed frontmatter (aliases, status, first/last-contact, relations), MOCs (sujets), and recent digests. Use for the dashboard skill to avoid Glob patterns hitting the NFC/NFD Unicode normalization mismatch on macOS (folder names like 'Synthèse' are NFD on disk). Python reads the filesystem directly here.",
+    inputSchema: {},
+    annotations: { readOnlyHint: true },
+  },
+  async () => runAndFormat("synthesis", "list-all", [])
+);
+
+server.registerTool(
   "connaissance_synthesis_entity_paths",
   {
     description: "Return the canonical Résumés/ folder paths for a given entity — only folders that actually exist on disk. Use this to build the 'Liens' section of fiches deterministically, avoiding LLM hallucinations of wrong capitalization or non-existent subfolders.",

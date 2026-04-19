@@ -193,6 +193,98 @@ def relations_candidates(entity: str) -> dict:
     return {"entity": entity, "candidates": candidates}
 
 
+def list_all() -> dict:
+    """Inventaire complet de la synthèse pour alimenter le dashboard.
+
+    Retourne la liste de toutes les fiches existantes avec leur
+    frontmatter parsé (slug, aliases, status, first-contact, last-contact,
+    relations), plus les MOC, les digests, et les sujets. Évite les
+    problèmes de normalisation Unicode (NFC vs NFD) quand la skill doit
+    itérer sur ``Synthèse/`` : Python lit le système de fichiers
+    directement sans passer par un matcher glob qui compare octet par
+    octet.
+
+    Retourne ``{personnes: [...], organismes: [...], sujets: [...],
+    digests: [...]}``.
+    """
+    out: dict = {
+        "personnes": [],
+        "organismes": [],
+        "sujets": [],
+        "digests": [],
+    }
+    if not SYNTHESE.exists():
+        return out
+
+    for etype in ("personnes", "organismes"):
+        type_dir = SYNTHESE / etype
+        if not type_dir.is_dir():
+            continue
+        for entity_dir in sorted(type_dir.iterdir()):
+            if not entity_dir.is_dir():
+                continue
+            fiche = entity_dir / "fiche.md"
+            if not fiche.is_file():
+                continue
+            try:
+                content = fiche.read_text(encoding="utf-8")
+            except OSError:
+                continue
+            fm = _parse_frontmatter(content) or {}
+            rel = fiche.relative_to(CONNAISSANCE_ROOT)
+
+            def _iso(v):
+                if v is None:
+                    return None
+                iso = getattr(v, "isoformat", None)
+                return iso() if callable(iso) else v
+
+            item = {
+                "type": etype,
+                "slug": fm.get("slug") or entity_dir.name,
+                "entity_slug": entity_dir.name,
+                "aliases": fm.get("aliases") or [],
+                "status": fm.get("status"),
+                "first-contact": _iso(fm.get("first-contact")),
+                "last-contact": _iso(fm.get("last-contact")),
+                "relations": fm.get("relations") or [],
+                "fiche_path": str(rel),
+                "chronologie_exists": (entity_dir / "chronologie.md").is_file(),
+            }
+            out[etype].append(item)
+
+    sujets_dir = SYNTHESE / "sujets"
+    if sujets_dir.is_dir():
+        for moc in sorted(sujets_dir.glob("*.md")):
+            try:
+                content = moc.read_text(encoding="utf-8")
+            except OSError:
+                continue
+            fm = _parse_frontmatter(content) or {}
+            updated_raw = fm.get("updated")
+            iso = getattr(updated_raw, "isoformat", None)
+            updated = iso() if callable(iso) else updated_raw
+            out["sujets"].append({
+                "slug": moc.stem,
+                "category": fm.get("category") or moc.stem,
+                "updated": updated,
+                "moc_path": str(moc.relative_to(CONNAISSANCE_ROOT)),
+            })
+
+    digests_dir = SYNTHESE / "rapports" / "digests"
+    if digests_dir.is_dir():
+        digests = sorted(digests_dir.glob("*.md"),
+                         key=lambda p: p.stat().st_mtime, reverse=True)
+        for d in digests:
+            out["digests"].append({
+                "date": d.stem,
+                "path": str(d.relative_to(CONNAISSANCE_ROOT)),
+                "mtime": d.stat().st_mtime,
+            })
+
+    return out
+
+
 def entity_paths(entity: str) -> dict:
     """Retourner les chemins canoniques des résumés d'une entité.
 
