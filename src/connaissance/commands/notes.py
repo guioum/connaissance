@@ -48,6 +48,107 @@ def _extract_attachment_refs(content: str) -> set[str]:
     return refs
 
 
+def backlog_count(since=None, until=None) -> dict:
+    """Compte rapide de notes à copier/mettre à jour, sans lire les contenus.
+
+    **Ne lit AUCUN contenu Markdown** — contrairement à `scan`, qui lit
+    chaque `.md` pour extraire le frontmatter YAML et filtrer par dates
+    `created/modified`. Ici, on se base uniquement sur :
+
+    - `rglob("*.md")` sur `~/Notes/`
+    - `f.stat().st_mtime` pour le filtre `since/until` (approximation du
+      champ `created` du frontmatter, mais cohérent avec la sémantique
+      « quelque chose à (re)copier »).
+    - Existence + mtime de la destination miroir.
+
+    Retourne un count (`to_copy`, `to_update`) sans parser les notes.
+    Trade-off : le filtre par date utilise `mtime` et non `created` du
+    frontmatter ; une note ancienne modifiée récemment compte comme
+    récente. Pour un compte exact via frontmatter, utiliser `scan`.
+    """
+    if not NOTES_DIR.exists():
+        return {
+            "total_to_copy": 0,
+            "to_copy": 0,
+            "to_update": 0,
+            "skipped_total": 0,
+            "note": "~/Notes n'existe pas.",
+        }
+
+    # Bornes de date en epoch pour éviter de re-parser à chaque fichier.
+    since_ts: float | None = None
+    until_ts: float | None = None
+    if since:
+        if isinstance(since, str):
+            try:
+                since_ts = datetime.strptime(since, "%Y-%m-%d").replace(
+                    tzinfo=timezone.utc
+                ).timestamp()
+            except ValueError:
+                since_ts = None
+        elif isinstance(since, datetime):
+            since_ts = since.timestamp()
+    if until:
+        if isinstance(until, str):
+            try:
+                until_ts = datetime.strptime(until, "%Y-%m-%d").replace(
+                    tzinfo=timezone.utc
+                ).timestamp()
+            except ValueError:
+                until_ts = None
+        elif isinstance(until, datetime):
+            until_ts = until.timestamp()
+
+    to_copy = 0
+    to_update = 0
+    skipped = 0
+
+    for f in NOTES_DIR.rglob("*.md"):
+        if not f.is_file() or "Attachments" in f.parts:
+            continue
+        try:
+            mtime = f.stat().st_mtime
+        except OSError:
+            skipped += 1
+            continue
+
+        if since_ts is not None and mtime < since_ts:
+            skipped += 1
+            continue
+        if until_ts is not None and mtime >= until_ts:
+            skipped += 1
+            continue
+
+        try:
+            rel = f.relative_to(NOTES_DIR)
+        except ValueError:
+            skipped += 1
+            continue
+        dest = TRANSCRIPTIONS_DIR / rel
+        if not dest.exists():
+            to_copy += 1
+            continue
+        try:
+            if mtime > dest.stat().st_mtime:
+                to_update += 1
+            else:
+                skipped += 1
+        except OSError:
+            skipped += 1
+
+    return {
+        "total_to_copy": to_copy + to_update,
+        "to_copy": to_copy,
+        "to_update": to_update,
+        "skipped_total": skipped,
+        "note": (
+            "Borne approximative du backlog notes : filtre par mtime du "
+            "fichier au lieu du champ `created` du frontmatter. Pour un "
+            "compte exact, lancer `notes_scan`."
+        ),
+    }
+
+
 def scan_notes(since=None, until=None):
     """Scanner ~/Notes/ et retourner les notes à copier/mettre à jour."""
     if not NOTES_DIR.exists():

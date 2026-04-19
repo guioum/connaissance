@@ -40,6 +40,9 @@ def _cmd_documents(args) -> Any:
     if args.verb == "scan":
         since, until = _parse_date_range(args)
         return documents.scan(since=since, until=until, output_file=args.output_file)
+    if args.verb == "backlog-count":
+        since, until = _parse_date_range(args)
+        return documents.backlog_count(since=since, until=until)
     if args.verb == "register":
         return documents.register(args.source_file, args.transcription)
     if args.verb == "register-existing":
@@ -86,6 +89,8 @@ def _cmd_notes(args) -> Any:
     since, until = _parse_date_range(args)
     if args.verb == "scan":
         return notes.scan(since=since, until=until, output_file=args.output_file)
+    if args.verb == "backlog-count":
+        return notes.backlog_count(since=since, until=until)
     if args.verb == "copy":
         return notes.copy(dry_run=args.dry_run, since=since, until=until)
     raise SystemExit(f"verbe inconnu : notes {args.verb}")
@@ -350,6 +355,8 @@ def build_parser() -> argparse.ArgumentParser:
                             help="Écrire le scan complet dans ce fichier JSON "
                                  "au lieu de le renvoyer inline (peut dépasser "
                                  "le Mo sur une base documentaire chargée).")
+    p_doc_bc = p_doc_verbs.add_parser("backlog-count")
+    add_date_range(p_doc_bc)
     p_doc_reg = p_doc_verbs.add_parser("register")
     p_doc_reg.add_argument("source_file")
     p_doc_reg.add_argument("transcription")
@@ -388,6 +395,8 @@ def build_parser() -> argparse.ArgumentParser:
                                    "au lieu de le renvoyer inline (peut dépasser "
                                    "plusieurs centaines de Ko sur un Apple "
                                    "Notes chargé).")
+    p_notes_bc = p_notes_verbs.add_parser("backlog-count")
+    add_date_range(p_notes_bc)
     p_notes_copy = p_notes_verbs.add_parser("copy")
     p_notes_copy.add_argument("--dry-run", action="store_true")
     add_date_range(p_notes_copy)

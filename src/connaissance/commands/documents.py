@@ -222,6 +222,76 @@ def _upsert_transcription_frontmatter(trans_path: Path, source_path: Path,
             pass
 
 
+def backlog_count(since=None, until=None) -> dict:
+    """Compte rapide de documents à transcrire.
+
+    **Ne calcule AUCUN SHA256** — contrairement à `scan`, ce qui lit chaque
+    fichier intégralement. Parcourt l'arborescence `~/Documents/`, applique
+    le filtre (extension, dossiers exclus, dates par mtime) et vérifie
+    seulement l'existence de la transcription miroir (`Transcriptions/
+    Documents/<rel>.md`).
+
+    Trade-off vs `scan` :
+    - Perd la détection `source_changed` (PDF remplacé à même chemin ne
+      sera pas détecté — pas de comparaison de hash).
+    - Perd la dédup par SHA256 contre `tracking.db` (un PDF déplacé vers
+      un nouveau chemin sera compté comme à transcrire alors qu'il l'est
+      déjà par hash).
+
+    Retourne une **borne supérieure** du backlog documents. Pour un compte
+    exact, utiliser `scan`. Conçu comme alternative timeout-safe pour les
+    overviews du skill `pipeline`.
+    """
+    if not DOCUMENTS_DIR.exists():
+        return {
+            "total_to_transcribe": 0,
+            "by_year": {},
+            "skipped": {},
+            "note": "~/Documents n'existe pas.",
+        }
+
+    if isinstance(since, str):
+        since = datetime.strptime(since, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+    if isinstance(until, str):
+        until = datetime.strptime(until, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+
+    filtres = Filtres()
+    total = 0
+    by_year: dict[str, int] = {}
+    skipped: dict[str, int] = {}
+
+    for f in sorted(DOCUMENTS_DIR.rglob("*")):
+        if not f.is_file():
+            continue
+        ok, reason = filtres.filter_document(f, since=since, until=until)
+        if not ok:
+            skipped[reason] = skipped.get(reason, 0) + 1
+            continue
+        rel = f.relative_to(DOCUMENTS_DIR)
+        trans_path = TRANSCRIPTIONS_DIR / rel.with_suffix(".md")
+        if trans_path.exists():
+            skipped["existant"] = skipped.get("existant", 0) + 1
+            continue
+        total += 1
+        try:
+            year = datetime.fromtimestamp(f.stat().st_mtime).strftime("%Y")
+        except OSError:
+            year = "?"
+        by_year[year] = by_year.get(year, 0) + 1
+
+    return {
+        "total_to_transcribe": total,
+        "by_year": dict(sorted(by_year.items(), reverse=True)),
+        "skipped": skipped,
+        "note": (
+            "Borne supérieure du backlog documents : pas de hash SHA256, "
+            "pas de détection de source_changed, pas de dedup par hash "
+            "contre tracking.db. Pour un compte exact, lancer "
+            "`documents_scan`."
+        ),
+    }
+
+
 def scan_documents(since=None, until=None, db=None):
     """Scanner ~/Documents/ et retourner les fichiers à transcrire."""
     if not DOCUMENTS_DIR.exists():

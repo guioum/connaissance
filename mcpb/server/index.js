@@ -1,6 +1,6 @@
 // MCP server wrapper for the `connaissance` CLI.
 //
-// Exposes 46 tools (mcp__connaissance__*) that shell-out to the
+// Exposes 48 tools (mcp__connaissance__*) that shell-out to the
 // `connaissance` Python CLI installed via `uv tool install` or `pip`.
 // Each tool maps 1:1 to a CLI subcommand `connaissance <group> <verb>`.
 //
@@ -306,6 +306,23 @@ server.registerTool(
 );
 
 server.registerTool(
+  "connaissance_documents_backlog_count",
+  {
+    description: "FAST count of documents to transcribe under ~/Documents/ WITHOUT hashing any file. Walks the tree, applies the filter (extension, excluded folders, date range via mtime), and checks existence of the mirror transcription — no SHA256, no tracking.db dedup. Returns {total_to_transcribe, by_year, skipped}. Timeout-safe alternative to documents_scan for pipeline overviews. For an exact count (with source_changed detection and hash-level dedup), use documents_scan.",
+    inputSchema: {
+      ...dateRangeSchema,
+    },
+    annotations: { readOnlyHint: true },
+  },
+  async (args) => {
+    const a = [];
+    pushFlag(a, "since", args.since);
+    pushFlag(a, "until", args.until);
+    return runAndFormat("documents", "backlog-count", a);
+  }
+);
+
+server.registerTool(
   "connaissance_documents_register",
   {
     description: "Register a document transcription in tracking.db and inject canonical frontmatter (source, source_hash, transcribed_at).",
@@ -482,6 +499,23 @@ server.registerTool(
       : (args.output_file || autoOutputFile("notes_scan"));
     pushFlag(a, "output-file", outputFile);
     return runAndFormat("notes", "scan", a);
+  }
+);
+
+server.registerTool(
+  "connaissance_notes_backlog_count",
+  {
+    description: "FAST count of Apple Notes to copy/update from ~/Notes/ WITHOUT reading any file contents. Walks the tree, filters by file mtime (approximation of frontmatter `created`), and checks destination mirror existence + mtime. Returns {total_to_copy, to_copy, to_update, skipped_total}. Timeout-safe alternative to notes_scan for pipeline overviews. Trade-off: the date filter uses mtime instead of the frontmatter `created` field (an old note modified recently is counted as recent). For exact frontmatter-based filtering, use notes_scan.",
+    inputSchema: {
+      ...dateRangeSchema,
+    },
+    annotations: { readOnlyHint: true },
+  },
+  async (args) => {
+    const a = [];
+    pushFlag(a, "since", args.since);
+    pushFlag(a, "until", args.until);
+    return runAndFormat("notes", "backlog-count", a);
   }
 );
 
