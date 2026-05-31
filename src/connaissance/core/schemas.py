@@ -186,7 +186,7 @@ class Triage(TypedDict, total=False):
     total_files: int        # vrac + conteneurs
     loose_files: int        # fichiers en vrac, à classer
     groups: dict            # décompte EN VRAC : {A_documents, B_exports, C_media, D_code, autre}
-    containers: dict        # {files_total, repos_code: [{path, files}], bundles: [{path, files, type}]}
+    containers: dict        # {files_total, repos_code, bundles, archives} — chaque entrée [{path, files, …}]
     by_extension: dict
     documents_sample: list[str]
     # variante --output-file
@@ -195,6 +195,7 @@ class Triage(TypedDict, total=False):
     container_files: int
     repos_code: int
     bundles: int
+    archives: int
 
 
 # --- emails ---

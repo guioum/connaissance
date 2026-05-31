@@ -55,6 +55,38 @@ def test_macos_bundle_collapsed_as_unit(tmp_path, monkeypatch):
     assert res["groups"].get("A_documents") == 1     # seule la facture est en vrac
 
 
+def test_density_archive_collapses_doc_poor_folder(tmp_path, monkeypatch):
+    # Un dossier volumineux quasi sans documents (résidu de dump) → unité archive.
+    root = tmp_path / "Documents"
+    dump = root / "Classer" / "old-dump"
+    dump.mkdir(parents=True)
+    for i in range(120):
+        (dump / f"f{i}.json").write_text("{}", encoding="utf-8")   # code, non-doc
+    (dump / "egare.pdf").write_bytes(b"%PDF")                       # 1 doc égaré
+    (root / "facture.pdf").write_bytes(b"%PDF")
+    monkeypatch.setattr(T, "DOCUMENTS_DIR", root)
+    res = T.triage()
+    archs = res["containers"]["archives"]
+    assert len(archs) == 1
+    assert archs[0]["files"] == 121 and archs[0]["docs"] == 1
+    # tout le dump est avalé ; seule la facture racine reste en vrac
+    assert res["groups"].get("D_code", 0) == 0
+    assert res["groups"].get("A_documents") == 1
+
+
+def test_small_doc_poor_folder_is_not_archived(tmp_path, monkeypatch):
+    # Sous le seuil de taille : pas d'archive, les fichiers restent en vrac.
+    root = tmp_path / "Documents"
+    small = root / "Classer" / "petit"
+    small.mkdir(parents=True)
+    for i in range(5):
+        (small / f"f{i}.json").write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(T, "DOCUMENTS_DIR", root)
+    res = T.triage()
+    assert res["containers"]["archives"] == []
+    assert res["groups"].get("D_code") == 5
+
+
 def test_marker_dir_claude_detects_project(tmp_path, monkeypatch):
     root = tmp_path / "Documents"
     proj = root / "- Protégés" / "monach-budget"

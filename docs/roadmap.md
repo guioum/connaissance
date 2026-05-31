@@ -28,10 +28,13 @@ grande réorg tant que ce n'est pas validé.
   sont comptés en **unités** ; les **exports sont parcourus** (un vieux Google
   Drive contient de vrais documents — bulletins, livres — qui remontent en A).
   Les **conteneurs** (13 repos de code, 23 paquets macOS `.app`/`.abbu`/`.ynab4`)
-  sont des unités exclues du décompte. Corpus réel — EN VRAC à classer : **9,5k
-  documents** · 12,5k médias · 9,5k code épars · 1,3k autre · **155 exports
-  divers** (qfx, cartes mentales, vcf…), + 33,4k fichiers avalés par les
-  conteneurs. Heuristiques tunables (`commands/triage.py`).
+  sont des unités exclues du décompte ; une **détection « archive » par densité**
+  collapse aussi les dossiers volumineux quasi sans documents (résidus de dumps :
+  codebase 2020, cruft Takeout) en protégeant les dossiers riches en docs (un
+  Drive à 14 % de docs ne se collapse pas — < 1 % de docs égarés au total).
+  Corpus réel — EN VRAC à classer : **9,5k documents** · 9,4k médias · 4k code ·
+  0,6k autre · 0,2k exports divers ; + 42k fichiers mis de côté en
+  6 repos · 13 paquets · 16 archives. Heuristiques tunables (`commands/triage.py`).
 - [ ] 🟡 **Phase B — Extraction de signaux (groupe A, zéro OCR)** : nom, chemin,
   dates, métadonnées PDF/Office, texte embarqué (born-digital), texte du cache,
   EXIF. Lecture via le miroir SSD (`documents_read_path`).

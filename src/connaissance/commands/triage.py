@@ -43,9 +43,10 @@ MARKER_DIRS = {".git", ".claude", ".svn", ".hg", "node_modules", "vendor"}
 
 # Paquets macOS / bundles d'app : dossiers à traiter en UNITÉS (on n'organise pas
 # l'intérieur d'un backup Contacts .abbu, d'un budget .ynab4, d'une photothèque…).
-BUNDLE_SUFFIXES = {".app", ".abbu", ".ynab4", ".photoslibrary", ".photolibrary",
-                   ".aplibrary", ".imovielibrary", ".tvlibrary", ".fcpbundle",
-                   ".logicx", ".band", ".scriv", ".rcproject", ".pkg"}
+BUNDLE_SUFFIXES = {".app", ".abbu", ".ynab4", ".ynab3", ".bearbk",
+                   ".photoslibrary", ".photolibrary", ".aplibrary",
+                   ".imovielibrary", ".tvlibrary", ".fcpbundle", ".logicx",
+                   ".band", ".scriv", ".rcproject", ".pkg"}
 
 # Les EXPORTS ne sont PAS traités comme des conteneurs opaques : on les parcourt
 # pour en extraire les vrais documents (ex. un vieux Google Drive contient des
@@ -54,18 +55,27 @@ BUNDLE_SUFFIXES = {".app", ".abbu", ".ynab4", ".photoslibrary", ".photolibrary",
 
 DOC_EXTS = {"pdf", "docx", "doc", "xlsx", "xls", "pptx", "ppt", "csv", "txt",
             "rtf", "pages", "numbers", "key", "odt", "ods", "odp", "md",
-            "markdown", "epub", "mobi", "azw3"}
+            "markdown", "epub", "mobi", "azw3", "xlsm", "xlsb", "dotx",
+            "docm", "pptm"}
 MEDIA_EXTS = {"jpg", "jpeg", "png", "gif", "heic", "heif", "tiff", "tif",
               "bmp", "webp", "svg", "mp4", "mov", "avi", "mkv", "m4v", "mp3",
               "wav", "aac", "flac", "m4a", "raw", "cr2", "nef", "psd", "ai"}
 CODE_EXTS = {"php", "phpt", "js", "mjs", "cjs", "ts", "jsx", "tsx", "vue",
              "tpl", "twig", "blade", "css", "scss", "sass", "less", "py",
-             "rb", "go", "rs", "java", "kt", "c", "h", "cpp", "hpp", "cs",
-             "swift", "sql", "sh", "bash", "pl", "lua", "coffee", "json",
-             "xml", "yml", "yaml", "lock", "ydiff", "phar", "map", "html",
-             "htm", "ino", "po", "sample", "ttf", "otf", "woff", "woff2"}
+             "pyw", "rb", "go", "rs", "java", "kt", "c", "h", "cpp", "hpp",
+             "cs", "swift", "sql", "sh", "bash", "pl", "lua", "coffee",
+             "json", "xml", "yml", "yaml", "lock", "ydiff", "phar", "map",
+             "html", "htm", "ino", "po", "sample", "ttf", "otf", "woff",
+             "woff2", "ipa"}
 EXPORT_EXTS = {"enex", "nib", "abcdp", "abcdg", "ydevice", "smmx", "qfx",
-               "ics", "vcf", "ynab4", "bib", "opml", "mm"}
+               "ics", "vcf", "ynab4", "bib", "opml", "mm", "itmz", "qbo"}
+
+# Détection « archive » par densité : un dossier d'au moins ARCHIVE_MIN_FILES
+# fichiers dont ≤ ARCHIVE_MAX_DOC_RATIO sont de vrais documents = une unité à
+# mettre de côté (résidu d'un dump/codebase). Le seuil protège les dossiers
+# riches en documents (ex. un vieux Drive à ~14 % de docs ne se collapse PAS).
+ARCHIVE_MIN_FILES = 100
+ARCHIVE_MAX_DOC_RATIO = 0.03
 
 # Notre propre vue (raccourcis) + dossiers déjà classés : à ne pas triager.
 SKIP_TOP = {"- Par catégorie", "organismes", "personnes", "divers", "promus"}
@@ -87,14 +97,46 @@ def _count_subtree(d: Path) -> int:
     return sum(len(files) for _, _, files in os.walk(d))
 
 
+def _subtree_stats(root: Path) -> tuple[dict, dict]:
+    """Bottom-up : pour chaque dossier, (nb fichiers, nb vrais documents
+    ORGANISABLES) de son sous-arbre.
+
+    Les fichiers à l'intérieur d'un conteneur (repo/paquet) ne sont PAS
+    organisables : un dossier qui n'est qu'un conteneur compte 0 document.
+    Ainsi le ratio de documents d'une « archive » candidate reflète les vrais
+    documents en vrac qu'elle contient (et pas des READMEs de repos imbriqués)."""
+    total: dict[str, int] = {}
+    docs: dict[str, int] = {}
+    for dirpath, dirnames, filenames in os.walk(root, topdown=False):
+        is_container = (Path(dirpath).suffix.lower() in BUNDLE_SUFFIXES
+                        or bool(set(filenames) & CODE_MARKERS)
+                        or bool(set(dirnames) & MARKER_DIRS))
+        t = d = 0
+        for f in filenames:
+            if f.startswith("."):
+                continue
+            t += 1
+            if _classify_ext(Path(f).suffix.lower().lstrip(".")) == "A_documents":
+                d += 1
+        for child in dirnames:
+            cp = os.path.join(dirpath, child)
+            t += total.get(cp, 0)
+            d += docs.get(cp, 0)
+        total[dirpath] = t
+        docs[dirpath] = 0 if is_container else d   # conteneur → 0 doc organisable
+    return total, docs
+
+
 def triage(output_file: str | None = None) -> dict:
     """Cartographier ~/Documents en groupes A/B/C/D (lecture seule)."""
     root = DOCUMENTS_DIR
+    sub_total, sub_docs = _subtree_stats(root)
     groups: Counter = Counter()        # fichiers EN VRAC (hors conteneurs)
     by_ext: Counter = Counter()
     repos: list[dict] = []
     bundles: list[dict] = []
-    container_files = 0                  # fichiers AVALÉS par repos + paquets
+    archives: list[dict] = []
+    container_files = 0                  # fichiers AVALÉS par conteneurs
     documents: list[str] = []           # échantillon des vrais docs (groupe A)
 
     for dirpath, dirnames, filenames in os.walk(root):
@@ -123,6 +165,18 @@ def triage(output_file: str | None = None) -> dict:
             dirnames[:] = []
             continue
 
+        # Archive par densité : dossier volumineux quasi sans documents → unité.
+        # (Sauf la racine. Le seuil protège les dossiers riches en documents.)
+        if d != root:
+            st = sub_total.get(dirpath, 0)
+            sd = sub_docs.get(dirpath, 0)
+            if st >= ARCHIVE_MIN_FILES and (sd / st) <= ARCHIVE_MAX_DOC_RATIO:
+                container_files += st
+                archives.append({"path": str(d.relative_to(root)),
+                                 "files": st, "docs": sd})
+                dirnames[:] = []
+                continue
+
         for f in filenames:
             if f.startswith("."):
                 continue
@@ -142,6 +196,7 @@ def triage(output_file: str | None = None) -> dict:
             "files_total": container_files,      # fichiers avalés par les unités
             "repos_code": sorted(repos, key=lambda r: -r["files"]),
             "bundles": sorted(bundles, key=lambda r: -r["files"]),
+            "archives": sorted(archives, key=lambda r: -r["files"]),
         },
         "by_extension": dict(by_ext.most_common(40)),
         # Échantillon ÉTALÉ sur tout l'arbre (pas seulement le début du walk),
@@ -157,6 +212,7 @@ def triage(output_file: str | None = None) -> dict:
             "container_files": p["containers"]["files_total"],
             "repos_code": len(p["containers"]["repos_code"]),
             "bundles": len(p["containers"]["bundles"]),
+            "archives": len(p["containers"]["archives"]),
         }
 
     return write_or_inline(payload, output_file=output_file, summary_fn=_summary)
