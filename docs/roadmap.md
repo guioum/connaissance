@@ -46,7 +46,15 @@ grande réorg tant que ce n'est pas validé.
   EXIF. Lecture via le miroir SSD (`documents_read_path`).
 - [ ] 🟡 **Phase C — Pré-classement heuristique** : entité + catégorie + date +
   titre, avec confiance ; basse confiance → zone d'attente (vrai pipeline
-  OCR+LLM plus tard). Réutilise la taxonomie + `resolution.py`.
+  OCR+LLM plus tard). Réutilise la taxonomie + `resolution.py`. Pose aussi le
+  **tag `sujet:`** (depuis `grouped_folders` du triage) — voir modèle sujets.
+- [ ] 🟡 **Sujets = vue virtuelle unique** (décision actée — modèle sujets) :
+  un doc est classé physiquement par ENTITÉ + tagué `sujet:` ; une seule vue
+  `~/Documents/- Sujets/` (symlinks, régénérable) rassemble par sujet et
+  **remplace `- Par catégorie/`** (la catégorie devient un sujet grossier).
+  Virtuel par défaut ; physique = exception (`divers/<sujet>/`). Pour le cas
+  « envoi au comptable » : commande `sujet export <nom>` (copie/zip réel à la
+  demande), pas de dossier physique permanent.
 - [ ] 🟡 **Phase D — Doublons** : exacts (SHA256 caché) + quasi (SimHash texte).
 - [ ] 🟢 Groupes B/C/D classés par logique propre (code regroupé, médias par
   date, exports tels quels).
