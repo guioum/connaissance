@@ -24,6 +24,13 @@ devient un simple shim de skills qui consomme les outils MCP exposés ici.
 - **Audit** — 6 vérifications d'intégrité déterministes, reindex de la
   base, réparation d'attachements, archivage de non-documents
 
+## Documentation
+
+Ce README couvre l'installation et l'usage. Pour la **conception** (modèle de
+données, flux du pipeline, scoring courriels, environnements, contribution),
+voir [`docs/`](docs/README.md) — et [`docs/roadmap.md`](docs/roadmap.md) pour
+ce qu'il reste à faire.
+
 ## Quick start
 
 ### 1. Install the CLI
