@@ -8,14 +8,19 @@ Classe chaque fichier en quatre groupes — SANS OCR, en lecture seule :
   D_code      : code et fichiers techniques
 
 Principe clé : on ne déroule pas 67k fichiers un par un. On détecte les
-**conteneurs de code/projet** — repo (marqueur fichier type composer.json, ou
-dossier marqueur ``.git``/``.claude``…) et bundles ``.app`` — et on les traite
-comme des **unités** (comptés en bloc, non parcourus). Un repo reste groupé.
+**conteneurs** et on les traite comme des **unités** (comptées en bloc, non
+parcourues, et EXCLUES du décompte des groupes — ``groups`` ne compte que les
+fichiers EN VRAC à classer) :
 
-Les **exports** (vieux Google Drive, etc.) ne sont PAS opaques : on les
-**parcourt** pour en extraire les vrais documents (→ groupe A) ; les fichiers
-d'app sans valeur documentaire (``.enex``, ``.smmx``…) restent en B par leur
-extension.
+  - repos de code/projet : marqueur fichier (composer.json…) ou dossier
+    marqueur (``.git``, ``.claude``…) ;
+  - paquets macOS : ``.app``, ``.abbu`` (backup Contacts), ``.ynab4`` (budget),
+    photothèques… — on n'organise pas l'intérieur d'un paquet.
+
+Les **exports « en vrac »** (vieux Google Drive, etc.) ne sont PAS opaques : on
+les **parcourt** pour en extraire les vrais documents (→ groupe A) ; les
+fichiers d'app sans valeur documentaire (``.enex``, ``.smmx``…) restent en B
+par leur extension.
 
 Rien n'est déplacé : ``triage`` ne fait que cartographier (schema Triage).
 """
@@ -35,6 +40,12 @@ CODE_MARKERS = {
 }
 # Marqueurs DOSSIERS : leur présence signe un projet (même sans marqueur fichier).
 MARKER_DIRS = {".git", ".claude", ".svn", ".hg", "node_modules", "vendor"}
+
+# Paquets macOS / bundles d'app : dossiers à traiter en UNITÉS (on n'organise pas
+# l'intérieur d'un backup Contacts .abbu, d'un budget .ynab4, d'une photothèque…).
+BUNDLE_SUFFIXES = {".app", ".abbu", ".ynab4", ".photoslibrary", ".photolibrary",
+                   ".aplibrary", ".imovielibrary", ".tvlibrary", ".fcpbundle",
+                   ".logicx", ".band", ".scriv", ".rcproject", ".pkg"}
 
 # Les EXPORTS ne sont PAS traités comme des conteneurs opaques : on les parcourt
 # pour en extraire les vrais documents (ex. un vieux Google Drive contient des
@@ -79,11 +90,12 @@ def _count_subtree(d: Path) -> int:
 def triage(output_file: str | None = None) -> dict:
     """Cartographier ~/Documents en groupes A/B/C/D (lecture seule)."""
     root = DOCUMENTS_DIR
-    groups: Counter = Counter()
+    groups: Counter = Counter()        # fichiers EN VRAC (hors conteneurs)
     by_ext: Counter = Counter()
     repos: list[dict] = []
     bundles: list[dict] = []
-    documents: list[str] = []   # échantillon des vrais docs (groupe A)
+    container_files = 0                  # fichiers AVALÉS par repos + paquets
+    documents: list[str] = []           # échantillon des vrais docs (groupe A)
 
     for dirpath, dirnames, filenames in os.walk(root):
         d = Path(dirpath)
@@ -92,16 +104,22 @@ def triage(output_file: str | None = None) -> dict:
         if d == root:
             dirnames[:] = [n for n in dirnames if n not in SKIP_TOP]
 
-        # Conteneur de CODE/PROJET → unité, compté en bloc, non parcouru.
-        # (Les exports ne sont PAS opaques : on les parcourt — voir plus bas.)
-        is_bundle = d.suffix == ".app"
+        # Conteneur → UNITÉ : compté en bloc, non parcouru, exclu des groupes.
+        # Repo de code/projet (marqueur fichier ou dossier .git/.claude…) OU
+        # paquet macOS (.app, .abbu, .ynab4, photothèque…).
+        # (Les exports « fichiers en vrac » comme un vieux Drive sont parcourus.)
+        is_bundle = d.suffix.lower() in BUNDLE_SUFFIXES
         is_repo = bool(set(filenames) & CODE_MARKERS) \
             or bool(set(dirnames) & MARKER_DIRS)
         if is_bundle or is_repo:
             cnt = _count_subtree(d)
+            container_files += cnt
             rel = str(d.relative_to(root))
-            (bundles if is_bundle else repos).append({"path": rel, "files": cnt})
-            groups["D_code"] += cnt
+            if is_bundle:
+                bundles.append({"path": rel, "files": cnt,
+                                "type": d.suffix.lower().lstrip(".")})
+            else:
+                repos.append({"path": rel, "files": cnt})
             dirnames[:] = []
             continue
 
@@ -115,13 +133,15 @@ def triage(output_file: str | None = None) -> dict:
             if g == "A_documents":
                 documents.append(str((d / f).relative_to(root)))
 
-    total = sum(groups.values())
+    loose = sum(groups.values())
     payload = {
-        "total_files": total,
-        "groups": dict(groups.most_common()),
+        "total_files": loose + container_files,
+        "loose_files": loose,            # fichiers en vrac, à classer
+        "groups": dict(groups.most_common()),   # décompte EN VRAC uniquement
         "containers": {
+            "files_total": container_files,      # fichiers avalés par les unités
             "repos_code": sorted(repos, key=lambda r: -r["files"]),
-            "app_bundles": sorted(bundles, key=lambda r: -r["files"]),
+            "bundles": sorted(bundles, key=lambda r: -r["files"]),
         },
         "by_extension": dict(by_ext.most_common(40)),
         # Échantillon ÉTALÉ sur tout l'arbre (pas seulement le début du walk),
@@ -132,9 +152,11 @@ def triage(output_file: str | None = None) -> dict:
     def _summary(p: dict) -> dict:
         return {
             "total_files": p["total_files"],
+            "loose_files": p["loose_files"],
             "groups": p["groups"],
+            "container_files": p["containers"]["files_total"],
             "repos_code": len(p["containers"]["repos_code"]),
-            "app_bundles": len(p["containers"]["app_bundles"]),
+            "bundles": len(p["containers"]["bundles"]),
         }
 
     return write_or_inline(payload, output_file=output_file, summary_fn=_summary)

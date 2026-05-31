@@ -1,6 +1,6 @@
 {
   "name": "connaissance-mcp",
-  "version": "2.20.1",
+  "version": "2.20.2",
   "type": "module",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.0",

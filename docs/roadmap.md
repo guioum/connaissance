@@ -27,8 +27,11 @@ grande réorg tant que ce n'est pas validé.
   code/projet** (marqueur fichier OU dossier `.git`/`.claude`, bundles `.app`)
   sont comptés en **unités** ; les **exports sont parcourus** (un vieux Google
   Drive contient de vrais documents — bulletins, livres — qui remontent en A).
-  Corpus réel : ~39,7k code · 12,5k médias · **9,5k docs** · 3,2k exports ·
-  1,5k autre. Heuristiques tunables (`commands/triage.py`).
+  Les **conteneurs** (13 repos de code, 23 paquets macOS `.app`/`.abbu`/`.ynab4`)
+  sont des unités exclues du décompte. Corpus réel — EN VRAC à classer : **9,5k
+  documents** · 12,5k médias · 9,5k code épars · 1,3k autre · **155 exports
+  divers** (qfx, cartes mentales, vcf…), + 33,4k fichiers avalés par les
+  conteneurs. Heuristiques tunables (`commands/triage.py`).
 - [ ] 🟡 **Phase B — Extraction de signaux (groupe A, zéro OCR)** : nom, chemin,
   dates, métadonnées PDF/Office, texte embarqué (born-digital), texte du cache,
   EXIF. Lecture via le miroir SSD (`documents_read_path`).

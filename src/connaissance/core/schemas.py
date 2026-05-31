@@ -183,17 +183,18 @@ class LedgerVerify(TypedDict):
 
 
 class Triage(TypedDict, total=False):
-    total_files: int
-    groups: dict            # {A_documents, B_exports, C_media, D_code, autre}
-    containers: dict        # {repos_code: [{path, files}], app_bundles, exports}
+    total_files: int        # vrac + conteneurs
+    loose_files: int        # fichiers en vrac, à classer
+    groups: dict            # décompte EN VRAC : {A_documents, B_exports, C_media, D_code, autre}
+    containers: dict        # {files_total, repos_code: [{path, files}], bundles: [{path, files, type}]}
     by_extension: dict
     documents_sample: list[str]
     # variante --output-file
     output_file: str
     total_bytes: int
+    container_files: int
     repos_code: int
-    app_bundles: int
-    exports: int
+    bundles: int
 
 
 # --- emails ---
