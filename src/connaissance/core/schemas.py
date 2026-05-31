@@ -131,6 +131,13 @@ class VerifyPreserve(TypedDict):
     added_tokens: list[str]
 
 
+class RegisterBatch(TypedDict):
+    registered: int
+    missing: list[dict]   # [{source, transcription, rel}] — transcription absente du disque
+    total: int
+    dry_run: bool
+
+
 # --- emails ---
 
 class EmailsStats(TypedDict):

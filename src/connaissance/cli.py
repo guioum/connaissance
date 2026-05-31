@@ -47,6 +47,8 @@ def _cmd_documents(args) -> Any:
         return documents.register(args.source_file, args.transcription)
     if args.verb == "register-existing":
         return documents.register_existing_all()
+    if args.verb == "register-batch":
+        return documents.register_batch(args.from_scan, dry_run=args.dry_run)
     if args.verb == "suspects":
         return documents.suspects()
     if args.verb == "verify-preserve":
@@ -361,6 +363,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_doc_reg.add_argument("source_file")
     p_doc_reg.add_argument("transcription")
     p_doc_verbs.add_parser("register-existing")
+    p_doc_rb = p_doc_verbs.add_parser("register-batch")
+    p_doc_rb.add_argument("--from-scan", dest="from_scan", required=True,
+                          help="Fichier JSON produit par `documents scan "
+                               "--output-file` (clé to_transcribe).")
+    p_doc_rb.add_argument("--dry-run", dest="dry_run", action="store_true")
     p_doc_verbs.add_parser("suspects")
     p_doc_vp = p_doc_verbs.add_parser("verify-preserve")
     p_doc_vp.add_argument("before")

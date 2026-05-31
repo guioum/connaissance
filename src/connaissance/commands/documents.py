@@ -6,6 +6,7 @@ Expose :
 - `suspects() -> DocumentsSuspects`
 """
 
+import json
 import sys
 import re
 from datetime import datetime, timezone
@@ -776,6 +777,56 @@ def register_existing_all(db: TrackingDB | None = None) -> dict:
         db = TrackingDB()
     count = register_existing(db)
     return {"registered": count, "skipped": []}
+
+
+def register_batch(scan_file: str, dry_run: bool = False,
+                   db: TrackingDB | None = None) -> dict:
+    """Enregistrer en lot les documents d'un manifeste de `documents scan`.
+
+    Relit le fichier produit par ``documents scan --output-file`` (clé
+    ``to_transcribe`` ; chaque item porte ``source`` + ``transcription``
+    + ``hash``) et enregistre chaque document dont la transcription **existe**
+    déjà sur disque (après l'OCR), en réutilisant les chemins exacts calculés
+    au scan — plus de câblage de chemins à la main côté skill.
+
+    Les transcriptions **manquantes** sont remontées explicitement (`missing`)
+    plutôt qu'ignorées en silence : un OCR écrit hors de
+    ``Transcriptions/Documents/`` est ainsi attrapé bruyamment au lieu de
+    produire des orphelins (cf. incident du 2026-04-19).
+    """
+    path = Path(scan_file).expanduser()
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(f"Manifeste de scan illisible : {scan_file} ({exc})")
+
+    items = payload.get("to_transcribe") or []
+    if db is None:
+        db = TrackingDB()
+
+    registered: list[str] = []
+    missing: list[dict] = []
+    for it in items:
+        transcription = it.get("transcription")
+        if not transcription:
+            continue
+        if not Path(transcription).expanduser().exists():
+            missing.append({
+                "source": it.get("source"),
+                "transcription": transcription,
+                "rel": it.get("rel"),
+            })
+            continue
+        if not dry_run:
+            register_document(db, it.get("source"), transcription, it.get("hash"))
+        registered.append(transcription)
+
+    return {
+        "registered": len(registered),
+        "missing": missing,
+        "total": len(items),
+        "dry_run": dry_run,
+    }
 
 
 def suspects() -> dict:

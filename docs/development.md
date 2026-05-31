@@ -58,6 +58,8 @@ uv run --extra test pytest
   racine neutralisé — voir [`conftest.py`](../tests/conftest.py)).
 - [`test_filtres_scoring.py`](../tests/test_filtres_scoring.py) — scoring
   courriels par signal, avec configs injectées (découplé du template).
+- [`test_register_batch.py`](../tests/test_register_batch.py) — register en
+  lot depuis un manifeste de scan (partition présent/manquant, fail-loud).
 
 Les modules couplés à l'environnement (`audit`, `resolution`, pipeline) ne sont
 pas encore testés — voir [roadmap.md](roadmap.md).

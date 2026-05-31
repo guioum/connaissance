@@ -77,7 +77,7 @@ cd ..
 ./setup-claude-desktop.sh
 ```
 
-Redémarrer Claude Desktop pour activer les 48 outils
+Redémarrer Claude Desktop pour activer les 49 outils
 `mcp__connaissance__*`.
 
 ## Usage
@@ -119,12 +119,12 @@ connaissance config scoring-set --add-domain-marketing exemple.fr --dry-run
 
 ### MCP tools (via Claude Desktop / cowork)
 
-48 outils mappés 1:1 vers les sous-commandes CLI :
+49 outils mappés 1:1 vers les sous-commandes CLI :
 
 | Groupe | Outils |
 |---|---|
 | pipeline | `detect`, `costs` |
-| documents | `scan`, `register`, `register_existing`, `suspects`, `verify_preserve`, `backlog_count` |
+| documents | `scan`, `register`, `register_existing`, `register_batch`, `suspects`, `verify_preserve`, `backlog_count` |
 | emails | `stats`, `extract`, `threads`, `calibrate`, `senders`, `cleanup_obsolete`, `backlog_count` |
 | notes | `scan`, `copy`, `backlog_count` |
 | organize | `plan`, `enrich`, `apply`, `resolve` |
@@ -137,7 +137,7 @@ connaissance config scoring-set --add-domain-marketing exemple.fr --dry-run
 | config | `scoring_show`, `scoring_set`, `scoring_diff`, `scoring_validate` |
 | manifest | `patch` |
 
-Total : **48 outils** sur **13 groupes**.
+Total : **49 outils** sur **13 groupes**.
 
 ## Architecture
 
@@ -150,7 +150,7 @@ Ce repo contient deux choses :
   `connaissance` (trouvé via `CONNAISSANCE_CLI` env ou auto-détection
   dans `~/.local/bin/`) et parse la sortie JSON.
 
-Les 48 outils MCP ne contiennent aucune logique métier : ils mappent
+Les 49 outils MCP ne contiennent aucune logique métier : ils mappent
 les sous-commandes CLI 1:1 et remontent le JSON tel quel.
 
 ## Prérequis

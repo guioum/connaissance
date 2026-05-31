@@ -21,10 +21,13 @@ C'est le garde-fou qui évite d'aspirer tout le disque.
 
 Trois sources, trois commandes :
 
-- **Documents** (`documents scan` → `register`) : repère les nouveaux fichiers
-  sous la source (par défaut `~/Documents`), délègue l'OCR au plugin externe
-  `mistral-ocr`, écrit la transcription au chemin miroir. `documents suspects`
-  repère les transcriptions OCR mal formées (tableaux cassés) à reprendre.
+- **Documents** (`documents scan` → OCR → `register-batch`) : repère les
+  nouveaux fichiers sous la source (par défaut `~/Documents`), délègue l'OCR au
+  plugin externe `mistral-ocr`, écrit la transcription au chemin miroir.
+  `register-batch --from-scan <manifeste>` enregistre tout le lot en réutilisant
+  les chemins calculés au scan, et **remonte bruyamment** les transcriptions
+  manquantes (OCR écrit au mauvais endroit) au lieu de produire des orphelins.
+  `documents suspects` repère les transcriptions OCR mal formées à reprendre.
 - **Courriels** (`emails extract`) : lit les archives mbox, **score** chaque
   courriel (multi-signaux), ne capture que ce qui dépasse le seuil, regroupe
   les fils. Voir [emails.md](emails.md).

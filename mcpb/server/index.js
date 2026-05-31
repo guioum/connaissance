@@ -344,6 +344,22 @@ server.registerTool(
 );
 
 server.registerTool(
+  "connaissance_documents_register_batch",
+  {
+    description: "Batch-register a `documents scan` manifest : read the scan output-file (to_transcribe items carry source + transcription paths) and register every document whose transcription now exists on disk, reusing the exact paths computed at scan time. Missing transcriptions are reported loudly under `missing` (e.g. an OCR batch written outside Transcriptions/Documents/) instead of producing silent orphans. Use after an OCR batch instead of calling register per file.",
+    inputSchema: {
+      from_scan: z.string().describe("Path to the JSON manifest produced by `documents scan --output-file`."),
+      dry_run: z.boolean().optional().describe("Report what would be registered (and what's missing) without writing."),
+    },
+  },
+  async (args) => {
+    const a = ["--from-scan", args.from_scan];
+    if (args.dry_run) a.push("--dry-run");
+    return runAndFormat("documents", "register-batch", a);
+  }
+);
+
+server.registerTool(
   "connaissance_documents_suspects",
   {
     description: "List transcriptions with suspect table patterns (empty cells, orphan pipe lines) that might need re-formatting via the transcrire/fix-ocr skill.",
