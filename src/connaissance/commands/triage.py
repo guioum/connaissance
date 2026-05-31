@@ -135,7 +135,8 @@ def triage(output_file: str | None = None) -> dict:
     by_ext: Counter = Counter()
     repos: list[dict] = []
     bundles: list[dict] = []
-    archives: list[dict] = []
+    archive_roots: list[str] = []        # racines d'archives détectées
+    arch_stats: dict[str, dict] = {}     # root → {path, docs, archived}
     container_files = 0                  # fichiers AVALÉS par conteneurs
     documents: list[str] = []           # échantillon des vrais docs (groupe A)
 
@@ -165,17 +166,23 @@ def triage(output_file: str | None = None) -> dict:
             dirnames[:] = []
             continue
 
-        # Archive par densité : dossier volumineux quasi sans documents → unité.
-        # (Sauf la racine. Le seuil protège les dossiers riches en documents.)
-        if d != root:
+        # Archive par densité : dossier volumineux quasi sans documents. On NE
+        # l'enterre PAS — ses vrais documents sont toujours extraits vers le
+        # groupe A ; seul son résidu NON-documentaire (médias, code…) est mis de
+        # côté. Le seuil de détection protège les dossiers riches en documents.
+        cur_archive = None
+        for ar in archive_roots:
+            if dirpath == ar or dirpath.startswith(ar + os.sep):
+                cur_archive = ar
+                break
+        if cur_archive is None and d != root:
             st = sub_total.get(dirpath, 0)
             sd = sub_docs.get(dirpath, 0)
             if st >= ARCHIVE_MIN_FILES and (sd / st) <= ARCHIVE_MAX_DOC_RATIO:
-                container_files += st
-                archives.append({"path": str(d.relative_to(root)),
-                                 "files": st, "docs": sd})
-                dirnames[:] = []
-                continue
+                cur_archive = dirpath
+                archive_roots.append(dirpath)
+                arch_stats[dirpath] = {"path": str(d.relative_to(root)),
+                                       "docs": 0, "archived": 0}
 
         for f in filenames:
             if f.startswith("."):
@@ -183,10 +190,24 @@ def triage(output_file: str | None = None) -> dict:
             ext = Path(f).suffix.lower().lstrip(".")
             by_ext[ext] += 1
             g = _classify_ext(ext)
-            groups[g] += 1
             if g == "A_documents":
+                # Un document est TOUJOURS extrait, où qu'il soit.
+                groups["A_documents"] += 1
                 documents.append(str((d / f).relative_to(root)))
+                if cur_archive:
+                    arch_stats[cur_archive]["docs"] += 1
+            elif cur_archive:
+                # Résidu non-documentaire d'une archive → mis de côté.
+                container_files += 1
+                arch_stats[cur_archive]["archived"] += 1
+            else:
+                groups[g] += 1
 
+    archives = [
+        {"path": s["path"], "files": s["docs"] + s["archived"],
+         "docs_extracted": s["docs"], "archived": s["archived"]}
+        for s in arch_stats.values()
+    ]
     loose = sum(groups.values())
     payload = {
         "total_files": loose + container_files,
@@ -196,7 +217,7 @@ def triage(output_file: str | None = None) -> dict:
             "files_total": container_files,      # fichiers avalés par les unités
             "repos_code": sorted(repos, key=lambda r: -r["files"]),
             "bundles": sorted(bundles, key=lambda r: -r["files"]),
-            "archives": sorted(archives, key=lambda r: -r["files"]),
+            "archives": sorted(archives, key=lambda r: -r["archived"]),
         },
         "by_extension": dict(by_ext.most_common(40)),
         # Échantillon ÉTALÉ sur tout l'arbre (pas seulement le début du walk),

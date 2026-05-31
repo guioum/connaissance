@@ -68,10 +68,10 @@ def test_density_archive_collapses_doc_poor_folder(tmp_path, monkeypatch):
     res = T.triage()
     archs = res["containers"]["archives"]
     assert len(archs) == 1
-    assert archs[0]["files"] == 121 and archs[0]["docs"] == 1
-    # tout le dump est avalé ; seule la facture racine reste en vrac
+    # le résidu (120 json) est mis de côté ; le doc égaré est EXTRAIT vers A.
+    assert archs[0]["docs_extracted"] == 1 and archs[0]["archived"] == 120
     assert res["groups"].get("D_code", 0) == 0
-    assert res["groups"].get("A_documents") == 1
+    assert res["groups"].get("A_documents") == 2   # facture racine + egare.pdf extrait
 
 
 def test_small_doc_poor_folder_is_not_archived(tmp_path, monkeypatch):

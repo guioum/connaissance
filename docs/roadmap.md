@@ -29,9 +29,10 @@ grande réorg tant que ce n'est pas validé.
   Drive contient de vrais documents — bulletins, livres — qui remontent en A).
   Les **conteneurs** (13 repos de code, 23 paquets macOS `.app`/`.abbu`/`.ynab4`)
   sont des unités exclues du décompte ; une **détection « archive » par densité**
-  collapse aussi les dossiers volumineux quasi sans documents (résidus de dumps :
-  codebase 2020, cruft Takeout) en protégeant les dossiers riches en docs (un
-  Drive à 14 % de docs ne se collapse pas — < 1 % de docs égarés au total).
+  met de côté le **résidu non-documentaire** des dossiers volumineux quasi sans
+  documents (dumps : codebase 2020, cruft Takeout) — mais leurs **vrais
+  documents sont toujours extraits vers le groupe A** (jamais enterrés : ex.
+  les diplômes des enfants dans `_Permanent/Souvenirs` remontent en A).
   Corpus réel — EN VRAC à classer : **9,5k documents** · 9,4k médias · 4k code ·
   0,6k autre · 0,2k exports divers ; + 42k fichiers mis de côté en
   6 repos · 13 paquets · 16 archives. Heuristiques tunables (`commands/triage.py`).
