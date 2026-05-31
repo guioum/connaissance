@@ -69,7 +69,10 @@ def verifier_liens_casses() -> list[dict]:
             fm = _lire_frontmatter(fiche)
             if not fm:
                 continue
-            for rel in fm.get("relations", []):
+            # `relations:` vide en YAML -> None (pas []), d'où le `or []`.
+            for rel in (fm.get("relations") or []):
+                if not isinstance(rel, dict):
+                    continue
                 entity_ref = rel.get("entity", "")
                 if not entity_ref:
                     continue
@@ -211,6 +214,85 @@ def verifier_doublons() -> list[dict]:
     return problemes
 
 
+# --- Vérification 6 : Quasi-doublons de documents (SimHash texte) ---
+
+def verifier_quasi_doublons(seuil: int | None = None) -> list[dict]:
+    """Détecter les quasi-doublons de documents par SimHash du texte OCR.
+
+    Compare les transcriptions de ``Transcriptions/Documents/`` via un SimHash
+    64 bits (caché dans tracking.db). Deux transcriptions à distance de Hamming
+    <= ``seuil`` (défaut 3) forment un cluster. Chaque cluster est annoté :
+
+    - ``doublon_probable`` : même entité ET même date — le même document a été
+      transcrit/classé plusieurs fois. Candidat sûr à fusionner.
+    - ``recurrent_probable`` : même entité mais dates DIFFÉRENTES — document
+      récurrent au gabarit quasi identique (virement annuel, carte
+      d'embarquement même trajet d'une année sur l'autre). Probablement des
+      événements distincts, à NE PAS fusionner.
+    - ``classement_croise`` : entités DIFFÉRENTES — cross-filing intentionnel
+      du step ``organize`` (ex. une carte d'embarquement classée sous
+      l'organisme ET sous les personnes). À confirmer, pas à supprimer.
+
+    Lecture seule : ne supprime ni ne déplace rien.
+    """
+    from connaissance.core.dedup import (DEFAULT_THRESHOLD, cluster_by_hamming,
+                                         from_hex)
+    if seuil is None:
+        seuil = DEFAULT_THRESHOLD
+
+    _date_re = re.compile(r"(\d{4}-\d{2}-\d{2})")
+
+    docs_dir = TRANSCRIPTIONS / "Documents"
+    if not docs_dir.is_dir():
+        return []
+
+    entries: list[tuple[str, int]] = []  # (chemin relatif à Documents/, simhash)
+    with TrackingDB() as db:
+        for md in sorted(docs_dir.rglob("*.md")):
+            rel_cache = md.relative_to(CONNAISSANCE)  # clé de cache logique
+            h = db.get_or_compute_simhash(md, rel_cache)
+            if h is None:
+                continue
+            entries.append((str(md.relative_to(docs_dir)), from_hex(h)))
+
+    if len(entries) < 2:
+        return []
+
+    clusters = cluster_by_hamming([v for _, v in entries], seuil)
+
+    def _entite(rel: str) -> str:
+        # Documents/<type>/<slug>/fichier.md  ->  "<type>/<slug>"
+        parts = Path(rel).parts
+        if len(parts) >= 2:
+            return "/".join(parts[:2])
+        return parts[0] if parts else rel
+
+    def _date(rel: str) -> str:
+        m = _date_re.search(Path(rel).name)
+        return m.group(1) if m else ""
+
+    problemes = []
+    for c in clusters:
+        fichiers = sorted(entries[i][0] for i in c)
+        entites = sorted({_entite(f) for f in fichiers})
+        dates = sorted({_date(f) for f in fichiers if _date(f)})
+        if len(entites) > 1:
+            categorie = "classement_croise"
+        elif len(dates) <= 1:
+            categorie = "doublon_probable"
+        else:
+            categorie = "recurrent_probable"
+        problemes.append({
+            "categorie": categorie,
+            "entites": entites,
+            "dates": dates,
+            "fichiers": fichiers,
+            "count": len(fichiers),
+        })
+    problemes.sort(key=lambda p: p["count"], reverse=True)
+    return problemes
+
+
 # --- API publique ---
 
 
@@ -220,6 +302,7 @@ _AUDIT_STEPS = {
     "triplets_desynchronises": verifier_triplets,
     "attachements_manquants": verifier_attachements,
     "doublons": verifier_doublons,
+    "quasi_doublons": verifier_quasi_doublons,
 }
 
 

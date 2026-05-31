@@ -8,3 +8,4 @@ node_modules/
 mcpb/server/index.js.bundled
 *.mcpb
 .DS_Store
+scratch/

@@ -76,6 +76,20 @@ CREATE INDEX IF NOT EXISTS idx_files_hash ON files(hash);
 -- idx_files_size créé dans _migrate() après ALTER TABLE ADD COLUMN size,
 -- pour rester compatible avec les DB v2.13.0 et antérieures.
 
+-- Cache des SimHash texte des transcriptions (détection de quasi-doublons).
+-- Indexé sur le chemin LOGIQUE relatif à CONNAISSANCE_ROOT : clé stable et
+-- identique en Mac natif (~/Connaissance) comme en cowork VM (~/mnt/Connaissance),
+-- pour que le cache soit partagé entre environnements. Validé par (size, mtime).
+CREATE TABLE IF NOT EXISTS text_simhash (
+    rel_path TEXT NOT NULL UNIQUE,
+    simhash TEXT,
+    size INTEGER,
+    mtime REAL,
+    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%S', 'now', 'localtime'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_text_simhash ON text_simhash(simhash);
+
 CREATE TABLE IF NOT EXISTS llm_usage (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     timestamp TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%S', 'now', 'localtime')),
@@ -449,6 +463,66 @@ class TrackingDB:
         if h is None:
             return None
         self.register_hash(h, str(path), size=size, mtime=mtime)
+        return h
+
+    def get_or_compute_simhash(self, abs_path, rel_path,
+                               compute_fn=None) -> str | None:
+        """SimHash texte d'une transcription, caché par ``(rel_path, size, mtime)``.
+
+        - ``abs_path`` : chemin physique à lire/stat (dépend de l'environnement).
+        - ``rel_path`` : chemin LOGIQUE relatif à CONNAISSANCE_ROOT — la clé de
+          cache, stable entre Mac natif et cowork VM.
+
+        Même logique JIT que ``get_or_compute_hash`` : si la ligne existe avec
+        ``(size, mtime)`` identiques et un ``simhash`` non NULL, on le retourne
+        sans relire le fichier. Sinon on calcule (défaut : SimHash 64 bits du
+        texte) et on persiste. Retourne le SimHash en hex (16 car.) ou ``None``
+        si le fichier est vide/illisible.
+        """
+        try:
+            st = Path(abs_path).stat()
+        except OSError:
+            return None
+        size = int(st.st_size)
+        mtime = float(st.st_mtime)
+
+        row = self._conn.execute(
+            "SELECT simhash, size, mtime FROM text_simhash WHERE rel_path = ?",
+            (str(rel_path),)).fetchone()
+        if row is not None:
+            d = dict(row)
+            if (d.get("simhash")
+                    and d.get("size") == size
+                    and d.get("mtime") == mtime):
+                return d["simhash"]
+
+        if compute_fn is None:
+            from connaissance.core.dedup import simhash_text, to_hex
+
+            def _default_compute(p):
+                try:
+                    txt = Path(p).read_text(encoding="utf-8", errors="replace")
+                except OSError:
+                    return None
+                v = simhash_text(txt)
+                return to_hex(v) if v is not None else None
+            compute = _default_compute
+        else:
+            compute = compute_fn
+
+        h = compute(abs_path)
+        if h is None:
+            return None
+        self._conn.execute(
+            """INSERT INTO text_simhash (rel_path, simhash, size, mtime)
+               VALUES (?, ?, ?, ?)
+               ON CONFLICT(rel_path) DO UPDATE SET
+                 simhash=excluded.simhash,
+                 size=excluded.size,
+                 mtime=excluded.mtime,
+                 updated_at=strftime('%Y-%m-%dT%H:%M:%S', 'now', 'localtime')""",
+            (str(rel_path), h, size, mtime))
+        self._conn.commit()
         return h
 
     def purge_source_hashes(self) -> None:

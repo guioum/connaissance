@@ -941,9 +941,9 @@ server.registerTool(
 server.registerTool(
   "connaissance_audit_check",
   {
-    description: "Run deterministic integrity checks : broken links, invalid frontmatter, desynchronized triplets, missing attachments, duplicates. For overdue actions (business content), use connaissance_actions_list instead.",
+    description: "Run deterministic integrity checks : broken links, invalid frontmatter, desynchronized triplets, missing attachments, exact duplicates, near-duplicate documents (SimHash on OCR text). For overdue actions (business content), use connaissance_actions_list instead.",
     inputSchema: {
-      steps: z.string().optional().describe("Comma-separated subset of: liens_casses, frontmatter_invalide, triplets_desynchronises, attachements_manquants, doublons. Default 'all'."),
+      steps: z.string().optional().describe("Comma-separated subset of: liens_casses, frontmatter_invalide, triplets_desynchronises, attachements_manquants, doublons, quasi_doublons. Default 'all'."),
     },
     annotations: { readOnlyHint: true },
   },
