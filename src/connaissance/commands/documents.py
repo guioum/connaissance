@@ -7,6 +7,7 @@ Expose :
 """
 
 import json
+import shutil
 import sys
 import re
 from datetime import datetime, timezone
@@ -21,6 +22,12 @@ from connaissance.core.filtres import Filtres
 
 DOCUMENTS_DIR = BASE_PATH / "Documents"
 TRANSCRIPTIONS_DIR = BASE_PATH / "Connaissance" / "Transcriptions" / "Documents"
+RESUMES_DOCS_DIR = BASE_PATH / "Connaissance" / "Résumés" / "Documents"
+# Vue par catégorie : le préfixe « - » fait auto-exclure ce dossier du scan.
+CATEGORY_VIEW_NAME = "- Par catégorie"
+_VIEW_SOURCE_EXTS = [".pdf", ".png", ".jpg", ".jpeg", ".docx", ".doc",
+                     ".xlsx", ".xls", ".pptx", ".ppt", ".heic", ".tiff",
+                     ".tif", ".txt"]
 
 # Champs canoniques du frontmatter de transcription de document.
 # Les autres champs présents dans un frontmatter existant sont préservés.
@@ -826,6 +833,94 @@ def register_batch(scan_file: str, dry_run: bool = False,
         "missing": missing,
         "total": len(items),
         "dry_run": dry_run,
+    }
+
+
+def _find_source_for_resume(rel_no_ext: Path) -> Path | None:
+    """Source physique d'un résumé (mirror entity_type/slug/nom sous Documents)."""
+    for ext in _VIEW_SOURCE_EXTS:
+        cand = DOCUMENTS_DIR / rel_no_ext.with_suffix(ext)
+        if cand.exists():
+            return cand
+    parent = DOCUMENTS_DIR / rel_no_ext.parent
+    if parent.is_dir():
+        hits = sorted(parent.glob(rel_no_ext.name + ".*"))
+        if hits:
+            return hits[0]
+    return None
+
+
+def category_view(apply: bool = False, clear: bool = False) -> dict:
+    """Vue navigable de ~/Documents/ par CATÉGORIE, en raccourcis (symlinks).
+
+    L'arborescence canonique reste par ENTITÉ ; cette vue ajoute une navigation
+    par catégorie SANS rien déplacer. Chaque entrée est un raccourci vers le
+    vrai fichier source, sous ``~/Documents/- Par catégorie/<categorie>/``. Le
+    préfixe « - » exclut ce dossier du scan du pipeline.
+
+    La catégorie est lue dans le frontmatter des résumés (qui miroitent les
+    sources). Modes :
+
+    - défaut : **dry-run** — renvoie la répartition sans rien écrire.
+    - ``apply`` : (re)construit la vue à neuf (idempotent).
+    - ``clear`` : supprime la vue (réversible — rien d'autre n'est touché).
+    """
+    view_dir = DOCUMENTS_DIR / CATEGORY_VIEW_NAME
+
+    if clear:
+        existed = view_dir.exists()
+        if existed:
+            shutil.rmtree(view_dir)
+        return {"cleared": True, "existed": existed, "view_dir": str(view_dir)}
+
+    by_cat: dict[str, list[tuple[str, Path]]] = {}
+    no_category = missing_source = 0
+    if RESUMES_DOCS_DIR.is_dir():
+        for md in sorted(RESUMES_DOCS_DIR.rglob("*.md")):
+            if md.name.startswith("_") or "Attachments" in md.parts:
+                continue
+            fm = _read_transcription_frontmatter(md) or {}
+            cat = str(fm.get("category") or "").strip()
+            if not cat:
+                no_category += 1
+                continue
+            rel = md.relative_to(RESUMES_DOCS_DIR)
+            src = _find_source_for_resume(rel.with_suffix(""))
+            if src is None:
+                missing_source += 1
+                continue
+            entity = rel.parts[-2] if len(rel.parts) >= 2 else "divers"
+            by_cat.setdefault(cat, []).append((f"[{entity}] {src.name}", src))
+
+    counts = {c: len(v) for c, v in
+              sorted(by_cat.items(), key=lambda kv: -len(kv[1]))}
+
+    links_created = 0
+    if apply:
+        if view_dir.exists():
+            shutil.rmtree(view_dir)
+        view_dir.mkdir(parents=True)
+        for cat, items in by_cat.items():
+            cdir = view_dir / cat
+            cdir.mkdir(parents=True, exist_ok=True)
+            for link_name, src in items:
+                link = cdir / link_name
+                i = 1
+                while link.exists() or link.is_symlink():
+                    p = Path(link_name)
+                    link = cdir / f"{p.stem} ({i}){p.suffix}"
+                    i += 1
+                link.symlink_to(src)
+                links_created += 1
+
+    return {
+        "categories": counts,
+        "total": sum(counts.values()),
+        "no_category": no_category,
+        "missing_source": missing_source,
+        "applied": apply,
+        "links_created": links_created,
+        "view_dir": str(view_dir),
     }
 
 

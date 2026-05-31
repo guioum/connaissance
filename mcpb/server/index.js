@@ -360,6 +360,23 @@ server.registerTool(
 );
 
 server.registerTool(
+  "connaissance_documents_category_view",
+  {
+    description: "Generate a category-based VIEW of ~/Documents/ as symlinks under '- Par catégorie/<category>/'. The canonical tree stays organized by entity; the category lives in metadata. Read-only on the originals, fully regenerable, and excluded from the pipeline scan via the '- ' prefix. Default is dry-run (returns the per-category breakdown). Pass apply=true to (re)build the symlinks, clear=true to remove the view. Regenerate after a classification session, since it's a snapshot.",
+    inputSchema: {
+      apply: z.boolean().optional().describe("(Re)build the symlink view (idempotent)."),
+      clear: z.boolean().optional().describe("Remove the view (reversible)."),
+    },
+  },
+  async (args) => {
+    const a = [];
+    if (args.apply) a.push("--apply");
+    if (args.clear) a.push("--clear");
+    return runAndFormat("documents", "category-view", a);
+  }
+);
+
+server.registerTool(
   "connaissance_documents_suspects",
   {
     description: "List transcriptions with suspect table patterns (empty cells, orphan pipe lines) that might need re-formatting via the transcrire/fix-ocr skill.",

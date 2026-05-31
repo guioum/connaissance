@@ -60,6 +60,8 @@ uv run --extra test pytest
   courriels par signal, avec configs injectées (découplé du template).
 - [`test_register_batch.py`](../tests/test_register_batch.py) — register en
   lot depuis un manifeste de scan (partition présent/manquant, fail-loud).
+- [`test_category_view.py`](../tests/test_category_view.py) — vue par catégorie
+  en raccourcis (répartition, symlinks vers l'original, clear non destructif).
 
 Les modules couplés à l'environnement (`audit`, `resolution`, pipeline) ne sont
 pas encore testés — voir [roadmap.md](roadmap.md).

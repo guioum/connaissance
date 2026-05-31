@@ -88,6 +88,16 @@ enrichissement sémantique qmd pour les cas ambigus (`organize enrich`). Les
 résumés non encore classables tombent dans `divers/` ou `inconnus/`. `promus/`
 contient les documents promus depuis des pièces jointes (`optimize`).
 
+> **Entité vs catégorie.** `~/Documents/` est rangé physiquement par **entité**
+> (`<type>/<slug>/<date> titre.ext`) ; la **catégorie** (`banque`, `impots`…) du
+> frontmatter n'apparaît **pas** dans le chemin — c'est une étiquette, pas un
+> dossier (la catégorie est fortement corrélée à l'entité pour les organismes,
+> et baker un jugement IA mutable dans l'arborescence la fragiliserait).
+> `documents category-view` génère une **vue** navigable par catégorie sous
+> `~/Documents/- Par catégorie/`, en raccourcis vers les originaux : l'autre axe
+> sans déplacer ni dupliquer. Le préfixe `- ` l'exclut du scan ; elle est
+> régénérable (`--apply`) et réversible (`--clear`).
+
 ## tracking.db
 
 SQLite sous `~/Connaissance/.config/tracking.db`, **propriété exclusive du

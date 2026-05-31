@@ -138,6 +138,18 @@ class RegisterBatch(TypedDict):
     dry_run: bool
 
 
+class CategoryView(TypedDict, total=False):
+    categories: dict       # {categorie: nombre}, triées par fréquence
+    total: int
+    no_category: int       # résumés sans champ category
+    missing_source: int    # résumés dont le fichier source est introuvable
+    applied: bool
+    links_created: int
+    cleared: bool          # présent en mode --clear
+    existed: bool
+    view_dir: str
+
+
 # --- emails ---
 
 class EmailsStats(TypedDict):
