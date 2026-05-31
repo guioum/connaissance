@@ -41,9 +41,15 @@ grande réorg tant que ce n'est pas validé.
   Corpus réel — EN VRAC à classer : **9,5k documents** · 9,4k médias · 4k code ·
   0,6k autre · 0,2k exports divers ; + 42k fichiers mis de côté en
   6 repos · 13 paquets · 16 archives. Heuristiques tunables (`commands/triage.py`).
-- [ ] 🟡 **Phase B — Extraction de signaux (groupe A, zéro OCR)** : nom, chemin,
-  dates, métadonnées PDF/Office, texte embarqué (born-digital), texte du cache,
-  EXIF. Lecture via le miroir SSD (`documents_read_path`).
+- [ ] 🟡 **Phase B — Extraction de signaux (groupe A, zéro OCR)** ⏭️ *prochaine* :
+  pour chaque doc en vrac (+ docs des sujets), produire un « paquet de signaux »
+  sans Mistral — nom de fichier, chemin, **nom du dossier d'origine** (→ sujet),
+  dates (fichier, EXIF, métadonnées PDF/Office), **texte embarqué** des PDF
+  born-digital (pypdfium2/pdfminer), texte du **cache** OCR existant, extractive
+  summarization (mots-clés / premières lignes). Détecter born-digital vs scanné
+  (page 1 sans texte = scanné → signaux chemin/nom seulement). Nouvelle commande
+  `documents signals` (+ outil MCP), sortie JSON, lecture via le **SSD**
+  (`documents_read_path`), rien déplacé.
 - [ ] 🟡 **Phase C — Pré-classement heuristique** : entité + catégorie + date +
   titre, avec confiance ; basse confiance → zone d'attente (vrai pipeline
   OCR+LLM plus tard). Réutilise la taxonomie + `resolution.py`. Pose aussi le
