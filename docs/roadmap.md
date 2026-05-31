@@ -24,19 +24,34 @@ quand c'est obsolète. Priorités indicatives : 🔴 haute · 🟡 moyenne · �
   corpus de transcriptions grossit beaucoup (aujourd'hui quelques centaines,
   largement OK).
 
-### SSD & environnements
+### SSD comme cache de lecture (v2.16.0)
 
-- [ ] 🔴 Câbler `documents_read_root()` **env-aware** dans
-  [`core/paths.py`](../src/connaissance/core/paths.py) : préférer le miroir SSD
-  s'il est monté, sinon `~/Documents` ; sauter les fichiers `dataless` en mode
-  `--materialized-only`. Helper `is_dataless()`. Voir
+- [x] **Câblage SSD-aware** : `documents_cache_root()` / `documents_read_path()`
+  / `is_dataless()` dans `paths.py` ; `get_or_compute_hash(read_path=)` lit le
+  miroir mais indexe sous le canonique ; `documents scan` émet `read_source`.
+  Routé dans `documents` (scan/register) et `audit reindex`. Voir
   [environments.md](environments.md).
+- [ ] 🔴 **Skill `transcrire` : OCR depuis `read_source`** — le gros gain de
+  masse. Le CLI émet déjà `read_source` (SSD) ; le skill/MCP d'OCR doit lire ce
+  chemin (pas `source`) pour éviter de matérialiser iCloud à chaque nouveau
+  document. `register` garde `source` comme identité. (Repo séparé du shim de
+  skills.)
+- [ ] 🟢 Mode `--materialized-only` pour les passes de masse **sans** SSD :
+  sauter les fichiers `dataless` (helper déjà présent) au lieu de déclencher
+  des téléchargements.
+- [ ] 🟢 `optimize` ne bénéficie pas du SSD (lit des PJ sous `Connaissance/` et
+  des `promus/` fraîchement écrits) — laissé tel quel, documenté.
 
 ## Corrections & dette technique
 
+- [ ] 🟡 **`scope.py` et `audit_archive.py` utilisent `HOME / "Documents"`** au
+  lieu de `BASE_PATH / "Documents"` — faux en **cowork** (HOME ≠ BASE_PATH →
+  pointe hors du montage). Centraliser sur `paths.DOCUMENTS_DIR`.
 - [ ] 🟡 **Auditer les `fm.get("…", [])`** susceptibles du même bug que
   `verifier_liens_casses` : un champ liste vide en YAML parse en `None`, pas
   `[]`, et plante à l'itération. Garder le motif `(fm.get("x") or [])`.
+- [ ] 🟢 `hash_file()` dans `commands/documents.py` est du **code mort** (aucun
+  appelant) — retirer.
 - [ ] 🟡 **Pas de suite de tests** : ajouter `pytest`, en commençant par les
   composants `core/` purs et déterministes — `dedup` (simhash, clustering),
   `filtres` (scoring courriels), le cache de `tracking` (hit/miss sur

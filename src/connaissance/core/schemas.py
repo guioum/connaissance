@@ -96,11 +96,14 @@ class PipelineDetection(TypedDict, total=False):
 
 # --- documents ---
 
-class DocumentToTranscribe(TypedDict):
-    path: str
+class DocumentToTranscribe(TypedDict, total=False):
+    source: str          # chemin canonique (identité : frontmatter, DB, register)
+    read_source: str     # chemin physique à OCR/lire — miroir SSD si dispo, sinon = source
+    transcription: str   # chemin miroir de sortie sous Transcriptions/Documents/
     rel: str
     size: int
-    mtime: float
+    hash: str | None     # présent seulement si un hash a été calculé (JIT)
+    reason: str          # ex. "source_changed"
 
 
 class DocumentsScan(TypedDict):

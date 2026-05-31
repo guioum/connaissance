@@ -14,7 +14,8 @@ from pathlib import Path
 
 import yaml
 
-from connaissance.core.paths import BASE_PATH, require_paths
+from connaissance.core.paths import (BASE_PATH, documents_read_path,
+                                      require_paths)
 from connaissance.core.tracking import TrackingDB
 from connaissance.core.filtres import Filtres
 
@@ -387,7 +388,7 @@ def scan_documents(since=None, until=None, db=None):
             # (size, mtime) divergent → hash-confirm avant de déclencher
             # une ré-OCR coûteuse. Couvre le cas `touch` sans changement
             # réel (mtime a bougé mais contenu identique).
-            file_hash = db.get_or_compute_hash(f)
+            file_hash = db.get_or_compute_hash(f, read_path=documents_read_path(f))
             stored_hash = _fm_source_hash(fm)
             if file_hash and stored_hash and stored_hash == file_hash:
                 # Contenu inchangé (hash identique malgré mtime différent) :
@@ -398,6 +399,7 @@ def scan_documents(since=None, until=None, db=None):
             if file_hash and stored_hash and stored_hash != file_hash:
                 to_process.append({
                     "source": str(f),
+                    "read_source": str(documents_read_path(f)),
                     "transcription": str(trans_path),
                     "rel": str(rel),
                     "size": size,
@@ -417,13 +419,15 @@ def scan_documents(since=None, until=None, db=None):
         file_hash: str | None = None
         is_duplicate = False
         if candidates:
-            file_hash = db.get_or_compute_hash(f)
+            file_hash = db.get_or_compute_hash(f, read_path=documents_read_path(f))
             if file_hash:
                 for c in candidates:
                     c_hash = c.get("hash")
                     if c_hash is None:
                         # Matérialiser le hash du candidat au besoin
-                        c_hash = db.get_or_compute_hash(Path(c["path"]))
+                        cpath = Path(c["path"])
+                        c_hash = db.get_or_compute_hash(
+                            cpath, read_path=documents_read_path(cpath))
                     if c_hash and c_hash == file_hash:
                         is_duplicate = True
                         break
@@ -433,6 +437,7 @@ def scan_documents(since=None, until=None, db=None):
 
         to_process.append({
             "source": str(f),
+            "read_source": str(documents_read_path(f)),
             "transcription": str(trans_path),
             "rel": str(rel),
             "size": size,
@@ -472,8 +477,10 @@ def register_document(db, source_path, transcription_path, file_hash=None):
 
     if not file_hash:
         # Passe via le cache JIT : si la DB a déjà ce hash pour (path, size,
-        # mtime), on évite une relecture complète du fichier.
-        file_hash = db.get_or_compute_hash(source_path)
+        # mtime), on évite une relecture complète du fichier. Lecture du
+        # contenu depuis le miroir SSD si disponible (pas de download iCloud).
+        file_hash = db.get_or_compute_hash(
+            source_path, read_path=documents_read_path(source_path))
 
     # Injecter le frontmatter canonique dans le fichier transcription.
     # Source de vérité pour source/hash/size/mtime ; la DB est un index dérivé.

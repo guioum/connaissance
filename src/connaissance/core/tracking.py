@@ -413,16 +413,21 @@ class TrackingDB:
         self._conn.commit()
 
     def get_or_compute_hash(self, path,
-                            compute_fn=None) -> str | None:
+                            compute_fn=None, read_path=None) -> str | None:
         """Récupérer le hash d'un fichier depuis le cache, ou le calculer.
 
         Cœur du pipeline JIT :
 
-        - ``stat()`` le fichier. Si la ligne DB existe avec ``(size, mtime)``
-          identiques et un ``hash`` non NULL, retourner ce hash sans lire le
-          fichier.
-        - Sinon, lire + hasher via ``compute_fn(path) -> str | None``
-          (défaut : SHA256 chunké), persister ``(hash, size, mtime)``.
+        - ``stat()`` ``path`` (canonique — clé de cache et de stat). Si la ligne
+          DB existe avec ``(size, mtime)`` identiques et un ``hash`` non NULL,
+          retourner ce hash sans lire le fichier.
+        - Sinon, lire + hasher le **contenu** depuis ``read_path`` s'il est
+          fourni (ex. un miroir SSD local pour éviter un téléchargement iCloud),
+          sinon depuis ``path``. Persister ``(hash, size, mtime)`` sous ``path``.
+
+        ``path`` reste l'identité (clé, frontmatter, DB) ; ``read_path`` n'est
+        qu'une source de lecture alternative — voir ``paths.documents_read_path``.
+        ``stat()`` seul ne télécharge jamais un fichier iCloud dataless.
 
         Retourne ``None`` si le fichier est inaccessible.
         """
@@ -459,7 +464,8 @@ class TrackingDB:
         else:
             compute = compute_fn
 
-        h = compute(path)
+        # Lecture du contenu depuis le miroir si fourni ; identité = ``path``.
+        h = compute(read_path if read_path is not None else path)
         if h is None:
             return None
         self.register_hash(h, str(path), size=size, mtime=mtime)

@@ -48,6 +48,91 @@ BASE_PATH = _detect_base_path()
 # Racine de la base de connaissance : prérequis strict, jamais créée par le plugin.
 CONNAISSANCE_ROOT = BASE_PATH / "Connaissance"
 
+# Racine canonique des documents source (typiquement en iCloud Drive — des
+# fichiers peuvent être `dataless`, leur contenu rechargé à la lecture).
+DOCUMENTS_DIR = BASE_PATH / "Documents"
+
+
+def _detect_documents_cache_root() -> Path | None:
+    """Racine d'un miroir LOCAL de Documents servant de cache de lecture.
+
+    Permet de lire le contenu des documents source sans déclencher de
+    téléchargement iCloud. Le miroir doit préserver la MÊME arborescence
+    relative que ``DOCUMENTS_DIR`` (cas du SSD « Backup Cloud »).
+
+    Résolution :
+    1. ``CONNAISSANCE_DOCUMENTS_CACHE`` (override explicite, ex. autre disque).
+    2. SSD « Backup Cloud » monté — Mac natif (`/Volumes/Backup Cloud/Documents`)
+       ou cowork (`<BASE_PATH>/Backup Cloud/Documents`, monté via le sélecteur).
+
+    Retourne ``None`` si aucun miroir n'est disponible.
+    """
+    import os
+    override = os.environ.get("CONNAISSANCE_DOCUMENTS_CACHE")
+    if override:
+        p = Path(override)
+        return p if p.is_dir() else None
+    for c in (Path("/Volumes/Backup Cloud/Documents"),
+              BASE_PATH / "Backup Cloud" / "Documents"):
+        if c.is_dir():
+            return c
+    return None
+
+
+# Mémo process-local : l'état de montage est stable pour la durée d'un run CLI.
+_CACHE_ROOT_MEMO: list[Path | None] = []
+
+
+def documents_cache_root() -> Path | None:
+    """Racine du miroir de lecture des documents (SSD), ou ``None``."""
+    if not _CACHE_ROOT_MEMO:
+        _CACHE_ROOT_MEMO.append(_detect_documents_cache_root())
+    return _CACHE_ROOT_MEMO[0]
+
+
+def documents_read_path(path: Path) -> Path:
+    """Mapper un chemin canonique sous DOCUMENTS_DIR vers son miroir local.
+
+    Si un miroir (SSD) est disponible et contient le fichier avec la MÊME
+    taille (garde anti-miroir-périmé), retourne le chemin miroir — le lire ne
+    déclenche aucun téléchargement iCloud. Sinon retourne ``path`` inchangé.
+
+    No-op pour tout chemin hors DOCUMENTS_DIR : sûr à appliquer partout. Le
+    miroir reste un cache OPPORTUNISTE — l'identité (clé de cache, frontmatter,
+    DB) demeure toujours le chemin canonique ``path``.
+    """
+    path = Path(path)
+    root = documents_cache_root()
+    if root is None:
+        return path
+    try:
+        rel = path.relative_to(DOCUMENTS_DIR)
+    except ValueError:
+        return path
+    mirror = root / rel
+    try:
+        if mirror.is_file() and path.stat().st_size == mirror.stat().st_size:
+            return mirror
+    except OSError:
+        return path
+    return path
+
+
+def is_dataless(path: Path) -> bool:
+    """True si le fichier est un placeholder iCloud non matérialisé (macOS).
+
+    Le lire déclencherait un téléchargement. Détection best-effort via le flag
+    BSD ``UF_DATALESS`` ; sur les plateformes/FS sans ce flag, retourne False.
+    ``stat()`` seul (métadonnées) ne télécharge jamais.
+    """
+    import stat as _stat
+    flag = getattr(_stat, "UF_DATALESS", 0x40000000)
+    try:
+        st = Path(path).stat()
+    except OSError:
+        return False
+    return bool(getattr(st, "st_flags", 0) & flag)
+
 
 def is_cowork() -> bool:
     """True si on tourne dans une VM cowork (home sous /sessions/)."""

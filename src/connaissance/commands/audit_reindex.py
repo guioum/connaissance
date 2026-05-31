@@ -22,7 +22,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from connaissance.core.paths import BASE_PATH
+from connaissance.core.paths import BASE_PATH, documents_read_path
 from connaissance.core.tracking import TrackingDB
 
 try:
@@ -184,8 +184,9 @@ def reindex_transcriptions(db: TrackingDB, dry_run: bool) -> dict:
                             and fm.get("source_hash")):
                         hash_val = _fm_source_hash_str(fm.get("source_hash"))
                     else:
-                        hash_val = (db.get_or_compute_hash(src_path)
-                                    if size is not None else None)
+                        hash_val = (db.get_or_compute_hash(
+                            src_path, read_path=documents_read_path(src_path))
+                            if size is not None else None)
                     before = f.read_text(encoding="utf-8", errors="ignore")
                     _upsert_transcription_frontmatter(
                         f, src_path, hash_val, size, mtime,
@@ -450,7 +451,8 @@ def reindex_document_hashes(db: TrackingDB, dry_run: bool) -> dict:
                 # Source modifiée depuis la transcription : recalculer le hash
                 # (cache JIT via get_or_compute_hash) et rafraîchir le
                 # frontmatter.
-                file_hash = db.get_or_compute_hash(candidate)
+                file_hash = db.get_or_compute_hash(
+                    candidate, read_path=documents_read_path(candidate))
                 if not dry_run and _upsert is not None and file_hash:
                     _upsert(trans, candidate, file_hash, source_size, source_mtime)
                     counts["backfilled"] += 1
@@ -467,7 +469,8 @@ def reindex_document_hashes(db: TrackingDB, dry_run: bool) -> dict:
                     st = source.stat()
                 except OSError:
                     continue
-                h = db.get_or_compute_hash(source)
+                h = db.get_or_compute_hash(
+                    source, read_path=documents_read_path(source))
                 if not h:
                     continue
                 # register_hash déjà fait par get_or_compute_hash (via le

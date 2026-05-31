@@ -48,9 +48,23 @@ matérialisé** de `~/Documents` (mêmes chemins, tailles, mtimes ; ~48 Go). C'e
 une source de lecture **insensible à l'éviction iCloud** : idéale pour les
 passes lourdes (lire le miroir plutôt que de matérialiser tout iCloud).
 
-Statut : la détection du miroir n'est **pas encore câblée** dans `paths.py`
-(prévu : un `documents_read_root()` env-aware qui préfère le SSD s'il est monté,
-sinon iCloud). Voir [roadmap.md](roadmap.md).
+Câblage (depuis v2.16.0) — le SSD est utilisé comme **cache de lecture
+opportuniste**, jamais comme dépendance de correction :
+
+- `paths.documents_cache_root()` détecte le miroir : override
+  `CONNAISSANCE_DOCUMENTS_CACHE`, sinon `/Volumes/Backup Cloud/Documents`
+  (natif) ou `<BASE_PATH>/Backup Cloud/Documents` (cowork via le sélecteur).
+- `paths.documents_read_path(canonique)` renvoie le chemin miroir s'il existe
+  avec la **même taille** (garde anti-miroir-périmé), sinon le canonique. No-op
+  hors `DOCUMENTS_DIR`.
+- L'**identité** reste toujours le chemin canonique : `get_or_compute_hash`
+  lit le contenu depuis le miroir (`read_path=`) mais indexe sous le canonique ;
+  `documents scan` émet `source` (canonique) **et** `read_source` (physique,
+  SSD si dispo) — l'OCR lit `read_source`, `register` enregistre `source`.
+
+`is_dataless(path)` détecte un placeholder iCloud (flag BSD `UF_DATALESS`) sans
+le télécharger — utile pour un futur mode `--materialized-only` quand le SSD est
+absent (voir [roadmap.md](roadmap.md)).
 
 ## Accès au SSD depuis cowork
 
