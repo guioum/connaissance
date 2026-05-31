@@ -17,8 +17,11 @@ grande réorg tant que ce n'est pas validé.
   journalisé + `revert_run` vérifié par hash), table `file_ledger`, groupe CLI
   `ledger list|show|verify|revert` + 4 outils MCP. Toute modif de nom/dossier
   passe par là ; rollback par run, ne restaure que si le hash est intact.
-- [ ] 🔴 **Retrofit** : faire passer les déplacements d'`organize` (et les
-  `optimize`) par `safe_move` → tout le flow existant devient journalisé.
+- [x] **Retrofit `organize`** (v2.19.1) : les déplacements (résumé,
+  transcription, document source, fils de courriels) passent par `safe_move` →
+  journalisés et révertibles. `organize apply` retourne `ledger_run`. Les
+  suppressions d'`optimize` (dedup) attendent la « corbeille ledger » ci-dessous
+  (un `unlink` n'est pas réversible sans préserver le fichier).
 - [ ] 🔴 **Phase A — Triage A/B/C/D** : classer chaque fichier (vrais docs /
   code / médias / exports d'apps) par extension + heuristiques de chemin (repo
   de code = regroupé, Takeout/`.enex` = export…). Plan en lecture seule.

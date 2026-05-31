@@ -264,10 +264,11 @@ class OrganizePlan(TypedDict):
     entries: list[OrganizeEntry]
 
 
-class OrganizeApply(TypedDict):
+class OrganizeApply(TypedDict, total=False):
     moved: int
     skipped: int
     errors: list[str]
+    ledger_run: str   # run_id du ledger (présent si des fichiers ont bougé) — pour `ledger revert`
 
 
 class OrganizeResolve(TypedDict):

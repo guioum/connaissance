@@ -16,6 +16,7 @@ from pathlib import Path
 import yaml
 
 from connaissance.core.paths import BASE_PATH
+from connaissance.core import ledger as _ledger
 from connaissance.core.tracking import TrackingDB
 from connaissance.core.resolution import construire_slug, construire_nom_fichier, chercher_alias
 
@@ -91,24 +92,34 @@ def _extract_attachment_filenames(md_path):
     return filenames
 
 
-def _move_with_attachments(src, dst, source_type="documents"):
+def _move_with_attachments(src, dst, source_type="documents",
+                           db=None, run_id=None, reason=""):
     """Déplacer un fichier .md et ses attachements référencés.
 
     Uniforme pour les trois sources (documents, courriels, notes) :
     ``shutil.move`` pour éviter la duplication. Si un autre .md du dossier
     source référence encore un attachement, on le laisse en place (move
     conditionnel sur « plus aucun référent restant »).
+
+    Si ``db`` et ``run_id`` sont fournis, chaque déplacement passe par le
+    **ledger** (``safe_move``) → réversible. Sinon repli sur ``shutil.move``.
     """
+    def _mv(a, b):
+        if db is not None and run_id is not None:
+            _ledger.safe_move(db, a, b, reason, run_id)
+        else:
+            shutil.move(str(a), str(b))
+
     dst.parent.mkdir(parents=True, exist_ok=True)
 
     if src.exists() and not dst.exists():
-        shutil.move(str(src), str(dst))
+        _mv(src, dst)
 
         # Annotations (documents uniquement)
         ann_src = src.with_name(src.stem + "_annotations.json")
         ann_dst = dst.with_name(dst.stem + "_annotations.json")
         if ann_src.exists() and not ann_dst.exists():
-            shutil.move(str(ann_src), str(ann_dst))
+            _mv(ann_src, ann_dst)
 
         att_src_dir = src.parent / "Attachments"
         att_dst_dir = dst.parent / "Attachments"
@@ -133,7 +144,7 @@ def _move_with_attachments(src, dst, source_type="documents"):
                 if fname in remaining_refs:
                     shutil.copy2(str(src_file), str(dst_file))
                 else:
-                    shutil.move(str(src_file), str(dst_file))
+                    _mv(src_file, dst_file)
 
         _cleanup_empty_parents(src)
         return True
@@ -213,6 +224,9 @@ def _apply_manifest_impl(entries: list, dry_run: bool, db: TrackingDB) -> dict:
     moved = 0
     skipped = 0
     errors = 0
+    # Un run ledger par lot d'apply : tous les déplacements ci-dessous sont
+    # journalisés sous ce run_id et révertibles ensemble (`ledger revert`).
+    run_id = _ledger.new_run_id("organize")
 
     for entry in entries:
         source = entry["source"]
@@ -274,22 +288,25 @@ def _apply_manifest_impl(entries: list, dry_run: bool, db: TrackingDB) -> dict:
             moved += 1
             continue
 
+        reason = f"organize {source} → {entity_type}/{entity_slug}"
         try:
             # 1. Déplacer le résumé (pas d'attachements dans les résumés miroir)
-            _move_with_attachments(resume_path, dest_resume, source)
+            _move_with_attachments(resume_path, dest_resume, source,
+                                   db=db, run_id=run_id, reason=reason)
 
             # 2. Déplacer la transcription + ses attachements UUID
             trans_path = TRANSCRIPTIONS / source_label / resume_rel
-            _move_with_attachments(trans_path, dest_trans, source)
+            _move_with_attachments(trans_path, dest_trans, source,
+                                   db=db, run_id=run_id, reason=reason)
 
             # 3. Pour les documents : déplacer aussi l'original dans ~/Documents/
             if source == "documents":
                 original = _find_original_document(resume_rel)
                 if original:
                     dest_original = DOCUMENTS_DIR / entity_type / entity_slug / f"{new_name}{original.suffix}"
-                    dest_original.parent.mkdir(parents=True, exist_ok=True)
                     if not dest_original.exists():
-                        shutil.move(str(original), str(dest_original))
+                        _ledger.safe_move(db, original, dest_original,
+                                          reason, run_id)
                         _cleanup_empty_parents(original)
 
             # 4. Pour les courriels (fils) : déplacer toutes les transcriptions du fil
@@ -297,7 +314,8 @@ def _apply_manifest_impl(entries: list, dry_run: bool, db: TrackingDB) -> dict:
                 for mid_hash in entry.get("other_hashes", []):
                     other_trans = trans_path.parent / f"{mid_hash}.md"
                     other_dest = dest_trans.parent / f"{mid_hash}.md"
-                    _move_with_attachments(other_trans, other_dest, "courriels")
+                    _move_with_attachments(other_trans, other_dest, "courriels",
+                                           db=db, run_id=run_id, reason=reason)
 
             moved += 1
 
@@ -349,7 +367,11 @@ def _apply_manifest_impl(entries: list, dry_run: bool, db: TrackingDB) -> dict:
     if errors:
         print(f"  ✗ {errors} erreurs", file=sys.stderr)
 
-    return {"moved": moved, "skipped": skipped, "errors": errors}
+    result = {"moved": moved, "skipped": skipped, "errors": errors}
+    # run_id du ledger : permet `ledger revert <run_id>` si un classement déçoit.
+    if not dry_run and moved:
+        result["ledger_run"] = run_id
+    return result
 
 
 def generer_manifeste():
