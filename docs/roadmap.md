@@ -3,6 +3,37 @@
 Liste vivante de ce qu'il reste à faire. Cocher quand c'est livré, retirer
 quand c'est obsolète. Priorités indicatives : 🔴 haute · 🟡 moyenne · 🟢 basse.
 
+## Grand chantier : réorganisation de ~/Documents (pré-classement)
+
+Objectif : ranger un `~/Documents` très désordonné (~67k fichiers, ~48 Go, 23
+niveaux, 3 logiques de classement contradictoires) selon la logique du système
+(`organismes/personnes/divers/promus`, renommé `AAAA-MM-JJ titre.ext`), **sans
+OCR Mistral** (signaux gratuits : chemin, nom, dates, métadonnées, texte
+embarqué born-digital, cache OCR existant, extractive summarization) et de façon
+**réversible**. Décisions actées : Ledger d'abord ; **dry-run only** pour la
+grande réorg tant que ce n'est pas validé.
+
+- [x] **Phase 0 — Ledger réversible** (v2.19.0) : `core/ledger.py` (`safe_move`
+  journalisé + `revert_run` vérifié par hash), table `file_ledger`, groupe CLI
+  `ledger list|show|verify|revert` + 4 outils MCP. Toute modif de nom/dossier
+  passe par là ; rollback par run, ne restaure que si le hash est intact.
+- [ ] 🔴 **Retrofit** : faire passer les déplacements d'`organize` (et les
+  `optimize`) par `safe_move` → tout le flow existant devient journalisé.
+- [ ] 🔴 **Phase A — Triage A/B/C/D** : classer chaque fichier (vrais docs /
+  code / médias / exports d'apps) par extension + heuristiques de chemin (repo
+  de code = regroupé, Takeout/`.enex` = export…). Plan en lecture seule.
+- [ ] 🟡 **Phase B — Extraction de signaux (groupe A, zéro OCR)** : nom, chemin,
+  dates, métadonnées PDF/Office, texte embarqué (born-digital), texte du cache,
+  EXIF. Lecture via le miroir SSD (`documents_read_path`).
+- [ ] 🟡 **Phase C — Pré-classement heuristique** : entité + catégorie + date +
+  titre, avec confiance ; basse confiance → zone d'attente (vrai pipeline
+  OCR+LLM plus tard). Réutilise la taxonomie + `resolution.py`.
+- [ ] 🟡 **Phase D — Doublons** : exacts (SHA256 caché) + quasi (SimHash texte).
+- [ ] 🟢 Groupes B/C/D classés par logique propre (code regroupé, médias par
+  date, exports tels quels).
+- [ ] 🟢 « Corbeille ledger » : transformer les suppressions (dedup) en
+  déplacement vers une zone réversible plutôt qu'un `unlink`.
+
 ## Améliorations
 
 ### Déduplication (suite de la v2.15.0)

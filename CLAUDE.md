@@ -14,7 +14,7 @@ en MCPB. Aucune duplication de logique métier entre les deux — le MCPB
 est un shell-out léger vers le CLI.
 
 ```
-src/connaissance/        → package Python, CLI avec 13 groupes de commandes
+src/connaissance/        → package Python, CLI avec 14 groupes de commandes
   ├── cli.py             → entry point, fonction main()
   ├── core/              → paths, tracking (SQLite), filtres, résolution, schemas
   ├── commands/          → un module par groupe de sous-commandes
@@ -78,7 +78,7 @@ immédiatement actives sans reinstall.
 3. Ajouter le sub-parser dans `build_parser()`
 4. Ajouter un wrapper MCP dans `mcpb/server/index.js` via
    `server.registerTool()`
-5. Mettre à jour README et le tableau des 50 outils
+5. Mettre à jour README et le tableau des 54 outils
 
 ### Tests manuels
 

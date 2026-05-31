@@ -150,6 +150,38 @@ class CategoryView(TypedDict, total=False):
     view_dir: str
 
 
+class LedgerRun(TypedDict):
+    run_id: str
+    started: str
+    total: int
+    applied: int
+    reverted: int
+    reason: str | None
+
+
+class LedgerRuns(TypedDict):
+    runs: list[LedgerRun]
+
+
+class LedgerShow(TypedDict):
+    run_id: str
+    operations: list[dict]  # lignes file_ledger
+
+
+class LedgerRevert(TypedDict):
+    run_id: str
+    dry_run: bool
+    reverted: int
+    skipped: list[dict]     # [{path, reason}]
+
+
+class LedgerVerify(TypedDict):
+    run_id: str
+    checked: int
+    ok: int
+    issues: list[dict]      # [{path, reason}]
+
+
 # --- emails ---
 
 class EmailsStats(TypedDict):

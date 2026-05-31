@@ -90,6 +90,27 @@ CREATE TABLE IF NOT EXISTS text_simhash (
 
 CREATE INDEX IF NOT EXISTS idx_text_simhash ON text_simhash(simhash);
 
+-- Ledger journalisé des opérations de fichiers (move/rename), réversible.
+-- Chaque ligne 'applied' enregistre l'ancien et le nouveau chemin + le SHA256,
+-- ce qui permet un rollback vérifié (on ne restaure que si le fichier est
+-- intact). Les opérations partagent un run_id (1 run = 1 lot révertible).
+CREATE TABLE IF NOT EXISTS file_ledger (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id TEXT NOT NULL,
+    timestamp TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%S', 'now', 'localtime')),
+    op TEXT NOT NULL,
+    old_path TEXT,
+    new_path TEXT,
+    sha256 TEXT,
+    size INTEGER,
+    mtime REAL,
+    reason TEXT,
+    status TEXT NOT NULL DEFAULT 'applied'
+);
+
+CREATE INDEX IF NOT EXISTS idx_ledger_run ON file_ledger(run_id);
+CREATE INDEX IF NOT EXISTS idx_ledger_sha ON file_ledger(sha256);
+
 CREATE TABLE IF NOT EXISTS llm_usage (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     timestamp TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%S', 'now', 'localtime')),
@@ -530,6 +551,49 @@ class TrackingDB:
             (str(rel_path), h, size, mtime))
         self._conn.commit()
         return h
+
+    # --- Ledger des opérations de fichiers (réversible) ---
+
+    def ledger_record(self, entry: dict) -> None:
+        """Enregistrer une opération de fichier appliquée (status 'applied')."""
+        self._conn.execute(
+            """INSERT INTO file_ledger
+               (run_id, op, old_path, new_path, sha256, size, mtime, reason, status)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'applied')""",
+            (entry["run_id"], entry["op"], entry.get("old_path"),
+             entry.get("new_path"), entry.get("sha256"), entry.get("size"),
+             entry.get("mtime"), entry.get("reason")))
+        self._conn.commit()
+
+    def ledger_runs(self, limit: int = 20) -> list[dict]:
+        """Lister les runs récents avec le compte d'opérations par statut."""
+        rows = self._conn.execute(
+            """SELECT run_id,
+                      MIN(timestamp) AS started,
+                      COUNT(*) AS total,
+                      SUM(status = 'applied') AS applied,
+                      SUM(status = 'reverted') AS reverted,
+                      MAX(reason) AS reason
+               FROM file_ledger
+               GROUP BY run_id
+               ORDER BY started DESC
+               LIMIT ?""", (int(limit),)).fetchall()
+        return [dict(r) for r in rows]
+
+    def ledger_ops(self, run_id: str, status: str | None = None) -> list[dict]:
+        """Opérations d'un run (optionnellement filtrées par statut), ordre chrono."""
+        q = "SELECT * FROM file_ledger WHERE run_id = ?"
+        params: list = [run_id]
+        if status:
+            q += " AND status = ?"
+            params.append(status)
+        q += " ORDER BY id"
+        return [dict(r) for r in self._conn.execute(q, params).fetchall()]
+
+    def ledger_mark_reverted(self, row_id: int) -> None:
+        self._conn.execute(
+            "UPDATE file_ledger SET status = 'reverted' WHERE id = ?", (int(row_id),))
+        self._conn.commit()
 
     def purge_source_hashes(self) -> None:
         """Supprimer toutes les entrées file_type='source' (hashes de documents)."""

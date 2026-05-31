@@ -1197,6 +1197,58 @@ server.registerTool(
   }
 );
 
+server.registerTool(
+  "connaissance_ledger_list",
+  {
+    description: "List recent runs in the file-operation ledger (the reversible journal of every name/folder change). Each run groups the operations of one batch and can be reverted as a whole.",
+    inputSchema: {
+      limit: z.number().optional().describe("Max number of runs (default 20)."),
+    },
+    annotations: { readOnlyHint: true },
+  },
+  async (args) => {
+    const a = [];
+    if (args.limit != null) { a.push("--limit", String(args.limit)); }
+    return runAndFormat("ledger", "list", a);
+  }
+);
+
+server.registerTool(
+  "connaissance_ledger_show",
+  {
+    description: "Show every operation (old path → new path, hash, reason, status) of a ledger run.",
+    inputSchema: { run_id: z.string().describe("The run identifier.") },
+    annotations: { readOnlyHint: true },
+  },
+  async (args) => runAndFormat("ledger", "show", [args.run_id])
+);
+
+server.registerTool(
+  "connaissance_ledger_verify",
+  {
+    description: "Verify a ledger run against disk : are the moved files still present at their new path with the recorded hash? Reports any moved/modified/missing file. Read-only.",
+    inputSchema: { run_id: z.string().describe("The run identifier.") },
+    annotations: { readOnlyHint: true },
+  },
+  async (args) => runAndFormat("ledger", "verify", [args.run_id])
+);
+
+server.registerTool(
+  "connaissance_ledger_revert",
+  {
+    description: "Roll back a ledger run : move each file back to its previous location, in reverse order. Hash-verified — a file whose content changed since the move is skipped, never overwritten. Pass dry_run=true to preview without moving anything.",
+    inputSchema: {
+      run_id: z.string().describe("The run identifier to revert."),
+      dry_run: z.boolean().optional().describe("Preview the rollback without moving files."),
+    },
+  },
+  async (args) => {
+    const a = [args.run_id];
+    if (args.dry_run) a.push("--dry-run");
+    return runAndFormat("ledger", "revert", a);
+  }
+);
+
 // ── Start stdio ────────────────────────────────────────────────
 
 const transport = new StdioServerTransport();

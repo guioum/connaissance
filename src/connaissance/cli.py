@@ -318,6 +318,19 @@ def _cmd_manifest(args) -> Any:
     raise SystemExit(f"verbe inconnu : manifest {args.verb}")
 
 
+def _cmd_ledger(args) -> Any:
+    from connaissance.commands import ledger
+    if args.verb == "list":
+        return ledger.list_runs(limit=args.limit)
+    if args.verb == "show":
+        return ledger.show(args.run_id)
+    if args.verb == "revert":
+        return ledger.revert(args.run_id, dry_run=args.dry_run)
+    if args.verb == "verify":
+        return ledger.verify(args.run_id)
+    raise SystemExit(f"verbe inconnu : ledger {args.verb}")
+
+
 _GROUPS: dict[str, Callable] = {
     "documents": _cmd_documents,
     "emails": _cmd_emails,
@@ -332,6 +345,7 @@ _GROUPS: dict[str, Callable] = {
     "scope": _cmd_scope,
     "config": _cmd_config,
     "manifest": _cmd_manifest,
+    "ledger": _cmd_ledger,
 }
 
 
@@ -638,6 +652,19 @@ def build_parser() -> argparse.ArgumentParser:
     p_mf_patch.add_argument("--set", type=str, default=None,
                             help="k1=v1,k2=v2 à appliquer aux entrées matchées")
     p_mf_patch.add_argument("--delete-filter", dest="delete_filter", type=str, default=None)
+
+    # ledger (journal réversible des opérations de fichiers)
+    p_lg = sub.add_parser("ledger")
+    p_lg_verbs = p_lg.add_subparsers(dest="verb", required=True)
+    p_lg_list = p_lg_verbs.add_parser("list")
+    p_lg_list.add_argument("--limit", type=int, default=20)
+    p_lg_show = p_lg_verbs.add_parser("show")
+    p_lg_show.add_argument("run_id")
+    p_lg_rev = p_lg_verbs.add_parser("revert")
+    p_lg_rev.add_argument("run_id")
+    p_lg_rev.add_argument("--dry-run", dest="dry_run", action="store_true")
+    p_lg_ver = p_lg_verbs.add_parser("verify")
+    p_lg_ver.add_argument("run_id")
 
     return parser
 

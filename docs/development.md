@@ -62,6 +62,8 @@ uv run --extra test pytest
   lot depuis un manifeste de scan (partition présent/manquant, fail-loud).
 - [`test_category_view.py`](../tests/test_category_view.py) — vue par catégorie
   en raccourcis (répartition, symlinks vers l'original, clear non destructif).
+- [`test_ledger.py`](../tests/test_ledger.py) — ledger réversible : `safe_move`
+  journalisé, rollback vérifié par hash, skip si contenu modifié.
 
 Les modules couplés à l'environnement (`audit`, `resolution`, pipeline) ne sont
 pas encore testés — voir [roadmap.md](roadmap.md).
