@@ -101,6 +101,13 @@ GROUPED_PATTERNS = [
 ]
 GROUPED_MIN_DOCS = 2
 
+# Candidats de regroupement (INFORMATIONNEL) : dossiers visiblement cohérents en
+# documents mais dont le nom ne matche aucun thème connu. Suggérés à
+# l'utilisateur (peut révéler de nouveaux thèmes). Ne change RIEN au classement :
+# leurs documents restent en vrac tant qu'ils ne sont pas confirmés.
+CAND_MIN_DOCS = 5
+CAND_MIN_RATIO = 0.7
+
 
 def _norm(s: str) -> str:
     """Minuscule + accents retirés, pour le matching de noms de dossiers."""
@@ -174,6 +181,7 @@ def triage(output_file: str | None = None) -> dict:
     repos: list[dict] = []
     bundles: list[dict] = []
     grouped: list[dict] = []             # dossiers thématiques à garder groupés
+    candidates: list[dict] = []          # candidats de regroupement (suggestions)
     archive_roots: list[str] = []        # racines d'archives détectées
     arch_stats: dict[str, dict] = {}     # root → {path, docs, archived}
     container_files = 0                  # fichiers AVALÉS par conteneurs
@@ -234,6 +242,21 @@ def triage(output_file: str | None = None) -> dict:
                 arch_stats[dirpath] = {"path": str(d.relative_to(root)),
                                        "docs": 0, "archived": 0}
 
+        # Candidat de regroupement (INFORMATIONNEL) : dossier qui CONTIENT
+        # DIRECTEMENT une collection cohérente de documents, sans thème nommé.
+        # On le signale sans rien changer (ses docs restent en vrac). Le compte
+        # « direct » (et non le sous-arbre) cible les vraies collections-feuilles
+        # plutôt que les super-dossiers (un hub de sous-dossiers n'est pas listé).
+        # (Un dossier dont le nom n'est qu'une date — 2020, 2020-03… — est un
+        # bucket temporel, pas un thème : on ne le suggère pas.)
+        if d != root and not re.fullmatch(r"\d{4}([-_. ]\d{1,2}){0,2}", d.name.strip()):
+            here = [f for f in filenames if not f.startswith(".")]
+            ndoc = sum(1 for f in here
+                       if _classify_ext(Path(f).suffix.lower().lstrip(".")) == "A_documents")
+            if ndoc >= CAND_MIN_DOCS and (ndoc / len(here)) >= CAND_MIN_RATIO:
+                candidates.append({"path": str(d.relative_to(root)),
+                                   "docs": ndoc, "files": len(here)})
+
         for f in filenames:
             if f.startswith("."):
                 continue
@@ -267,6 +290,8 @@ def triage(output_file: str | None = None) -> dict:
         "groups": dict(groups.most_common()),   # décompte EN VRAC uniquement
         # Dossiers thématiques à organiser comme UNITÉS (≠ vrac, ≠ résidu).
         "grouped_folders": sorted(grouped, key=lambda g: -g["docs"]),
+        # Suggestions (informationnel) : dossiers cohérents sans thème nommé.
+        "grouped_candidates": sorted(candidates, key=lambda c: -c["docs"]),
         "containers": {
             "files_total": container_files,      # fichiers avalés par les unités
             "repos_code": sorted(repos, key=lambda r: -r["files"]),
@@ -286,6 +311,7 @@ def triage(output_file: str | None = None) -> dict:
             "groups": p["groups"],
             "container_files": p["containers"]["files_total"],
             "grouped_folders": len(p["grouped_folders"]),
+            "grouped_candidates": len(p["grouped_candidates"]),
             "repos_code": len(p["containers"]["repos_code"]),
             "bundles": len(p["containers"]["bundles"]),
             "archives": len(p["containers"]["archives"]),

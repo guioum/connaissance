@@ -187,6 +187,7 @@ class Triage(TypedDict, total=False):
     loose_files: int        # fichiers en vrac, à classer
     grouped_files: int      # fichiers dans les dossiers thématiques groupés
     grouped_folders: list   # [{path, theme, docs, files}] — collections à garder unies
+    grouped_candidates: list  # [{path, docs, files}] — collections cohérentes SANS thème (suggestions, informatif)
     groups: dict            # décompte EN VRAC : {A_documents, B_exports, C_media, D_code, autre}
     containers: dict        # {files_total, repos_code, bundles, archives}.
     # archives : [{path, files, docs_extracted, archived}] — une archive met de
