@@ -22,9 +22,20 @@ les **parcourt** pour en extraire les vrais documents (→ groupe A) ; les
 fichiers d'app sans valeur documentaire (``.enex``, ``.smmx``…) restent en B
 par leur extension.
 
+Trois sorts distincts, donc :
+  - **vrac** (``groups``) : documents à classer individuellement par entité ;
+  - **dossiers groupés** (``grouped_folders``) : collections thématiques
+    cohérentes (impôts d'une année, une formation, les contrats d'un client) à
+    garder ensemble et organiser comme une UNITÉ (futur sujet), détectées par
+    le nom du dossier + un garde-fou « contient des documents » ;
+  - **conteneurs** (repos, paquets, archives) : mis de côté (les archives
+    extraient quand même leurs documents vers le vrac).
+
 Rien n'est déplacé : ``triage`` ne fait que cartographier (schema Triage).
 """
 import os
+import re
+import unicodedata
 from collections import Counter
 from pathlib import Path
 
@@ -76,6 +87,33 @@ EXPORT_EXTS = {"enex", "nib", "abcdp", "abcdg", "ydevice", "smmx", "qfx",
 # riches en documents (ex. un vieux Drive à ~14 % de docs ne se collapse PAS).
 ARCHIVE_MIN_FILES = 100
 ARCHIVE_MAX_DOC_RATIO = 0.03
+
+# Dossiers thématiques à GARDER GROUPÉS (collections cohérentes de documents, à
+# organiser comme une unité — un futur « sujet » — plutôt qu'à éclater par
+# entité). Détectés par le NOM du dossier (accents ignorés, frontières de mots
+# pour éviter « information » → formation, « ressources » → cours). Garde-fou :
+# le dossier doit contenir au moins GROUPED_MIN_DOCS vrais documents.
+GROUPED_PATTERNS = [
+    (re.compile(r"\bimpots?\b|\bfiscal|\bdeclaration|\bt[45]\b|\brl[123]\b"), "impots"),
+    (re.compile(r"\bformations?\b|\bcertification|\bdiplome|\batelier|\bwebinaire|\bcursus"), "formations"),
+    (re.compile(r"\bcontrats?\b|\bmandat|\bconvention|\bentente|\bbail\b"), "contrats"),
+    (re.compile(r"\bclients?\b|\bdossier client"), "clients"),
+]
+GROUPED_MIN_DOCS = 2
+
+
+def _norm(s: str) -> str:
+    """Minuscule + accents retirés, pour le matching de noms de dossiers."""
+    return "".join(c for c in unicodedata.normalize("NFD", s.lower())
+                   if unicodedata.category(c) != "Mn")
+
+
+def _grouped_theme(name: str) -> str | None:
+    n = _norm(name)
+    for rx, theme in GROUPED_PATTERNS:
+        if rx.search(n):
+            return theme
+    return None
 
 # Notre propre vue (raccourcis) + dossiers déjà classés : à ne pas triager.
 SKIP_TOP = {"- Par catégorie", "organismes", "personnes", "divers", "promus"}
@@ -135,6 +173,7 @@ def triage(output_file: str | None = None) -> dict:
     by_ext: Counter = Counter()
     repos: list[dict] = []
     bundles: list[dict] = []
+    grouped: list[dict] = []             # dossiers thématiques à garder groupés
     archive_roots: list[str] = []        # racines d'archives détectées
     arch_stats: dict[str, dict] = {}     # root → {path, docs, archived}
     container_files = 0                  # fichiers AVALÉS par conteneurs
@@ -165,6 +204,17 @@ def triage(output_file: str | None = None) -> dict:
                 repos.append({"path": rel, "files": cnt})
             dirnames[:] = []
             continue
+
+        # Dossier thématique cohérent (impôts, formation, contrats clients…) →
+        # à GARDER GROUPÉ comme une unité (futur sujet), pas éclaté par entité.
+        if d != root:
+            theme = _grouped_theme(d.name)
+            if theme and sub_docs.get(dirpath, 0) >= GROUPED_MIN_DOCS:
+                grouped.append({"path": str(d.relative_to(root)), "theme": theme,
+                                "docs": sub_docs.get(dirpath, 0),
+                                "files": sub_total.get(dirpath, 0)})
+                dirnames[:] = []
+                continue
 
         # Archive par densité : dossier volumineux quasi sans documents. On NE
         # l'enterre PAS — ses vrais documents sont toujours extraits vers le
@@ -209,10 +259,14 @@ def triage(output_file: str | None = None) -> dict:
         for s in arch_stats.values()
     ]
     loose = sum(groups.values())
+    grouped_files = sum(g["files"] for g in grouped)
     payload = {
-        "total_files": loose + container_files,
+        "total_files": loose + grouped_files + container_files,
         "loose_files": loose,            # fichiers en vrac, à classer
+        "grouped_files": grouped_files,  # fichiers dans les dossiers groupés
         "groups": dict(groups.most_common()),   # décompte EN VRAC uniquement
+        # Dossiers thématiques à organiser comme UNITÉS (≠ vrac, ≠ résidu).
+        "grouped_folders": sorted(grouped, key=lambda g: -g["docs"]),
         "containers": {
             "files_total": container_files,      # fichiers avalés par les unités
             "repos_code": sorted(repos, key=lambda r: -r["files"]),
@@ -231,6 +285,7 @@ def triage(output_file: str | None = None) -> dict:
             "loose_files": p["loose_files"],
             "groups": p["groups"],
             "container_files": p["containers"]["files_total"],
+            "grouped_folders": len(p["grouped_folders"]),
             "repos_code": len(p["containers"]["repos_code"]),
             "bundles": len(p["containers"]["bundles"]),
             "archives": len(p["containers"]["archives"]),

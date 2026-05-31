@@ -33,6 +33,11 @@ grande réorg tant que ce n'est pas validé.
   documents (dumps : codebase 2020, cruft Takeout) — mais leurs **vrais
   documents sont toujours extraits vers le groupe A** (jamais enterrés : ex.
   les diplômes des enfants dans `_Permanent/Souvenirs` remontent en A).
+  Enfin, les **dossiers thématiques cohérents** (impôts d'une année, formations,
+  contrats/dossiers clients) sont détectés par nom + garde-fou « contient des
+  documents » et **gardés groupés** comme unités (futurs sujets), pas éclatés
+  par entité (44 dossiers / 1260 docs sur le corpus). Trois sorts : vrac
+  (classer individuellement) · dossiers groupés (unités) · conteneurs (de côté).
   Corpus réel — EN VRAC à classer : **9,5k documents** · 9,4k médias · 4k code ·
   0,6k autre · 0,2k exports divers ; + 42k fichiers mis de côté en
   6 repos · 13 paquets · 16 archives. Heuristiques tunables (`commands/triage.py`).

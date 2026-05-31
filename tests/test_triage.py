@@ -112,6 +112,37 @@ def test_export_folder_is_walked_not_opaque(tmp_path, monkeypatch):
     assert res["groups"].get("B_exports") == 1
 
 
+def test_grouped_thematic_folders(tmp_path, monkeypatch):
+    root = tmp_path / "Documents"
+    # Bundle impôts → à garder groupé (pas éclaté par entité).
+    tax = root / "Classer" / "Impôts 2024"
+    tax.mkdir(parents=True)
+    (tax / "t4.pdf").write_bytes(b"%PDF")
+    (tax / "releve.pdf").write_bytes(b"%PDF")
+    # « information » ne doit PAS matcher « formation » (frontière de mot).
+    info = root / "Classer" / "information generale"
+    info.mkdir(parents=True)
+    (info / "doc.pdf").write_bytes(b"%PDF")
+    (info / "note.pdf").write_bytes(b"%PDF")
+    monkeypatch.setattr(T, "DOCUMENTS_DIR", root)
+    res = T.triage()
+    gf = res["grouped_folders"]
+    assert len(gf) == 1 and gf[0]["theme"] == "impots" and gf[0]["docs"] == 2
+    # docs du bundle hors vrac ; ceux d'« information » restent en vrac (2).
+    assert res["groups"].get("A_documents") == 2
+
+
+def test_grouped_requires_min_docs(tmp_path, monkeypatch):
+    root = tmp_path / "Documents"
+    c = root / "Contrats"
+    c.mkdir(parents=True)
+    (c / "unique.pdf").write_bytes(b"%PDF")   # 1 doc < seuil → pas groupé
+    monkeypatch.setattr(T, "DOCUMENTS_DIR", root)
+    res = T.triage()
+    assert res["grouped_folders"] == []
+    assert res["groups"].get("A_documents") == 1   # reste en vrac
+
+
 def test_triage_skips_already_classified_top_dirs(tmp_path, monkeypatch):
     root = tmp_path / "Documents"
     (root / "organismes" / "banque").mkdir(parents=True)
