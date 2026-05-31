@@ -22,12 +22,13 @@ grande réorg tant que ce n'est pas validé.
   journalisés et révertibles. `organize apply` retourne `ledger_run`. Les
   suppressions d'`optimize` (dedup) attendent la « corbeille ledger » ci-dessous
   (un `unlink` n'est pas réversible sans préserver le fichier).
-- [x] **Phase A — Triage A/B/C/D** (v2.20.0) : `documents triage` cartographie
-  ~/Documents en 4 groupes (lecture seule), en traitant les conteneurs (repos
-  de code via marqueur, bundles `.app`, dossiers d'export) comme des **unités**.
-  Sur le corpus réel : ~35,9k code · 16,4k exports · 7,5k docs · 4,4k médias.
-  Heuristiques tunables (`commands/triage.py`) — ex. un dossier-projet sans
-  marqueur peut laisser fuir des `.md`/`.csv` dans le groupe A.
+- [x] **Phase A — Triage A/B/C/D** (v2.20.0, affiné v2.20.1) : `documents triage`
+  cartographie ~/Documents en 4 groupes (lecture seule). Les **conteneurs de
+  code/projet** (marqueur fichier OU dossier `.git`/`.claude`, bundles `.app`)
+  sont comptés en **unités** ; les **exports sont parcourus** (un vieux Google
+  Drive contient de vrais documents — bulletins, livres — qui remontent en A).
+  Corpus réel : ~39,7k code · 12,5k médias · **9,5k docs** · 3,2k exports ·
+  1,5k autre. Heuristiques tunables (`commands/triage.py`).
 - [ ] 🟡 **Phase B — Extraction de signaux (groupe A, zéro OCR)** : nom, chemin,
   dates, métadonnées PDF/Office, texte embarqué (born-digital), texte du cache,
   EXIF. Lecture via le miroir SSD (`documents_read_path`).
