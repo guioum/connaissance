@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "connaissance"
-version = "2.16.0"
+version = "2.16.1"
 description = "Personal knowledge base CLI — transcription, summarization, entity organization, synthesis, audit. Built around a local Markdown + SQLite store."
 requires-python = ">=3.10"
 authors = [{ name = "guioum" }]
@@ -17,8 +17,15 @@ dependencies = [
 [project.scripts]
 connaissance = "connaissance.cli:main"
 
+[project.optional-dependencies]
+test = ["pytest>=8"]
+
 [tool.setuptools.packages.find]
 where = ["src"]
 
 [tool.setuptools.package-data]
 "connaissance" = ["prompts/*.md", "config/*.yaml"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

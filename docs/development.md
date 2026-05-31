@@ -40,9 +40,27 @@ connaissance audit check --steps liens_casses
 cd mcpb/server && npm install && node index.js < /dev/null
 ```
 
-> Il n'existe pas encore de suite `pytest` automatisée. Les composants `core/`
-> purs et déterministes (`dedup`, `filtres` scoring, le cache de `tracking`)
-> sont les premiers candidats à des tests unitaires — voir [roadmap.md](roadmap.md).
+## Tests automatisés
+
+Suite `pytest` sous [`tests/`](../tests/), centrée sur les composants `core/`
+purs et déterministes (portables, sans dépendre d'une vraie base
+`~/Connaissance/`) :
+
+```bash
+uv run --extra test pytest
+```
+
+- [`test_dedup.py`](../tests/test_dedup.py) — SimHash, distance de Hamming,
+  clustering (pur).
+- [`test_tracking_cache.py`](../tests/test_tracking_cache.py) — cache JIT
+  (hit/miss sur `size`/`mtime`), `read_path` (lecture miroir SSD / clé
+  canonique), SimHash. Via un fixture `tracking_db` (DB tmp, prérequis de
+  racine neutralisé — voir [`conftest.py`](../tests/conftest.py)).
+- [`test_filtres_scoring.py`](../tests/test_filtres_scoring.py) — scoring
+  courriels par signal, avec configs injectées (découplé du template).
+
+Les modules couplés à l'environnement (`audit`, `resolution`, pipeline) ne sont
+pas encore testés — voir [roadmap.md](roadmap.md).
 
 ## Scripts de calibration jetables
 

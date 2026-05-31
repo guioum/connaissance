@@ -503,7 +503,7 @@ def enrich(manifest_path: str, qmd_results: list[dict]) -> dict:
     else:
         entries = data or []
 
-    candidates_by_id = {item["id"]: item.get("candidates", []) for item in qmd_results}
+    candidates_by_id = {item["id"]: (item.get("candidates") or []) for item in qmd_results}
 
     for entry in entries:
         key = entry.get("resume_path") or entry.get("id")

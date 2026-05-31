@@ -88,7 +88,10 @@ def chercher_alias(identifiant: str, synthese_dir: Path | None = None) -> str | 
                 fm = yaml.safe_load(fm_text)
             except (IndexError, yaml.YAMLError):
                 continue
-            for alias in fm.get("aliases", []):
+            # frontmatter vide -> None ; `aliases:` vide -> None (pas []).
+            if not isinstance(fm, dict):
+                continue
+            for alias in (fm.get("aliases") or []):
                 alias_str = str(alias)
                 if alias_str.startswith("*@"):
                     # Pattern domaine : *@orange.fr matche facturation@orange.fr

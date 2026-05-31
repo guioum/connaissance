@@ -182,7 +182,7 @@ def collect_moves(config, rapport, category_filter=None):
 def _find_category(rel_path_nfc, rapport):
     """Trouver la catégorie d'un chemin dans le rapport."""
     for cat, data in rapport.get("by_category", {}).items():
-        for item in data.get("items", []):
+        for item in (data.get("items") or []):
             if nfc(item["rel_path"]) == rel_path_nfc:
                 return cat
     # Chercher dans le summary complet n'aide pas, essayer les heuristiques

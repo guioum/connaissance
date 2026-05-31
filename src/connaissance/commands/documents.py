@@ -7,7 +7,6 @@ Expose :
 """
 
 import sys
-import hashlib
 import re
 from datetime import datetime, timezone
 from pathlib import Path
@@ -77,18 +76,6 @@ def _source_dates(source_path: Path) -> tuple[str | None, str | None]:
     created = (birthtime or mtime).strftime("%Y-%m-%dT%H:%M:%S")
     modified = mtime.strftime("%Y-%m-%dT%H:%M:%S")
     return created, modified
-
-
-def hash_file(path):
-    """Calculer le SHA256 d'un fichier."""
-    h = hashlib.sha256()
-    try:
-        with open(path, "rb") as f:
-            for chunk in iter(lambda: f.read(8192), b""):
-                h.update(chunk)
-        return h.hexdigest()
-    except OSError:
-        return None
 
 
 def _merge_frontmatter(content: str, new_fields: dict) -> str:

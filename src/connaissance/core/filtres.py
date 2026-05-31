@@ -200,7 +200,7 @@ class Filtres:
         from_display = (msg_dict.get("from_display", "") or "").lower()
         subject = (msg_dict.get("subject", "") or "")
         body = (msg_dict.get("body", "") or "")
-        attachments = msg_dict.get("attachments", [])
+        attachments = msg_dict.get("attachments") or []
         folder = (msg_dict.get("folder", "") or "").lower()
         is_html_only = msg_dict.get("is_html_only", False)
 

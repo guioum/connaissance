@@ -42,24 +42,27 @@ quand c'est obsolète. Priorités indicatives : 🔴 haute · 🟡 moyenne · �
 - [ ] 🟢 `optimize` ne bénéficie pas du SSD (lit des PJ sous `Connaissance/` et
   des `promus/` fraîchement écrits) — laissé tel quel, documenté.
 
-## Corrections & dette technique
+## Corrections & dette technique (v2.16.1)
 
-- [ ] 🟡 **`scope.py` et `audit_archive.py` utilisent `HOME / "Documents"`** au
-  lieu de `BASE_PATH / "Documents"` — faux en **cowork** (HOME ≠ BASE_PATH →
-  pointe hors du montage). Centraliser sur `paths.DOCUMENTS_DIR`.
-- [ ] 🟡 **Auditer les `fm.get("…", [])`** susceptibles du même bug que
-  `verifier_liens_casses` : un champ liste vide en YAML parse en `None`, pas
-  `[]`, et plante à l'itération. Garder le motif `(fm.get("x") or [])`.
-- [ ] 🟢 `hash_file()` dans `commands/documents.py` est du **code mort** (aucun
-  appelant) — retirer.
-- [ ] 🟡 **Pas de suite de tests** : ajouter `pytest`, en commençant par les
-  composants `core/` purs et déterministes — `dedup` (simhash, clustering),
-  `filtres` (scoring courriels), le cache de `tracking` (hit/miss sur
-  `size`/`mtime`).
-- [ ] 🟢 `mcpb/server/package.json` est figé à `2.13.0` alors que pyproject +
-  manifest suivent les releases — synchroniser ou documenter pourquoi il dérive.
-- [ ] 🟢 `uv.lock` est présent mais non suivi par git — décider : le tracker
-  (lock reproductible) ou l'ignorer explicitement.
+- [x] **Bug None-iteration** (même classe que `liens_casses`) : `resolution.py`
+  itérait `fm.get("aliases", [])` qui vaut `None` si le champ YAML est vide
+  (et `fm` lui-même pouvait être `None`). Corrigé + durcissement défensif
+  `or []` dans `filtres` (attachments), `audit_archive` (items),
+  `organize` (candidates). `synthesis` utilisait déjà le motif sûr.
+- [x] **Code mort** : `hash_file()` (+ import `hashlib`) retiré de
+  `commands/documents.py`.
+- [x] **Suite `pytest`** (`tests/`) : `dedup` (pur), cache `tracking` (JIT +
+  `read_path` SSD), scoring `filtres` (configs injectées). 22 tests, portables.
+  Lancer : `uv run --extra test pytest`. Voir [development.md](development.md).
+- [x] **`package.json` synchronisé** à la version courante (était figé à 2.13.0).
+- [x] **`uv.lock` ignoré** (gitignore) : `uv tool install git+…` ne le consomme
+  pas et les deps runtime sont minimales/lâches.
+- [ ] 🟢 **Faux positif corrigé** : le point « `scope.py`/`audit_archive.py`
+  utilisent `HOME` » était une erreur de ma part — les deux font `HOME =
+  BASE_PATH` (alias), donc c'est correct. Reste un nettoyage *cosmétique*
+  optionnel : importer `paths.DOCUMENTS_DIR` au lieu de redéfinir localement.
+- [ ] 🟢 Étendre les tests aux modules couplés à l'environnement (`audit`
+  verifiers, `resolution`) via des fixtures de répertoires tmp + monkeypatch.
 
 ## Documentation
 
