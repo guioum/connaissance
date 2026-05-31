@@ -8,12 +8,12 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 
 import yaml
 
+from connaissance.core import ledger as _ledger
 from connaissance.core.paths import CONNAISSANCE_ROOT, require_connaissance_root
 from connaissance.core.tracking import TrackingDB
 from connaissance.core.filtres import Filtres
@@ -211,6 +211,7 @@ def archive_items(obsoletes: list[dict], db: TrackingDB, scoring_config: dict) -
     """Déplacer les fichiers flagués vers l'archive et mettre à jour la DB."""
     require_connaissance_root()
 
+    run_id = _ledger.new_run_id("cleanup-courriel")   # lot ledger réversible
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     archive_dir = ARCHIVE_ROOT / timestamp
     archive_dir.mkdir(parents=True, exist_ok=False)
@@ -246,10 +247,10 @@ def archive_items(obsoletes: list[dict], db: TrackingDB, scoring_config: dict) -
             "reasons": item["reasons"],
         }
 
-        # Archiver la transcription
+        # Archiver la transcription (journalisé au ledger → réversible)
         trans_dest = archive_dir / trans_rel
-        trans_dest.parent.mkdir(parents=True, exist_ok=True)
-        shutil.move(str(trans), str(trans_dest))
+        _ledger.safe_move(db, trans, trans_dest,
+                          "cleanup courriel obsolète", run_id)
         manifest_item["transcription_archived"] = str(trans_dest.relative_to(archive_dir))
 
         # Retirer de la DB (ignore si absente)
@@ -271,8 +272,8 @@ def archive_items(obsoletes: list[dict], db: TrackingDB, scoring_config: dict) -
         if resume is not None and resume.exists():
             resume_rel = str(resume.relative_to(CONNAISSANCE_ROOT))
             resume_dest = archive_dir / resume_rel
-            resume_dest.parent.mkdir(parents=True, exist_ok=True)
-            shutil.move(str(resume), str(resume_dest))
+            _ledger.safe_move(db, resume, resume_dest,
+                              "cleanup courriel obsolète", run_id)
             db._conn.execute("DELETE FROM files WHERE path = ?", (resume_rel,))
             manifest_item["resume_original"] = resume_rel
             manifest_item["resume_archived"] = str(resume_dest.relative_to(archive_dir))

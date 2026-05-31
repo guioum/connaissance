@@ -19,6 +19,7 @@ from pathlib import Path
 
 import yaml
 
+from connaissance.core import ledger as _ledger
 from connaissance.core.paths import BASE_PATH, require_paths, require_connaissance_root
 from connaissance.core.tracking import TrackingDB
 
@@ -265,6 +266,9 @@ def execute_moves(moves, dry_run=False):
     skipped = []
     errors = []
     cleaned_dirs = []
+    # Un run ledger pour le lot : chaque déplacement est journalisé et réversible.
+    db = TrackingDB()
+    run_id = _ledger.new_run_id("archive")
 
     for m in moves:
         source = Path(m["source"])
@@ -284,13 +288,14 @@ def execute_moves(moves, dry_run=False):
             continue
 
         try:
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            shutil.move(str(source), str(dest))
+            # safe_move : journalise (ancien/nouveau chemin + hash) puis déplace.
+            _ledger.safe_move(db, source, dest,
+                              f"archive non-document ({m.get('category', '')})",
+                              run_id)
             moved.append(m)
 
-            # Tracking
+            # Tracking (journal d'opérations, en plus du ledger)
             try:
-                db = TrackingDB()
                 db.log("connaissance", "archive",
                        source_type="document",
                        source_path=str(source),
@@ -309,7 +314,7 @@ def execute_moves(moves, dry_run=False):
             m["error"] = str(e)
             errors.append(m)
 
-    return moved, skipped, errors, cleaned_dirs
+    return moved, skipped, errors, cleaned_dirs, run_id
 
 
 def update_config_after_moves(config, moved):
@@ -414,16 +419,19 @@ def archive(dry_run: bool = True, category: str | None = None) -> dict:
             "dry_run": True,
         }
 
-    moved, _skipped, errors, _cleaned_dirs = execute_moves(moves)
+    moved, _skipped, errors, _cleaned_dirs, run_id = execute_moves(moves)
     if moved:
         config, removed_count = update_config_after_moves(config, moved)
         if removed_count > 0:
             save_config(config)
 
-    return {
+    result = {
         "archived": len(moved),
         "list": [{"source": str(m.get("source")), "dest": str(m.get("dest"))}
                  for m in moved],
         "errors": errors,
         "dry_run": False,
     }
+    if moved:
+        result["ledger_run"] = run_id   # pour `ledger revert`
+    return result

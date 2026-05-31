@@ -17,11 +17,13 @@ grande réorg tant que ce n'est pas validé.
   journalisé + `revert_run` vérifié par hash), table `file_ledger`, groupe CLI
   `ledger list|show|verify|revert` + 4 outils MCP. Toute modif de nom/dossier
   passe par là ; rollback par run, ne restaure que si le hash est intact.
-- [x] **Retrofit `organize`** (v2.19.1) : les déplacements (résumé,
-  transcription, document source, fils de courriels) passent par `safe_move` →
-  journalisés et révertibles. `organize apply` retourne `ledger_run`. Les
-  suppressions d'`optimize` (dedup) attendent la « corbeille ledger » ci-dessous
-  (un `unlink` n'est pas réversible sans préserver le fichier).
+- [x] **Retrofit des déplacements** (v2.19.1, étendu v2.21.2) : TOUS les
+  déplacements de fichiers passent par `safe_move` → journalisés et révertibles :
+  `organize` (résumé/transcription/document source/fils), `audit
+  archive-non-documents`, `emails cleanup-obsolete`. Chacun retourne/expose un
+  `ledger_run`. Restent les **suppressions** d'`optimize` (dedup/orphelins) qui
+  attendent la « corbeille ledger » ci-dessous (un `unlink` n'est pas réversible
+  sans préserver le fichier).
 - [x] **Phase A — Triage A/B/C/D** (v2.20.0, affiné v2.20.1) : `documents triage`
   cartographie ~/Documents en 4 groupes (lecture seule). Les **conteneurs de
   code/projet** (marqueur fichier OU dossier `.git`/`.claude`, bundles `.app`)
