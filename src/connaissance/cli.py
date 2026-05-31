@@ -51,6 +51,9 @@ def _cmd_documents(args) -> Any:
         return documents.register_batch(args.from_scan, dry_run=args.dry_run)
     if args.verb == "category-view":
         return documents.category_view(apply=args.apply, clear=args.clear)
+    if args.verb == "triage":
+        from connaissance.commands import triage
+        return triage.triage(output_file=args.output_file)
     if args.verb == "suspects":
         return documents.suspects()
     if args.verb == "verify-preserve":
@@ -389,6 +392,10 @@ def build_parser() -> argparse.ArgumentParser:
                           help="(Re)construire la vue par catégorie en raccourcis.")
     p_doc_cv.add_argument("--clear", action="store_true",
                           help="Supprimer la vue par catégorie.")
+    p_doc_tr = p_doc_verbs.add_parser("triage")
+    p_doc_tr.add_argument("--output-file", dest="output_file", type=str,
+                          default=None,
+                          help="Écrire le rapport complet dans ce fichier JSON.")
     p_doc_verbs.add_parser("suspects")
     p_doc_vp = p_doc_verbs.add_parser("verify-preserve")
     p_doc_vp.add_argument("before")

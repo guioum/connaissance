@@ -377,6 +377,22 @@ server.registerTool(
 );
 
 server.registerTool(
+  "connaissance_documents_triage",
+  {
+    description: "Phase A of the ~/Documents reorganization : map the whole folder into 4 groups (A real documents, B app exports, C media, D code) WITHOUT OCR, read-only. Detects containers (code repos via marker files, .app bundles, export folders) and counts them as single units instead of enumerating every file inside — a code repo stays grouped. Returns the breakdown + the list of repos/bundles/exports + a sample of real documents. Pass output_file to write the full report to disk.",
+    inputSchema: {
+      output_file: z.string().optional().describe("Write the full JSON report to this path instead of inline."),
+    },
+    annotations: { readOnlyHint: true },
+  },
+  async (args) => {
+    const a = [];
+    if (args.output_file) a.push("--output-file", args.output_file);
+    return runAndFormat("documents", "triage", a);
+  }
+);
+
+server.registerTool(
   "connaissance_documents_suspects",
   {
     description: "List transcriptions with suspect table patterns (empty cells, orphan pipe lines) that might need re-formatting via the transcrire/fix-ocr skill.",

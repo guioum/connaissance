@@ -182,6 +182,20 @@ class LedgerVerify(TypedDict):
     issues: list[dict]      # [{path, reason}]
 
 
+class Triage(TypedDict, total=False):
+    total_files: int
+    groups: dict            # {A_documents, B_exports, C_media, D_code, autre}
+    containers: dict        # {repos_code: [{path, files}], app_bundles, exports}
+    by_extension: dict
+    documents_sample: list[str]
+    # variante --output-file
+    output_file: str
+    total_bytes: int
+    repos_code: int
+    app_bundles: int
+    exports: int
+
+
 # --- emails ---
 
 class EmailsStats(TypedDict):
