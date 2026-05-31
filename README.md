@@ -69,7 +69,7 @@ détectée automatiquement, avec support du montage VirtioFS
 ```bash
 # Build the MCPB
 cd mcpb/server && npm install
-cd .. && npx @anthropic-ai/mcpb pack . connaissance-2.1.0.mcpb
+cd .. && npx @anthropic-ai/mcpb pack . connaissance-<version>.mcpb
 
 # Install via drag-drop on Claude Desktop
 # Or via setup script:
@@ -77,7 +77,7 @@ cd ..
 ./setup-claude-desktop.sh
 ```
 
-Redémarrer Claude Desktop pour activer les 42 outils
+Redémarrer Claude Desktop pour activer les 48 outils
 `mcp__connaissance__*`.
 
 ## Usage
@@ -119,24 +119,25 @@ connaissance config scoring-set --add-domain-marketing exemple.fr --dry-run
 
 ### MCP tools (via Claude Desktop / cowork)
 
-42 outils mappés 1:1 vers les sous-commandes CLI :
+48 outils mappés 1:1 vers les sous-commandes CLI :
 
-| Group | Tools |
+| Groupe | Outils |
 |---|---|
-| pipeline | `detect`, `costs`, `simulate` |
-| documents | `scan`, `register`, `register_existing`, `suspects`, `verify_preserve` |
-| emails | `stats`, `extract`, `threads`, `calibrate`, `senders`, `cleanup_obsolete` |
-| notes | `scan`, `copy` |
+| pipeline | `detect`, `costs` |
+| documents | `scan`, `register`, `register_existing`, `suspects`, `verify_preserve`, `backlog_count` |
+| emails | `stats`, `extract`, `threads`, `calibrate`, `senders`, `cleanup_obsolete`, `backlog_count` |
+| notes | `scan`, `copy`, `backlog_count` |
 | organize | `plan`, `enrich`, `apply`, `resolve` |
 | optimize | `plan`, `apply` |
 | summarize | `plan`, `prepare`, `register` |
-| synthesis | `plan`, `aliases_candidates`, `relations_candidates`, `register` |
+| synthesis | `plan`, `prepare`, `register`, `aliases_candidates`, `relations_candidates`, `entity_paths`, `list_all` |
 | audit | `check`, `reindex_db`, `repair_attachments`, `archive_non_documents` |
+| actions | `list` |
 | scope | `scan`, `check`, `include`, `exclude` |
 | config | `scoring_show`, `scoring_set`, `scoring_diff`, `scoring_validate` |
 | manifest | `patch` |
 
-Total : **42 outils**.
+Total : **48 outils** sur **13 groupes**.
 
 ## Architecture
 
@@ -149,7 +150,7 @@ Ce repo contient deux choses :
   `connaissance` (trouvé via `CONNAISSANCE_CLI` env ou auto-détection
   dans `~/.local/bin/`) et parse la sortie JSON.
 
-Les 42 outils MCP ne contiennent aucune logique métier : ils mappent
+Les 48 outils MCP ne contiennent aucune logique métier : ils mappent
 les sous-commandes CLI 1:1 et remontent le JSON tel quel.
 
 ## Prérequis

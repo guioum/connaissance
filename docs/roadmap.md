@@ -64,14 +64,15 @@ quand c'est obsolète. Priorités indicatives : 🔴 haute · 🟡 moyenne · �
 - [ ] 🟢 Étendre les tests aux modules couplés à l'environnement (`audit`
   verifiers, `resolution`) via des fixtures de répertoires tmp + monkeypatch.
 
-## Documentation
+## Documentation (fait)
 
-- [ ] 🟡 **Dérive du décompte d'outils** : le README et `CLAUDE.md` disent
-  « 42 outils » / « 12 groupes » ; la réalité est **48 outils** / **13 groupes**
-  (`manifest.json` dit déjà 48). Reconcilier, et ajouter une ligne pour le step
-  `quasi_doublons`.
-- [ ] 🟢 Le Quick start du README référence `connaissance-2.1.0.mcpb` (version
-  figée dans l'exemple) — utiliser une version générique.
+- [x] **Décompte d'outils reconcilié** : README + `CLAUDE.md` passés de
+  « 42 / 12 groupes » à **48 outils / 13 groupes** (source de vérité : les
+  `registerTool` de `index.js`). Tableau README corrigé (`pipeline simulate`
+  fantôme retiré, groupe `actions` ajouté, `backlog_count` /
+  `synthesis entity_paths,list_all,prepare` ajoutés).
+- [x] **Quick start** : version figée `connaissance-2.1.0.mcpb` → générique.
+- [x] **Pointeur `docs/`** ajouté en tête de `CLAUDE.md`.
 
 ## Idées exploratoires
 
