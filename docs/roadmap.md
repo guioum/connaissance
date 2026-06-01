@@ -43,6 +43,19 @@ grande réorg tant que ce n'est pas validé.
   Corpus réel — EN VRAC à classer : **9,5k documents** · 9,4k médias · 4k code ·
   0,6k autre · 0,2k exports divers ; + 42k fichiers mis de côté en
   6 repos · 13 paquets · 16 archives. Heuristiques tunables (`commands/triage.py`).
+- [x] **Garde-fou secrets — `documents secrets`** (v2.22.0) : scan lecture
+  seule de ~/Documents qui repère les fichiers contenant des **clés/mots de
+  passe/jetons** pour **quarantaine** (jamais classés en clair, jamais indexés
+  qmd, jamais envoyés à un service externe — OCR Mistral/Batch API). Secret
+  scanning léger, **zéro dépendance** (`core/secrets.py` : préfixes connus
+  AKIA/ghp_/sk-/AIza/xox…, blocs PEM, JWT, `user:pass@host`, affectations
+  `password=` gated entropie, colonnes CSV « password » → cas `credentials.csv`)
+  + signal nom de fichier (`.env`, `id_rsa`, `*.pem`, `*.pfx`, `*.kdbx`… ; le
+  `.key` Keynote n'est PAS pris pour une clé). Lecture via le **SSD**, jamais
+  de download iCloud (`dataless` → nom seulement). Évidences **caviardées**.
+  Presidio (PII, lourd) écarté : mauvais outil pour des secrets. Reste à faire :
+  la **mise de côté effective** (déplacement vers une zone protégée), à
+  journaliser au ledger + soumise à validation.
 - [ ] 🟡 **Phase B — Extraction de signaux (groupe A, zéro OCR)** ⏭️ *prochaine* :
   pour chaque doc en vrac (+ docs des sujets), produire un « paquet de signaux »
   sans Mistral — nom de fichier, chemin, **nom du dossier d'origine** (→ sujet),

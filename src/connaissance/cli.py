@@ -54,6 +54,9 @@ def _cmd_documents(args) -> Any:
     if args.verb == "triage":
         from connaissance.commands import triage
         return triage.triage(output_file=args.output_file)
+    if args.verb == "secrets":
+        from connaissance.commands import secrets
+        return secrets.scan(scope=args.scope, output_file=args.output_file)
     if args.verb == "suspects":
         return documents.suspects()
     if args.verb == "verify-preserve":
@@ -396,6 +399,13 @@ def build_parser() -> argparse.ArgumentParser:
     p_doc_tr.add_argument("--output-file", dest="output_file", type=str,
                           default=None,
                           help="Écrire le rapport complet dans ce fichier JSON.")
+    p_doc_sec = p_doc_verbs.add_parser("secrets")
+    p_doc_sec.add_argument("--scope", type=str, default=None,
+                           help="Restreindre à un sous-dossier de ~/Documents "
+                                "(chemin relatif, ex. 'Classer/old').")
+    p_doc_sec.add_argument("--output-file", dest="output_file", type=str,
+                           default=None,
+                           help="Écrire le rapport complet dans ce fichier JSON.")
     p_doc_verbs.add_parser("suspects")
     p_doc_vp = p_doc_verbs.add_parser("verify-preserve")
     p_doc_vp.add_argument("before")

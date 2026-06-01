@@ -393,6 +393,24 @@ server.registerTool(
 );
 
 server.registerTool(
+  "connaissance_documents_secrets",
+  {
+    description: "Scan ~/Documents (read-only, no OCR, no network) for files containing SECRETS — keys, passwords, tokens — so they can be QUARANTINED (never classified in clear, indexed in qmd, or sent to an external service like Mistral OCR / Batch API). Lightweight secret-scanning (known token prefixes AKIA/ghp_/sk-/AIza/xox…, PEM private-key blocks, JWT, user:pass@host URLs, high-entropy `password=`/`api_key=` assignments, CSV password columns) plus sensitive filenames (.env, id_rsa, *.pem, *.pfx, *.kdbx, credentials.*). Reads content via the SSD mirror only — never triggers an iCloud download (dataless files get filename-signal only). Matches are always redacted. NOT a PII detector. Pass scope to restrict to a subfolder; output_file to write the full report.",
+    inputSchema: {
+      scope: z.string().optional().describe("Restrict to a subfolder of ~/Documents (relative path, e.g. 'Classer/old')."),
+      output_file: z.string().optional().describe("Write the full JSON report to this path instead of inline."),
+    },
+    annotations: { readOnlyHint: true },
+  },
+  async (args) => {
+    const a = [];
+    if (args.scope) a.push("--scope", args.scope);
+    if (args.output_file) a.push("--output-file", args.output_file);
+    return runAndFormat("documents", "secrets", a);
+  }
+);
+
+server.registerTool(
   "connaissance_documents_suspects",
   {
     description: "List transcriptions with suspect table patterns (empty cells, orphan pipe lines) that might need re-formatting via the transcrire/fix-ocr skill.",

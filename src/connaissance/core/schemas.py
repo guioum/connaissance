@@ -203,6 +203,34 @@ class Triage(TypedDict, total=False):
     archives: int
 
 
+class SecretFinding(TypedDict):
+    kind: str
+    severity: Literal["high", "medium"]
+    line: int
+    evidence: str   # toujours caviardé
+
+
+class SecretFile(TypedDict):
+    rel: str
+    severity: Literal["high", "medium"]
+    filename_signal: str | None
+    findings: list[SecretFinding]
+    findings_count: int
+
+
+class SecretsScan(TypedDict, total=False):
+    flagged: int
+    files: list[SecretFile]
+    scanned: int
+    skipped: dict        # {dataless, too_big, binary, read_error}
+    note: str
+    # variante --output-file
+    output_file: str
+    total_bytes: int
+    high_severity: int
+    sample: list[str]
+
+
 # --- emails ---
 
 class EmailsStats(TypedDict):
