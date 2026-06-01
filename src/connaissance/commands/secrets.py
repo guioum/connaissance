@@ -25,10 +25,18 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+from connaissance.commands.triage import (BUNDLE_SUFFIXES, CODE_MARKERS,
+                                           MARKER_DIRS)
 from connaissance.core import secrets as _secrets
 from connaissance.core.output_file import write_or_inline
 from connaissance.core.paths import (DOCUMENTS_DIR, documents_read_path,
                                       is_dataless)
+
+# Sous-dossiers de dépendances/build : du code tiers, jamais TES secrets. On n'y
+# descend pas (un `password=` dans une fixture de test n'est pas un identifiant
+# réel). Complète MARKER_DIRS (node_modules, vendor, .git… déjà couverts).
+_NOISE_DIRS = {"bower_components", "Pods", "site-packages", ".tox", ".venv",
+               "venv", "dist", "build", ".next", ".nuxt", "__pycache__"}
 
 # Extensions dont on lit le CONTENU (texte brut). Volontairement étroit : un
 # faux .pdf/.docx ne livre rien d'exploitable en regex, mais ces formats-là si.
@@ -72,6 +80,7 @@ def scan(scope: str | None = None, output_file: str | None = None) -> dict:
     base = DOCUMENTS_DIR if scope is None else (DOCUMENTS_DIR / scope)
     files: list[dict] = []
     scanned = 0
+    containers_skipped = 0
     skipped = {"dataless": 0, "too_big": 0, "binary": 0, "read_error": 0}
 
     if not base.exists():
@@ -81,8 +90,22 @@ def scan(scope: str | None = None, output_file: str | None = None) -> dict:
         }
 
     for dirpath, dirnames, filenames in os.walk(base):
-        if Path(dirpath) == DOCUMENTS_DIR:
+        d = Path(dirpath)
+        if d == DOCUMENTS_DIR:
             dirnames[:] = [n for n in dirnames if n not in _SKIP_TOP]
+
+        # Conteneur (repo de code, bundle macOS) → unité tierce : on n'y descend
+        # pas. Un secret dans `phpseclib/Crypt/RSA.php` ou une fixture npm est du
+        # code, pas un identifiant réel. Même logique que `documents triage`.
+        is_bundle = d.suffix.lower() in BUNDLE_SUFFIXES
+        is_repo = bool(set(filenames) & CODE_MARKERS) \
+            or bool(set(dirnames) & MARKER_DIRS)
+        if is_bundle or is_repo:
+            containers_skipped += 1
+            dirnames[:] = []
+            continue
+        # Élaguer les dossiers de dépendances/build restants.
+        dirnames[:] = [n for n in dirnames if n not in _NOISE_DIRS]
 
         for fname in filenames:
             if fname.startswith("."):
@@ -140,6 +163,7 @@ def scan(scope: str | None = None, output_file: str | None = None) -> dict:
         "flagged": len(files),
         "files": files,
         "scanned": scanned,
+        "containers_skipped": containers_skipped,
         "skipped": skipped,
         "note": (
             "Lecture seule. Les fichiers listés contiennent des secrets "
@@ -155,6 +179,7 @@ def scan(scope: str | None = None, output_file: str | None = None) -> dict:
             "flagged": p["flagged"],
             "high_severity": high,
             "scanned": p["scanned"],
+            "containers_skipped": p["containers_skipped"],
             "skipped": p["skipped"],
             "sample": [f["rel"] for f in p["files"][:15]],
         }

@@ -222,6 +222,7 @@ class SecretsScan(TypedDict, total=False):
     flagged: int
     files: list[SecretFile]
     scanned: int
+    containers_skipped: int   # repos/bundles non parcourus (comme le triage)
     skipped: dict        # {dataless, too_big, binary, read_error}
     note: str
     # variante --output-file

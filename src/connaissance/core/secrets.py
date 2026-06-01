@@ -142,19 +142,27 @@ def scan_text(text: str, *, max_findings: int = 50) -> list[SecretFinding]:
     findings: list[SecretFinding] = []
     lines = text.splitlines()
 
-    # Signal tabulaire : un en-tête (1res lignes) listant des mots de passe.
+    # Signal tabulaire : un VRAI en-tête CSV/TSV (1res lignes) listant des mots
+    # de passe. Garde-fous de précision pour ne PAS se déclencher sur de la prose
+    # ou des clippings web (.html) : pas de balise markup, ligne courte, au moins
+    # 2 colonnes, et une majorité de colonnes « courtes » (en-tête, pas du texte).
     for i, line in enumerate(lines[:5], start=1):
-        if line.count(",") + line.count(";") + line.count("\t") >= 1:
-            cols = re.split(r"[,;\t]", line)
-            hits = [c.strip() for c in cols if _TABULAR_HEADER_RE.search(c)]
-            if hits:
-                findings.append({
-                    "kind": "tabular_password_column",
-                    "severity": "high",
-                    "line": i,
-                    "evidence": "colonne(s) : " + ", ".join(hits[:4]),
-                })
-                break
+        if "<" in line or ">" in line or not (0 < len(line) <= 300):
+            continue
+        if line.count(",") + line.count(";") + line.count("\t") < 1:
+            continue
+        cols = [c.strip() for c in re.split(r"[,;\t]", line)]
+        if len(cols) < 2 or sum(len(c) <= 40 for c in cols) < max(2, len(cols) * 0.6):
+            continue
+        hits = [c for c in cols if c and len(c) <= 40 and _TABULAR_HEADER_RE.search(c)]
+        if hits:
+            findings.append({
+                "kind": "tabular_password_column",
+                "severity": "high",
+                "line": i,
+                "evidence": "colonne(s) : " + ", ".join(hits[:4]),
+            })
+            break
 
     for lineno, line in enumerate(lines, start=1):
         if len(findings) >= max_findings:
