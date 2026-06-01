@@ -56,6 +56,20 @@ def test_assignment_high_entropy_flagged():
     assert any(x["kind"].startswith("assignment:") for x in f)
 
 
+def test_camelcase_key_assignment_flagged():
+    # Variantes camelCase manquées par api_key/apikey (cas réel : production.md).
+    assert any(x["kind"].startswith("assignment:")
+               for x in S.scan_text('apiSiteKey: "85b1c0d2e3f4a5b6c7d8e9f0a1b2c3d4"'))
+    assert any(x["kind"].startswith("assignment:")
+               for x in S.scan_text('clientSecret = "a7Fk9Zx2Qp4Lm8RtB3nW"'))
+
+
+def test_camelcase_non_secret_key_ignored():
+    # sortKey/cacheKey (préfixe non sensible) ou valeur non-secrète → rien.
+    assert S.scan_text('sortKey: "name-asc"') == []
+    assert S.scan_text('userKey: "name-asc"') == []   # valeur faible entropie
+
+
 def test_assignment_placeholder_ignored():
     for line in ('password = changeme', 'api_key = <YOUR_KEY>',
                  'token = ${ENV_TOKEN}', 'password = postgres'):

@@ -148,6 +148,20 @@ _ASSIGNMENT_RE = re.compile(
     """,
 )
 
+# Variante camelCase : `apiSiteKey`, `apiUserKey`, `clientSecret` … (clé séparée
+# du mot « key » par d'autres mots → ratée par _ASSIGNMENT_RE). Sensible à la
+# casse (le suffixe capitalisé EST la frontière camelCase) : `monkey`/`sortKey`
+# ne matchent pas ; `Key` n'est pris qu'avec un préfixe explicitement sensible.
+# `Token` est VOLONTAIREMENT exclu : sur des pages web archivées il capte un flot
+# de jetons de session/pagination/CSRF (`kookToken`, `nextToken`, `csrfToken`) —
+# que des faux positifs. Toujours gated par `_looks_secretish` sur la valeur.
+_CAMEL_ASSIGN_RE = re.compile(
+    r"\b("
+    r"[A-Za-z][A-Za-z0-9]*(?:Secret|Password|Passphrase)"
+    r"|(?:api|secret|access|private|auth|client|user|site)[A-Za-z0-9]*Key"
+    r")\s*[:=]\s*[\"']?(?P<val>[^\s\"'`]{6,})[\"']?"
+)
+
 # --- En-tête tabulaire (CSV/TSV) listant des mots de passe -------------------
 _TABULAR_HEADER_RE = re.compile(
     r"(?i)\b(password|passwd|mot\s+de\s+passe|secret|api[\s_-]?key|"
@@ -259,6 +273,15 @@ def scan_text(text: str, *, max_findings: int = 50) -> list[SecretFinding]:
                 "severity": "medium",
                 "line": lineno,
                 "evidence": redact(am.group("val")),
+            })
+        cm = _CAMEL_ASSIGN_RE.search(line)
+        if cm and _looks_secretish(cm.group("val")):
+            had_token = True
+            findings.append({
+                "kind": f"assignment:{cm.group(1).lower()}",
+                "severity": "medium",
+                "line": lineno,
+                "evidence": redact(cm.group("val")),
             })
         # Entropie : seulement si (a) aucun pattern connu n'a déjà capté la
         # ligne et (b) un mot-clé secret y figure (gating de précision).
