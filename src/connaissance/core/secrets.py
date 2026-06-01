@@ -62,7 +62,80 @@ _TOKEN_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
      re.compile(r"\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b")),
     ("basic_auth_url",
      re.compile(r"\b[a-z][a-z0-9+.-]*://[^/\s:@]+:[^/\s:@]{3,}@[^/\s]+", re.I)),
+    # Cloud / SaaS supplémentaires (recall, haute précision : formats spécifiques)
+    ("azure_storage_key", re.compile(r"AccountKey=[A-Za-z0-9+/=]{80,}")),
+    ("azure_connection_string",
+     re.compile(r"DefaultEndpointsProtocol=https?;AccountName=[A-Za-z0-9]+;AccountKey=")),
+    ("azure_sas_token", re.compile(r"\bsig=[A-Za-z0-9%/+]{43,}")),
+    ("twilio_api_key", re.compile(r"\bSK[0-9a-fA-F]{32}\b")),
+    ("twilio_account_sid", re.compile(r"\bAC[0-9a-fA-F]{32}\b")),
+    ("sendgrid_key", re.compile(r"\bSG\.[A-Za-z0-9_-]{22}\.[A-Za-z0-9_-]{43}\b")),
+    ("mailchimp_key", re.compile(r"\b[0-9a-f]{32}-us[0-9]{1,2}\b")),
+    ("square_oauth", re.compile(r"\bsq0(?:csp|atp)-[0-9A-Za-z_-]{22,}\b")),
+    ("npm_token", re.compile(r"\bnpm_[A-Za-z0-9]{36}\b")),
+    ("pypi_token", re.compile(r"\bpypi-AgEIcHlwaS[A-Za-z0-9_-]{50,}\b")),
+    ("slack_app_token", re.compile(r"\bxapp-[0-9]-[A-Za-z0-9-]{10,}\b")),
+    ("telegram_bot_token", re.compile(r"\b\d{8,10}:[A-Za-z0-9_-]{35}\b")),
+    ("discord_bot_token",
+     re.compile(r"\b[MN][A-Za-z0-9_-]{23}\.[A-Za-z0-9_-]{6}\.[A-Za-z0-9_-]{27}\b")),
+    ("gcp_service_account", re.compile(r'"type"\s*:\s*"service_account"')),
+    ("putty_private_key", re.compile(r"PuTTY-User-Key-File-\d")),
+    ("rfc1918_password_in_xml",
+     re.compile(r"<(?:password|secret|api[_-]?key)>[^<\s]{6,}</")),
 ]
+
+# --- Détecteur d'ENTROPIE, gated par CONTEXTE (recall sans le bruit) --------
+# Une chaîne Base64/Hex à fort aléa n'est flaguée QUE si un mot-clé secret est
+# présent sur la même ligne. Sans ce garde-fou, l'entropie libre sur un corpus
+# personnel (notes markdown, pages web, lockfiles, hashes) est massivement
+# bruyante. Avec : on attrape les clés opaques sans préfixe connu (ex.
+# `apikey: a9F…`, `Authorization: Bearer …`) tout en restant précis.
+_B64_TOKEN_RE = re.compile(r"[A-Za-z0-9+/=_-]{24,120}")
+_HEX_TOKEN_RE = re.compile(r"\b[0-9a-fA-F]{32,128}\b")
+_ENTROPY_B64_MIN = 4.5
+_ENTROPY_HEX_MIN = 3.2
+
+# Vocabulaire de contexte (frontières de mots). Volontairement sans « token »
+# ni « key » seuls (trop fréquents en prose) ; on garde les formes composées.
+_SECRET_CONTEXT_RE = re.compile(
+    r"(?i)\b(password|passwd|pwd|mot\s+de\s+passe|secret|secret[_-]?key|"
+    r"api[_-]?key|apikey|access[_-]?key|client[_-]?secret|auth[_-]?token|"
+    r"bearer|credentials?|passphrase|private[_-]?key)\b"
+)
+
+
+def _scan_entropy(line: str, lineno: int,
+                  severity: Severity = "high") -> list[SecretFinding]:
+    """Chaînes à forte entropie d'une ligne (Base64/Hex). Findings caviardés.
+
+    À appeler seulement quand la ligne porte un mot-clé secret (gating amont).
+    Évite quand même le markup, les data-URI et les lignes très longues.
+    """
+    if len(line) > 400 or ("<" in line and ">" in line):
+        return []
+    if "data:" in line and "base64" in line:
+        return []
+    out: list[SecretFinding] = []
+    seen: set[str] = set()
+    for rx, kind, thr, minlen in (
+        (_HEX_TOKEN_RE, "hex", _ENTROPY_HEX_MIN, 32),
+        (_B64_TOKEN_RE, "base64", _ENTROPY_B64_MIN, 24),
+    ):
+        for m in rx.finditer(line):
+            tok = m.group(0).strip("=_-")
+            if len(tok) < minlen or tok in seen:
+                continue
+            if kind == "base64" and not (
+                    re.search(r"[A-Za-z]", tok) and re.search(r"[0-9]", tok)):
+                continue   # un mot ou un long nombre, pas une clé
+            if shannon_entropy(tok) < thr:
+                continue
+            seen.add(tok)
+            out.append({"kind": f"high_entropy_{kind}", "severity": severity,
+                        "line": lineno, "evidence": redact(tok)})
+            if len(out) >= 3:
+                return out
+    return out
 
 # --- Affectations « mot-clé = valeur » (confiance moyenne, gated entropie) ---
 _ASSIGNMENT_RE = re.compile(
@@ -167,9 +240,11 @@ def scan_text(text: str, *, max_findings: int = 50) -> list[SecretFinding]:
     for lineno, line in enumerate(lines, start=1):
         if len(findings) >= max_findings:
             break
+        had_token = False
         for kind, rx in _TOKEN_PATTERNS:
             m = rx.search(line)
             if m:
+                had_token = True
                 findings.append({
                     "kind": kind,
                     "severity": "high",
@@ -178,12 +253,17 @@ def scan_text(text: str, *, max_findings: int = 50) -> list[SecretFinding]:
                 })
         am = _ASSIGNMENT_RE.search(line)
         if am and _looks_secretish(am.group("val")):
+            had_token = True
             findings.append({
                 "kind": f"assignment:{am.group(1).lower().replace(' ', '_')}",
                 "severity": "medium",
                 "line": lineno,
                 "evidence": redact(am.group("val")),
             })
+        # Entropie : seulement si (a) aucun pattern connu n'a déjà capté la
+        # ligne et (b) un mot-clé secret y figure (gating de précision).
+        if not had_token and _SECRET_CONTEXT_RE.search(line):
+            findings.extend(_scan_entropy(line, lineno))
 
     return findings[:max_findings]
 

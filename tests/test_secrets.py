@@ -62,6 +62,38 @@ def test_assignment_placeholder_ignored():
         assert S.scan_text(line) == [], line
 
 
+# --- core : nouveaux patterns providers ------------------------------------
+
+def test_detects_extra_providers():
+    cases = {
+        "sendgrid_key": "key=SG." + "a" * 22 + "." + "b" * 43,
+        "gcp_service_account": '  "type": "service_account",',
+        "twilio_api_key": "SK" + "0" * 32,
+        "telegram_bot_token": "12345678:" + "A" * 35,
+    }
+    for expected, line in cases.items():
+        kinds = {x["kind"] for x in S.scan_text(line)}
+        assert expected in kinds, (expected, kinds)
+
+
+# --- core : entropie gated par contexte ------------------------------------
+
+def test_gated_entropy_flags_keyword_plus_opaque_token():
+    # « bearer » (mot-clé) + jeton opaque hors syntaxe d'affectation.
+    f = S.scan_text("envoie le bearer a7Fk9Zx2Qp4Lm8RtB3nW6vC1hD5jE au serveur")
+    assert any(x["kind"].startswith("high_entropy") for x in f)
+
+
+def test_entropy_ignored_without_keyword():
+    # Même jeton, mais en prose sans mot-clé secret → pas de finding (anti-bruit
+    # : recettes, README, lockfiles ne doivent pas remonter).
+    assert S.scan_text("ma note contient a7Fk9Zx2Qp4Lm8RtB3nW6vC1hD5jE ici") == []
+
+
+def test_entropy_ignored_for_low_entropy_token():
+    assert S.scan_text("password hint aaaaaaaaaaaaaaaaaaaaaaaa here") == []
+
+
 # --- core : signal tabulaire (cas credentials.csv) -------------------------
 
 def test_tabular_password_header():
