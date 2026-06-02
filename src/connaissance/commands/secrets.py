@@ -198,14 +198,28 @@ def quarantine_apply(scope: str | None = None,
     (``filtres.filter_document`` les rejette). **Ne déplace/ne supprime rien** —
     n'écrit qu'un fichier de config, fusionné avec l'existant (idempotent).
 
-    Par défaut seules les détections **high** sont ajoutées ; ``include_medium``
-    ajoute aussi les ``medium`` (affectations, noms « mot de passe »…).
+    Périmètre par défaut = ce qui pourrait réellement **fuir dans le pipeline** :
+    toutes les détections **high** + les **medium OCR-éligibles** (PDF/docx/
+    images — ceux-là seraient transcrits puis indexés ; ex. un
+    ``Mot de passe.pdf``). Les medium non-OCR (affectations dans du .html/.txt,
+    code) ne sont PAS ajoutés par défaut car le pipeline ne les transcrit pas —
+    ``include_medium`` les ajoute quand même (couverture maximale).
     """
     require_connaissance_root()
+    ocr_exts = set(_filtres.Filtres().docs_config.get("extensions", []))
+
+    def _risky(f: dict) -> bool:
+        if f["severity"] == "high":
+            return True
+        if f["severity"] != "medium":
+            return False
+        if include_medium:
+            return True
+        # medium auto-quarantiné seulement s'il serait transcrit (vrai risque).
+        return Path(f["rel"]).suffix.lower() in ocr_exts
+
     report = scan(scope=scope)   # payload inline (read-only)
-    selected = [f for f in report["files"]
-                if f["severity"] == "high"
-                or (include_medium and f["severity"] == "medium")]
+    selected = [f for f in report["files"] if _risky(f)]
     rels = {f["rel"] for f in selected}
 
     existing = _filtres.load_quarantine_set()

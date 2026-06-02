@@ -195,19 +195,24 @@ def test_quarantine_apply_writes_list(tmp_path, monkeypatch):
     fake = {"files": [
         {"rel": "a/high.csv", "severity": "high", "findings": [],
          "filename_signal": None, "findings_count": 0},
-        {"rel": "b/med.pdf", "severity": "medium", "findings": [],
-         "filename_signal": "name_hint", "findings_count": 0},
+        {"rel": "b/med.html", "severity": "medium", "findings": [],
+         "filename_signal": None, "findings_count": 0},          # non-OCR
+        {"rel": "c/Mot de passe.pdf", "severity": "medium", "findings": [],
+         "filename_signal": "name_hint", "findings_count": 0},    # OCR-éligible
     ]}
     monkeypatch.setattr(CMD, "scan", lambda scope=None: fake)
 
+    # Défaut : high + medium OCR-éligible (le .pdf), PAS le .html non-OCR.
     res = CMD.quarantine_apply()
-    assert res["added"] == 1 and res["high"] == 1
+    assert res["added"] == 2
     txt = qfile.read_text(encoding="utf-8")
-    assert "a/high.csv" in txt and "b/med.pdf" not in txt   # high seulement
+    assert "a/high.csv" in txt and "c/Mot de passe.pdf" in txt
+    assert "b/med.html" not in txt
 
+    # include_medium : ajoute aussi le medium non-OCR.
     res2 = CMD.quarantine_apply(include_medium=True)
-    assert res2["added"] == 1   # le medium s'ajoute, idempotent sur le high
-    assert "b/med.pdf" in qfile.read_text(encoding="utf-8")
+    assert res2["added"] == 1
+    assert "b/med.html" in qfile.read_text(encoding="utf-8")
 
 
 def test_command_skips_already_classified_top_dirs(tmp_path, monkeypatch):
