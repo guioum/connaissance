@@ -27,10 +27,11 @@ from pathlib import Path
 
 from connaissance.commands.triage import (BUNDLE_SUFFIXES, CODE_MARKERS,
                                            MARKER_DIRS)
+from connaissance.core import filtres as _filtres
 from connaissance.core import secrets as _secrets
 from connaissance.core.output_file import write_or_inline
 from connaissance.core.paths import (DOCUMENTS_DIR, documents_read_path,
-                                      is_dataless)
+                                      is_dataless, require_connaissance_root)
 
 # Sous-dossiers de dépendances/build : du code tiers, jamais TES secrets. On n'y
 # descend pas (un `password=` dans une fixture de test n'est pas un identifiant
@@ -185,3 +186,45 @@ def scan(scope: str | None = None, output_file: str | None = None) -> dict:
         }
 
     return write_or_inline(payload, output_file=output_file, summary_fn=_summary)
+
+
+def quarantine_apply(scope: str | None = None,
+                     include_medium: bool = False) -> dict:
+    """Peupler la liste de quarantaine secrets depuis un scan (garde-fou ACTIF).
+
+    Scanne (lecture seule), puis écrit les chemins détectés dans
+    ``~/Connaissance/.config/secrets-quarantine.txt``. Les fichiers listés sont
+    désormais **exclus de l'OCR, de l'index qmd et du Batch API**
+    (``filtres.filter_document`` les rejette). **Ne déplace/ne supprime rien** —
+    n'écrit qu'un fichier de config, fusionné avec l'existant (idempotent).
+
+    Par défaut seules les détections **high** sont ajoutées ; ``include_medium``
+    ajoute aussi les ``medium`` (affectations, noms « mot de passe »…).
+    """
+    require_connaissance_root()
+    report = scan(scope=scope)   # payload inline (read-only)
+    selected = [f for f in report["files"]
+                if f["severity"] == "high"
+                or (include_medium and f["severity"] == "medium")]
+    rels = {f["rel"] for f in selected}
+
+    existing = _filtres.load_quarantine_set()
+    added = sorted(rels - existing)
+    merged = existing | rels
+    path = _filtres.write_quarantine_set(merged)
+
+    return {
+        "quarantine_file": str(path),
+        "added": len(added),
+        "already_present": len(rels & existing),
+        "total_quarantined": len(merged),
+        "high": sum(1 for f in selected if f["severity"] == "high"),
+        "medium": sum(1 for f in selected if f["severity"] == "medium"),
+        "added_sample": added[:20],
+        "note": (
+            "Garde-fou ACTIF posé : ces fichiers sont désormais exclus de "
+            "l'OCR, de l'index qmd et du Batch API. RIEN n'a été déplacé ni "
+            "supprimé — seule la liste de config a été écrite (éditable). "
+            "Pour lever une entrée, retire sa ligne du fichier."
+        ),
+    }

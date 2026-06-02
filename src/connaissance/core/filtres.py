@@ -19,6 +19,7 @@ import yaml
 from datetime import datetime, timezone
 from pathlib import Path
 
+from connaissance.core import secrets as _secrets
 from connaissance.core.paths import BASE_PATH, CONNAISSANCE_ROOT, require_connaissance_root
 
 PACKAGE_ROOT = Path(__file__).resolve().parents[1]
@@ -27,6 +28,12 @@ USER_FILTRES = CONNAISSANCE_ROOT / ".config" / "filtres.yaml"
 
 TEMPLATE_SCORING = PACKAGE_ROOT / "config" / "scoring-courriels.yaml"
 USER_SCORING = CONNAISSANCE_ROOT / ".config" / "scoring-courriels.yaml"
+
+# Liste de quarantaine secrets : chemins (relatifs à ~/Documents/) de fichiers
+# contenant des identifiants, à EXCLURE de l'OCR/index/Batch API. Peuplée par
+# `documents secrets --quarantine` ; éditable à la main. Un par ligne, `#` =
+# commentaire. C'est le garde-fou ACTIF (la détection seule ne protège pas).
+SECRETS_QUARANTINE = CONNAISSANCE_ROOT / ".config" / "secrets-quarantine.txt"
 
 DOCUMENTS_DIR = BASE_PATH / "Documents"
 
@@ -55,6 +62,37 @@ def _ensure_user_config(template, user_path):
     return user_path
 
 
+def load_quarantine_set() -> set[str]:
+    """Charger les chemins (relatifs à ~/Documents/) mis en quarantaine secrets."""
+    if not SECRETS_QUARANTINE.exists():
+        return set()
+    out: set[str] = set()
+    try:
+        for line in SECRETS_QUARANTINE.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if line and not line.startswith("#"):
+                out.add(line)
+    except OSError:
+        return set()
+    return out
+
+
+def write_quarantine_set(rels) -> Path:
+    """(Ré)écrire la liste de quarantaine (chemins rel à ~/Documents/), triée."""
+    require_connaissance_root()
+    SECRETS_QUARANTINE.parent.mkdir(parents=False, exist_ok=True)
+    header = (
+        "# Fichiers en quarantaine SECRETS — exclus de l'OCR, de l'index qmd et\n"
+        "# du Batch API (rejetés par filtres.filter_document, raison\n"
+        "# 'secret_quarantine'). Chemins relatifs à ~/Documents/, un par ligne.\n"
+        "# Géré par `connaissance documents secrets --quarantine` ; éditable.\n"
+    )
+    body = "\n".join(sorted(rels))
+    SECRETS_QUARANTINE.write_text(header + body + ("\n" if body else ""),
+                                  encoding="utf-8")
+    return SECRETS_QUARANTINE
+
+
 class Filtres:
     """Système de filtres unifié pour les 3 sources."""
 
@@ -63,6 +101,14 @@ class Filtres:
         config_file = config_path or _ensure_user_config(TEMPLATE_FILTRES, USER_FILTRES)
         self._config = _load_yaml(config_file)
         self._scoring_config = None  # chargé à la demande
+        self._quarantine = None      # chargé à la demande
+
+    @property
+    def quarantine(self) -> set[str]:
+        """Chemins (rel à ~/Documents/) en quarantaine secrets, mémo lazy."""
+        if self._quarantine is None:
+            self._quarantine = load_quarantine_set()
+        return self._quarantine
 
     @property
     def docs_config(self):
@@ -95,6 +141,13 @@ class Filtres:
         if extensions and path.suffix.lower() not in extensions:
             return False, "extension"
 
+        # Garde-fou secrets (nom) : matériel cryptographique reconnu au NOM
+        # (clé privée, keystore, .pem…) → jamais transcrit, même si l'extension
+        # est éligible (ex. id_rsa.pdf). Coût quasi nul, toujours actif.
+        sig = _secrets.filename_signal(path.name)
+        if sig and sig[1] == "high":
+            return False, "secret_filename"
+
         # Dossiers techniques
         tech_dirs = set(cfg.get("dossiers_techniques", []))
         if any(d in path.parts for d in tech_dirs):
@@ -106,6 +159,11 @@ class Filtres:
             rel_str = str(rel)
         except ValueError:
             rel_str = str(path)
+
+        # Garde-fou secrets (liste) : fichier mis en quarantaine par
+        # `documents secrets --quarantine` → exclu de l'OCR/index/Batch API.
+        if rel_str in self.quarantine:
+            return False, "secret_quarantine"
 
         # Dossier racine commençant par "- " → workflow, exclu
         root_dir = Path(rel_str).parts[0] if Path(rel_str).parts else ""

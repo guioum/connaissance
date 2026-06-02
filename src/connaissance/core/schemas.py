@@ -232,6 +232,17 @@ class SecretsScan(TypedDict, total=False):
     sample: list[str]
 
 
+class SecretsQuarantine(TypedDict, total=False):
+    quarantine_file: str
+    added: int
+    already_present: int
+    total_quarantined: int
+    high: int
+    medium: int
+    added_sample: list[str]
+    note: str
+
+
 # --- emails ---
 
 class EmailsStats(TypedDict):

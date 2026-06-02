@@ -154,6 +154,62 @@ def test_command_flags_content_and_name(tmp_path, monkeypatch):
     assert res["flagged"] == 2
 
 
+# --- garde-fou actif : filtres.filter_document ------------------------------
+
+def _filtres_min(extensions=(".pdf",)):
+    from connaissance.core import filtres
+    f = filtres.Filtres(config_path=filtres.TEMPLATE_FILTRES)
+    f._config = {"documents": {"extensions": list(extensions)}}
+    f._quarantine = set()
+    return f, filtres
+
+
+def test_filter_document_rejects_quarantined():
+    f, filtres = _filtres_min()
+    f._quarantine = {"Classer/secret/creds.pdf"}
+    p = filtres.DOCUMENTS_DIR / "Classer/secret/creds.pdf"
+    ok, reason = f.filter_document(p)
+    assert not ok and reason == "secret_quarantine"
+
+
+def test_filter_document_rejects_crypto_filename():
+    f, filtres = _filtres_min()
+    p = filtres.DOCUMENTS_DIR / "Classer/id_rsa.pdf"   # nom = clé privée
+    ok, reason = f.filter_document(p)
+    assert not ok and reason == "secret_filename"
+
+
+def test_filter_document_allows_normal_doc():
+    f, filtres = _filtres_min()
+    p = filtres.DOCUMENTS_DIR / "Classer/facture-2024.pdf"
+    ok, reason = f.filter_document(p)
+    assert ok, reason
+
+
+def test_quarantine_apply_writes_list(tmp_path, monkeypatch):
+    from connaissance.core import filtres
+    qfile = tmp_path / "secrets-quarantine.txt"
+    monkeypatch.setattr(filtres, "SECRETS_QUARANTINE", qfile)
+    monkeypatch.setattr(filtres, "require_connaissance_root", lambda: None)
+    monkeypatch.setattr(CMD, "require_connaissance_root", lambda: None)
+    fake = {"files": [
+        {"rel": "a/high.csv", "severity": "high", "findings": [],
+         "filename_signal": None, "findings_count": 0},
+        {"rel": "b/med.pdf", "severity": "medium", "findings": [],
+         "filename_signal": "name_hint", "findings_count": 0},
+    ]}
+    monkeypatch.setattr(CMD, "scan", lambda scope=None: fake)
+
+    res = CMD.quarantine_apply()
+    assert res["added"] == 1 and res["high"] == 1
+    txt = qfile.read_text(encoding="utf-8")
+    assert "a/high.csv" in txt and "b/med.pdf" not in txt   # high seulement
+
+    res2 = CMD.quarantine_apply(include_medium=True)
+    assert res2["added"] == 1   # le medium s'ajoute, idempotent sur le high
+    assert "b/med.pdf" in qfile.read_text(encoding="utf-8")
+
+
 def test_command_skips_already_classified_top_dirs(tmp_path, monkeypatch):
     root = tmp_path / "Documents"
     (root / "organismes" / "banque").mkdir(parents=True)

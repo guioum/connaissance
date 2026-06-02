@@ -399,13 +399,20 @@ server.registerTool(
     inputSchema: {
       scope: z.string().optional().describe("Restrict to a subfolder of ~/Documents (relative path, e.g. 'Classer/old')."),
       output_file: z.string().optional().describe("Write the full JSON report to this path instead of inline."),
+      quarantine: z.boolean().optional().describe("ACTIVE guard: write the detected files into the quarantine list (~/Connaissance/.config/secrets-quarantine.txt) so they are EXCLUDED from OCR, the qmd index and the Batch API (filtres rejects them, reason 'secret_quarantine'). Writes a config file only — moves/deletes nothing."),
+      include_medium: z.boolean().optional().describe("With quarantine: also add 'medium' detections (default: high only)."),
     },
     annotations: { readOnlyHint: true },
   },
   async (args) => {
     const a = [];
     if (args.scope) a.push("--scope", args.scope);
-    if (args.output_file) a.push("--output-file", args.output_file);
+    if (args.quarantine) {
+      a.push("--quarantine");
+      if (args.include_medium) a.push("--include-medium");
+    } else if (args.output_file) {
+      a.push("--output-file", args.output_file);
+    }
     return runAndFormat("documents", "secrets", a);
   }
 );

@@ -53,9 +53,25 @@ grande réorg tant que ce n'est pas validé.
   + signal nom de fichier (`.env`, `id_rsa`, `*.pem`, `*.pfx`, `*.kdbx`… ; le
   `.key` Keynote n'est PAS pris pour une clé). Lecture via le **SSD**, jamais
   de download iCloud (`dataless` → nom seulement). Évidences **caviardées**.
-  Presidio (PII, lourd) écarté : mauvais outil pour des secrets. Reste à faire :
-  la **mise de côté effective** (déplacement vers une zone protégée), à
-  journaliser au ledger + soumise à validation.
+  Presidio (PII, lourd) écarté : mauvais outil pour des secrets. Détecteur
+  enrichi (v2.22.1–2) : +patterns providers (Azure/GCP/Twilio/SendGrid/npm/
+  PyPI/Telegram/Discord…), entropie Base64/Hex **gated par mot-clé** (l'entropie
+  libre = bruit massif sur un corpus perso), clés camelCase (`apiSiteKey`).
+  **Validé par test comparatif vs detect-secrets** (éphémère, jamais intégré) :
+  même set de vrais secrets, detect-secrets rate le binaire (keystores/.p12/
+  .kdb) et les colonnes CSV, et n'apportait qu'**un** vrai manque (corrigé).
+- [x] **Garde-fou ACTIF — quarantaine pipeline** (v2.23.0) : `filter_document`
+  rejette (a) le matériel cryptographique reconnu au **nom** (clé privée,
+  keystore…) → `secret_filename`, et (b) tout chemin de la **liste de
+  quarantaine** `~/Connaissance/.config/secrets-quarantine.txt` →
+  `secret_quarantine`. Un fichier listé est ainsi **exclu de l'OCR, de l'index
+  qmd et du Batch API** (chokepoint unique). `documents secrets --quarantine
+  [--include-medium]` peuple la liste (high par défaut) — **écrit une config,
+  ne déplace/supprime rien**, idempotent, éditable.
+- [ ] 🟢 **Quarantaine — déplacement physique optionnel** : pour les secrets à
+  faire VOYAGER hors du dossier (ex. regrouper sous `- Protégés/secrets/`),
+  une action plan→apply journalisée au ledger. Distinct du garde-fou actif
+  ci-dessus (qui suffit à exclure du pipeline sans rien bouger).
 - [ ] 🟡 **Phase B — Extraction de signaux (groupe A, zéro OCR)** ⏭️ *prochaine* :
   pour chaque doc en vrac (+ docs des sujets), produire un « paquet de signaux »
   sans Mistral — nom de fichier, chemin, **nom du dossier d'origine** (→ sujet),

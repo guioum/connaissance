@@ -56,6 +56,9 @@ def _cmd_documents(args) -> Any:
         return triage.triage(output_file=args.output_file)
     if args.verb == "secrets":
         from connaissance.commands import secrets
+        if getattr(args, "quarantine", False):
+            return secrets.quarantine_apply(scope=args.scope,
+                                            include_medium=args.include_medium)
         return secrets.scan(scope=args.scope, output_file=args.output_file)
     if args.verb == "suspects":
         return documents.suspects()
@@ -406,6 +409,15 @@ def build_parser() -> argparse.ArgumentParser:
     p_doc_sec.add_argument("--output-file", dest="output_file", type=str,
                            default=None,
                            help="Écrire le rapport complet dans ce fichier JSON.")
+    p_doc_sec.add_argument("--quarantine", action="store_true",
+                           help="Garde-fou ACTIF : écrire les fichiers détectés "
+                                "dans la liste de quarantaine (exclus de l'OCR/"
+                                "index/Batch API). N'écrit qu'une config — ne "
+                                "déplace rien.")
+    p_doc_sec.add_argument("--include-medium", dest="include_medium",
+                           action="store_true",
+                           help="Avec --quarantine : ajouter aussi les "
+                                "détections 'medium' (défaut : high seulement).")
     p_doc_verbs.add_parser("suspects")
     p_doc_vp = p_doc_verbs.add_parser("verify-preserve")
     p_doc_vp.add_argument("before")
