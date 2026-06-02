@@ -179,6 +179,17 @@ def test_filter_document_rejects_crypto_filename():
     assert not ok and reason == "secret_filename"
 
 
+def test_filter_document_quarantine_nfc_nfd_robust():
+    import unicodedata
+    f, filtres = _filtres_min()
+    # Liste stockée en NFD (macOS) ; chemin testé en NFC (littéral) → doit matcher.
+    nfd = unicodedata.normalize("NFD", "Classer/Légal/clé.pdf")
+    nfc = unicodedata.normalize("NFC", "Classer/Légal/clé.pdf")
+    f._quarantine = {unicodedata.normalize("NFC", nfd)}   # load normalise en NFC
+    ok, reason = f.filter_document(filtres.DOCUMENTS_DIR / nfc)
+    assert not ok and reason == "secret_quarantine"
+
+
 def test_filter_document_allows_normal_doc():
     f, filtres = _filtres_min()
     p = filtres.DOCUMENTS_DIR / "Classer/facture-2024.pdf"

@@ -23,6 +23,7 @@ Garde-fous fidèles au reste du pipeline :
 from __future__ import annotations
 
 import os
+import unicodedata
 from pathlib import Path
 
 from connaissance.commands.triage import (BUNDLE_SUFFIXES, CODE_MARKERS,
@@ -220,7 +221,9 @@ def quarantine_apply(scope: str | None = None,
 
     report = scan(scope=scope)   # payload inline (read-only)
     selected = [f for f in report["files"] if _risky(f)]
-    rels = {f["rel"] for f in selected}
+    # NFC avant merge : les rels viennent du walk filesystem (NFD sur macOS),
+    # l'existant est chargé en NFC → sans ça le merge dédoublerait.
+    rels = {unicodedata.normalize("NFC", f["rel"]) for f in selected}
 
     existing = _filtres.load_quarantine_set()
     added = sorted(rels - existing)

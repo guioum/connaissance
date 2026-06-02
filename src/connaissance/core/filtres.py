@@ -15,6 +15,7 @@ Usage :
 
 import fnmatch
 import re
+import unicodedata
 import yaml
 from datetime import datetime, timezone
 from pathlib import Path
@@ -71,7 +72,10 @@ def load_quarantine_set() -> set[str]:
         for line in SECRETS_QUARANTINE.read_text(encoding="utf-8").splitlines():
             line = line.strip()
             if line and not line.startswith("#"):
-                out.add(line)
+                # NFC : macOS écrit les noms de fichiers en NFD (accents
+                # décomposés) ; on canonicalise pour matcher quelle que soit
+                # la source du chemin testé (littéral NFC vs walk NFD).
+                out.add(unicodedata.normalize("NFC", line))
     except OSError:
         return set()
     return out
@@ -87,7 +91,7 @@ def write_quarantine_set(rels) -> Path:
         "# 'secret_quarantine'). Chemins relatifs à ~/Documents/, un par ligne.\n"
         "# Géré par `connaissance documents secrets --quarantine` ; éditable.\n"
     )
-    body = "\n".join(sorted(rels))
+    body = "\n".join(sorted(unicodedata.normalize("NFC", r) for r in rels))
     SECRETS_QUARANTINE.write_text(header + body + ("\n" if body else ""),
                                   encoding="utf-8")
     return SECRETS_QUARANTINE
@@ -162,7 +166,8 @@ class Filtres:
 
         # Garde-fou secrets (liste) : fichier mis en quarantaine par
         # `documents secrets --quarantine` → exclu de l'OCR/index/Batch API.
-        if rel_str in self.quarantine:
+        # NFC pour matcher quelle que soit la normalisation du chemin reçu.
+        if unicodedata.normalize("NFC", rel_str) in self.quarantine:
             return False, "secret_quarantine"
 
         # Dossier racine commençant par "- " → workflow, exclu
