@@ -56,6 +56,24 @@ _SUJET_RULES = [
 _DATE_RE = re.compile(r"(19[89]\d|20\d{2})[-/.]?(0[1-9]|1[0-2])[-/.]?(0[1-9]|[12]\d|3[01])")
 _PERSON_RE = re.compile(r"^[A-ZÀ-Ö][a-zà-ÿ'’-]+(?:\s+[A-ZÀ-Ö][a-zà-ÿ'’-]+){1,2}$")
 
+# Mots de TYPE de document (minés du vrai corpus) à retirer d'un candidat
+# d'entité : « BNC Sommaire Relevé de compte » → « BNC ». Inclut articles/
+# suffixes juridiques pour un nettoyage propre.
+_TYPE_WORDS = {
+    "facture", "factures", "recu", "recus", "releve", "releves", "paiement",
+    "paiements", "sommaire", "sommaires", "compte", "comptes", "courant",
+    "cotisation", "avis", "statement", "report", "rapport", "officiel",
+    "document", "documents", "confirmation", "depot", "depots", "transaction",
+    "transactions", "bordereau", "manuel", "manuels", "declaration",
+    "formulaire", "paye", "payes", "bulletin", "note", "notes", "contrat",
+    "contrats", "de", "du", "des", "le", "la", "les", "en", "et",
+    "inc", "ltee", "ltd", "corp", "enr",
+    # Bruit de noms générés par scanner/app (jamais une entité).
+    "scanner", "doxie", "scan", "scanned", "img", "image", "images", "photo",
+    "screenshot", "capture", "untitled", "numerisation", "numerise", "fichier",
+    "page", "pages", "export", "copie", "copy", "final", "version",
+}
+
 
 def _norm(s: str) -> str:
     return "".join(c for c in unicodedata.normalize("NFD", (s or "").lower())
@@ -125,19 +143,41 @@ def _classify_entity_type(name: str) -> str:
     return "divers"
 
 
+def _strip_type_words(text: str) -> str:
+    """Candidat d'entité nettoyé : underscores → espaces, dates/nombres/années
+    et mots-de-type (+ bruit scanner) retirés."""
+    base = _DATE_RE.sub("", (text or "").replace("_", " "))
+    kept = []
+    for t in re.split(r"\s+", base.strip()):
+        n = _norm(t.strip("'’-_·"))
+        if not n or n in _TYPE_WORDS:
+            continue
+        if re.fullmatch(r"\d{1,4}(-\d{1,4})?", n):   # nombres, années, plages
+            continue
+        # Mot-scanner collé à un numéro : « scan001 », « img1234 », « doxie2024 ».
+        m = re.fullmatch(r"([a-zà-ÿ]+)\d+", n)
+        if m and m.group(1) in _TYPE_WORDS:
+            continue
+        kept.append(t.strip("'’-_·"))
+    return re.sub(r"\s+", " ", " ".join(kept)).strip(" -—–_·")
+
+
 def guess_entity(signals: dict, segments: list[str],
                  known_entities: list[str] | None = None) -> tuple[str | None, str, bool]:
     """(nom d'entité, entity_type, matché_connu).
 
-    Candidat = 1er segment du nom (hors date) sinon tête du dossier d'origine.
-    Si ``known_entities`` est fourni, on tente un alignement (sous-chaîne
-    normalisée) pour la cohérence inter-documents.
+    Candidat = 1er segment du nom **nettoyé** (mots-de-type, bruit scanner,
+    nombres) ; si vide (nom « scanner_2024 », date seule…), on se rabat sur le
+    **dossier d'origine** nettoyé — ce qui couvre les ~900 fichiers scanner/doxie
+    et les noms non segmentés. ``known_entities`` permet un alignement
+    (sous-chaîne normalisée) pour la cohérence inter-documents.
     """
     candidate = None
     if segments:
-        candidate = segments[0]
-    elif signals.get("origin_folder"):
-        candidate = re.split(r"[\\/]", signals["origin_folder"])[0]
+        candidate = _strip_type_words(segments[0]) or None
+    if not candidate and signals.get("origin_folder"):
+        lead = re.split(r"[\\/]", signals["origin_folder"])[0]
+        candidate = _strip_type_words(lead) or None
 
     if not candidate:
         return None, "inconnus", False
@@ -153,10 +193,13 @@ def guess_entity(signals: dict, segments: list[str],
 
 
 def guess_title(stem: str, segments: list[str], entity: str | None) -> str:
-    """Titre nettoyé : segments hors entité, sinon nom sans date. Collapse espaces."""
+    """Titre nettoyé : segments hors entité (et nom d'entité retiré s'il est
+    resté collé dans un segment unique), sinon nom sans date."""
     kept = [s for s in segments if s != entity]
     title = " ".join(kept) if kept else _DATE_RE.sub("", stem).strip(" -—–_")
-    title = re.sub(r"\s+", " ", title.replace("_", " ")).strip()
+    if entity:
+        title = re.sub(re.escape(entity), "", title, flags=re.I)
+    title = re.sub(r"\s+", " ", title.replace("_", " ")).strip(" -—–·")
     return title or stem
 
 

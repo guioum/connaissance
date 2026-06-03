@@ -31,18 +31,30 @@ def test_well_named_document_high_confidence():
 
 
 def test_known_entity_alignment():
-    s = _sig("Classer/vrac/bnc relevé mars.pdf",
-             dates={"from_name": None, "metadata": None,
-                    "filesystem_created": "2025-03-01T00:00:00",
-                    "filesystem_modified": None},
-             name_keywords=["bnc", "releve", "mars"])
-    # 'bnc' s'aligne sur l'entité connue 'Banque Nationale'
-    r = C.classify(s, known_entities=["Banque Nationale", "Hydro-Québec"])
-    # le 1er segment 'bnc relevé mars' contient 'bnc' → match connu? non,
-    # known cherche sous-chaîne : 'banque nationale' vs 'bnc releve mars' → pas
-    # de sous-chaîne. On teste plutôt l'alignement direct :
-    r2 = C.classify(_sig("x/BNC.pdf"), known_entities=["BNC", "Hydro-Québec"])
-    assert r2["entity"] == "BNC" and r2["entity_known"] is True
+    r = C.classify(_sig("x/BNC.pdf"), known_entities=["BNC", "Hydro-Québec"])
+    assert r["entity"] == "BNC" and r["entity_known"] is True
+
+
+def test_entity_strips_type_words():
+    # « BNC Sommaire Relevé de compte » → entité « BNC », titre sans « BNC ».
+    r = C.classify(_sig("x/BNC Sommaire Relevé de compte.pdf"))
+    assert r["entity"] == "BNC"
+    assert "bnc" not in r["title"].lower()
+
+
+def test_entity_from_folder_when_scanner_name():
+    # Nom généré par scanner → entité prise du dossier (mot-de-type retiré).
+    s = _sig("x/Vidéotron Facture/scanner_2024-03-12.pdf",
+             origin_folder="Vidéotron Facture")
+    r = C.classify(s)
+    assert r["entity"] == "Vidéotron"
+
+
+def test_entity_from_folder_strips_year_range():
+    s = _sig("x/Payes Québecor 2015-2016/scan001.pdf",
+             origin_folder="Payes Québecor 2015-2016")
+    r = C.classify(s)
+    assert r["entity"] == "Québecor"
 
 
 def test_person_entity_type():
