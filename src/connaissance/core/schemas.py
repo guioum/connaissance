@@ -274,6 +274,18 @@ class SecretsQuarantine(TypedDict, total=False):
     note: str
 
 
+class ClassifyPrepare(TypedDict, total=False):
+    total: int
+    model: str
+    transit_file: str
+    known_entities_count: int
+    requests: list[dict]   # [{custom_id, system, user, model, max_tokens}]
+    # variante --output-file
+    output_file: str
+    total_bytes: int
+    sample_prompts: list[dict]
+
+
 # --- emails ---
 
 class EmailsStats(TypedDict):

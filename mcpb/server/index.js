@@ -744,6 +744,31 @@ server.registerTool(
 );
 
 server.registerTool(
+  "connaissance_classify_prepare",
+  {
+    description:
+      "Phase C (pre-classification of ~/Documents) — build Batch API requests to classify documents from their Phase-B SIGNAL packets (NOT the full document). OFFLINE: generates requests, submits nothing. Each request bundles the signal packet + a free heuristic hint + the list of already-known entities, and asks Claude to return strict JSON {entity, entity_type, category, date, title, sujet, confidence, reason} — normalizing the entity against the known list (e.g. 'BNC' → 'Banque Nationale') and cleaning the title. Category is one of the canonical domains (banque, logement, impots, telecom, sante, ...). Writes requests to a transit file (and full requests to output_file) for submit_batch. Default model is Haiku 4.5 (cheap, short input). Typical flow: documents_signals(output_file) → classify_prepare(from_signals) → submit_batch → classify_register (later). Read-only on the corpus.",
+    inputSchema: {
+      scope: z.string().optional().describe("Subfolder of ~/Documents to classify (relative path)."),
+      from_signals: z.string().optional().describe("Path to a `documents signals --output-file` JSON (avoids re-scanning)."),
+      model: z.string().optional().describe("Batch model (default: claude-haiku-4-5-20251001)."),
+      limit: z.number().optional().describe("Cap the number of documents (sampling)."),
+      output_file: z.string().optional().describe("Write the full requests JSON to this path (recommended)."),
+    },
+    annotations: { readOnlyHint: true },
+  },
+  async (args) => {
+    const a = [];
+    if (args.scope) a.push("--scope", args.scope);
+    if (args.from_signals) a.push("--from-signals", args.from_signals);
+    if (args.model) a.push("--model", args.model);
+    if (args.limit != null) a.push("--limit", String(args.limit));
+    if (args.output_file) a.push("--output-file", args.output_file);
+    return runAndFormat("classify", "prepare", a);
+  }
+);
+
+server.registerTool(
   "connaissance_summarize_prepare",
   {
     description:

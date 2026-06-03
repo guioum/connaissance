@@ -126,6 +126,15 @@ def _cmd_pipeline(args) -> Any:
     raise SystemExit(f"verbe inconnu : pipeline {args.verb}")
 
 
+def _cmd_classify(args) -> Any:
+    from connaissance.commands import classify
+    if args.verb == "prepare":
+        return classify.prepare(scope=args.scope, from_signals=args.from_signals,
+                                model=args.model, limit=args.limit,
+                                output_file=args.output_file)
+    raise SystemExit(f"verbe inconnu : classify {args.verb}")
+
+
 def _cmd_organize(args) -> Any:
     from connaissance.commands import organize
     if args.verb == "plan":
@@ -348,6 +357,7 @@ _GROUPS: dict[str, Callable] = {
     "emails": _cmd_emails,
     "notes": _cmd_notes,
     "pipeline": _cmd_pipeline,
+    "classify": _cmd_classify,
     "organize": _cmd_organize,
     "optimize": _cmd_optimize,
     "summarize": _cmd_summarize,
@@ -484,6 +494,24 @@ def build_parser() -> argparse.ArgumentParser:
                                    "llm_usage) au lieu de l'estimation "
                                    "forfaitaire.")
     add_date_range(p_pipe_costs)
+    # classify (Phase C — pré-classement des documents ~/Documents)
+    p_cls = sub.add_parser("classify")
+    p_cls_verbs = p_cls.add_subparsers(dest="verb", required=True)
+    p_cls_prep = p_cls_verbs.add_parser("prepare")
+    p_cls_prep.add_argument("--scope", type=str, default=None,
+                            help="Sous-dossier de ~/Documents à classer.")
+    p_cls_prep.add_argument("--from-signals", dest="from_signals", type=str,
+                            default=None,
+                            help="Fichier JSON de `documents signals "
+                                 "--output-file` (évite un re-scan).")
+    p_cls_prep.add_argument("--model", type=str,
+                            default="claude-haiku-4-5-20251001",
+                            help="Modèle Batch (défaut : Haiku 4.5).")
+    p_cls_prep.add_argument("--limit", type=int, default=None,
+                            help="Limiter le nombre de documents (échantillon).")
+    p_cls_prep.add_argument("--output-file", dest="output_file", type=str,
+                            default=None,
+                            help="Écrire les requêtes complètes dans ce fichier.")
     # organize
     p_org = sub.add_parser("organize")
     p_org_verbs = p_org.add_subparsers(dest="verb", required=True)
