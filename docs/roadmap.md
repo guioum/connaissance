@@ -86,10 +86,21 @@ grande réorg tant que ce n'est pas validé.
   pas de download), **cache** `tracking.db` (table `doc_signals`). Validé sur
   1 804 docs réels : **86 % born-digital** (texte gratuit), 199 scannés (futur
   backlog OCR), origines révèlent les entités/sujets. Rien déplacé.
-- [ ] 🟡 **Phase C — Pré-classement heuristique** ⏭️ *prochaine* : entité + catégorie + date +
-  titre, avec confiance ; basse confiance → zone d'attente (vrai pipeline
-  OCR+LLM plus tard). Réutilise la taxonomie + `resolution.py`. Pose aussi le
-  **tag `sujet:`** (depuis `grouped_folders` du triage) — voir modèle sujets.
+- [x] **Phase C — Pré-classement hybride** (v2.25–2.30) : pipeline complet,
+  validé de bout en bout sur 1803 docs réels. Briques : (1) **hint heuristique**
+  `core/classify.py` (date/entité/catégorie/sujet/titre + confiance ; solidifié
+  sur le vrai corpus : strip mots-de-type + scanner→dossier, catégorie par
+  contenu, keywords nettoyés du foyer/boilerplate) ; (2) **`classify prepare`** —
+  signaux + hint + entités connues → requêtes Batch (entités connues en system
+  cacheable) ; (3) **submit_batch** (Haiku 4.5 — A/B vs Sonnet = match nul, donc
+  Haiku par défaut, ~quelques $ tout le corpus) ; (4) **`classify register`** —
+  résultats validés (catégorie canonique, date) + réconciliation entité
+  (`resolution.py`) → manifeste plan→apply, basse confiance → **zone d'attente** ;
+  (5) **`classify apply`** — déplacement **ledger** (réversible), **dry-run par
+  défaut**. Validé : 33 auto / 9 attente sur l'échantillon, destinations propres
+  (`RE-101(2020-01).pdf` → `organismes/revenu-quebec/2019-12-30 …`). Reste : le
+  **tag `sujet:`** dans le frontmatter (aujourd'hui le sujet est calculé mais pas
+  encore posé en frontmatter), et le run du corpus complet.
 - [ ] 🟡 **Sujets = vue virtuelle unique** (décision actée — modèle sujets) :
   un doc est classé physiquement par ENTITÉ + tagué `sujet:` ; une seule vue
   `~/Documents/- Sujets/` (symlinks, régénérable) rassemble par sujet et

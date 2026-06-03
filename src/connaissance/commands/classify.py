@@ -19,8 +19,9 @@ import unicodedata
 from pathlib import Path
 
 from connaissance.core import classify as _heur
+from connaissance.core import ledger as _ledger
 from connaissance.core.output_file import write_or_inline
-from connaissance.core.paths import DOCUMENTS_DIR, transit_file
+from connaissance.core.paths import DOCUMENTS_DIR, require_paths, transit_file
 from connaissance.core.resolution import (chercher_alias, construire_nom_fichier,
                                           construire_slug)
 from connaissance.core.tracking import TrackingDB
@@ -218,6 +219,80 @@ def prepare(scope: str | None = None, from_signals: str | None = None,
         }
 
     return write_or_inline(payload, output_file=output_file, summary_fn=_summary)
+
+
+# --- Brique 5 : apply (manifeste → déplacements ledger, dry-run par défaut) --
+
+def _unique_dest(dst: Path) -> Path:
+    """Éviter d'écraser : ``nom.pdf`` → ``nom (2).pdf`` si la cible existe."""
+    if not dst.exists():
+        return dst
+    stem, suf = dst.stem, dst.suffix
+    i = 2
+    while True:
+        cand = dst.with_name(f"{stem} ({i}){suf}")
+        if not cand.exists():
+            return cand
+        i += 1
+
+
+def apply(manifest_file: str, dry_run: bool = True,
+          db: TrackingDB | None = None) -> dict:
+    """Appliquer le manifeste de pré-classement (schema ClassifyApply).
+
+    Déplace chaque entrée ``status=auto`` vers sa destination **via le ledger**
+    (``safe_move`` : journalisé, réversible). Les ``attente`` sont laissées en
+    place. **Dry-run par défaut** : ne bouge RIEN tant que ``dry_run=False``
+    (flag ``--apply``). Collisions de noms gérées (`(2)`, `(3)`…).
+    """
+    require_paths(DOCUMENTS_DIR, context="classify apply")
+    payload_in = json.loads(Path(manifest_file).expanduser().read_text(encoding="utf-8"))
+    entries = payload_in.get("entries", payload_in) if isinstance(payload_in, dict) else payload_in
+    autos = [e for e in entries if e.get("status") == "auto" and e.get("dest")]
+
+    owns_db = db is None
+    if db is None:
+        db = TrackingDB()
+    run_id = _ledger.new_run_id("classify")
+
+    planned: list[dict] = []
+    skipped: list[dict] = []
+    errors: list[dict] = []
+    try:
+        for e in autos:
+            src = DOCUMENTS_DIR / e["source"]
+            if not src.exists():
+                skipped.append({"source": e["source"], "reason": "source_introuvable"})
+                continue
+            dst = _unique_dest(DOCUMENTS_DIR / e["dest"])
+            rel_dst = str(dst.relative_to(DOCUMENTS_DIR))
+            if dry_run:
+                planned.append({"source": e["source"], "dest": rel_dst})
+                continue
+            try:
+                _ledger.safe_move(db, src, dst,
+                                  f"classify {e.get('category') or ''}".strip(),
+                                  run_id)
+                planned.append({"source": e["source"], "dest": rel_dst})
+            except OSError as exc:
+                errors.append({"source": e["source"], "error": str(exc)})
+    finally:
+        if owns_db:
+            db.close()
+
+    result = {
+        "dry_run": dry_run,
+        "auto_total": len(autos),
+        "moved": 0 if dry_run else len(planned),
+        "planned": len(planned),
+        "attente": sum(1 for e in entries if e.get("status") == "attente"),
+        "skipped": skipped,
+        "errors": errors,
+        "moves": planned[:50],
+    }
+    if not dry_run and planned:
+        result["ledger_run"] = run_id
+    return result
 
 
 # --- Brique 4 : register (résultats Batch → manifeste plan→apply) -----------

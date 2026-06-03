@@ -136,6 +136,8 @@ def _cmd_classify(args) -> Any:
         return classify.register(results_file=args.results,
                                  from_prepare=args.from_prepare,
                                  output_file=args.output_file)
+    if args.verb == "apply":
+        return classify.apply(manifest_file=args.manifest, dry_run=not args.apply)
     raise SystemExit(f"verbe inconnu : classify {args.verb}")
 
 
@@ -526,6 +528,13 @@ def build_parser() -> argparse.ArgumentParser:
     p_cls_reg.add_argument("--output-file", dest="output_file", type=str,
                            default=None,
                            help="Écrire le manifeste complet dans ce fichier.")
+    p_cls_app = p_cls_verbs.add_parser("apply")
+    p_cls_app.add_argument("manifest",
+                           help="Manifeste produit par `classify register`.")
+    p_cls_app.add_argument("--apply", action="store_true",
+                           help="Exécuter les déplacements (sinon DRY-RUN par "
+                                "défaut — rien n'est déplacé). Réversible au "
+                                "ledger (`ledger revert`).")
     # organize
     p_org = sub.add_parser("organize")
     p_org_verbs = p_org.add_subparsers(dest="verb", required=True)

@@ -317,6 +317,18 @@ class ClassifyRegister(TypedDict, total=False):
     sample_auto: list[dict]
 
 
+class ClassifyApply(TypedDict, total=False):
+    dry_run: bool
+    auto_total: int
+    moved: int
+    planned: int
+    attente: int
+    skipped: list[dict]
+    errors: list[dict]
+    moves: list[dict]
+    ledger_run: str   # présent si des fichiers ont bougé (pour `ledger revert`)
+
+
 # --- emails ---
 
 class EmailsStats(TypedDict):

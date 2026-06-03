@@ -788,6 +788,24 @@ server.registerTool(
 );
 
 server.registerTool(
+  "connaissance_classify_apply",
+  {
+    description:
+      "Phase C brique 5 — apply a classify_register manifest: move each 'auto' entry to its destination (entity_type/slug/'AAAA-MM-JJ title.ext') VIA THE LEDGER (journaled, reversible with ledger_revert). 'attente' entries are left in place. DRY-RUN BY DEFAULT — pass apply=true to actually move files. Name collisions are handled ((2),(3)…). Returns planned/moved counts + ledger_run when files moved.",
+    inputSchema: {
+      manifest: z.string().describe("Path to the classify_register manifest JSON."),
+      apply: z.boolean().optional().describe("Execute the moves (default false = dry-run, moves nothing)."),
+    },
+    annotations: { readOnlyHint: false },
+  },
+  async (args) => {
+    const a = [args.manifest];
+    if (args.apply) a.push("--apply");
+    return runAndFormat("classify", "apply", a);
+  }
+);
+
+server.registerTool(
   "connaissance_summarize_prepare",
   {
     description:
