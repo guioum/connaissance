@@ -418,6 +418,24 @@ server.registerTool(
 );
 
 server.registerTool(
+  "connaissance_documents_signals",
+  {
+    description: "Phase B of the ~/Documents reorganization : extract a 'signal packet' per real document (group A) WITHOUT OCR, read-only, to feed later heuristic pre-classification. Cheap-to-expensive cascade: name + path + filesystem dates + type hint (stdlib) → Office metadata (docProps) → existing OCR-cache text → Office/plain text → PDF born-digital text layer page 1 (pypdfium2 if installed, last resort). Detects born-digital vs scanned. Produces keywords + extractive summary (Luhn) + entities (amounts/dates/refs). Skips containers, skips secret/quarantined files, reads via the SSD mirror (dataless files get name/path signals only — never an iCloud download), and caches packets in tracking.db. Pass output_file (the report can be large). Pass scope to restrict to a subfolder.",
+    inputSchema: {
+      scope: z.string().optional().describe("Restrict to a subfolder of ~/Documents (relative path)."),
+      output_file: z.string().optional().describe("Write the full JSON report to this path instead of inline (recommended — large on a big corpus)."),
+    },
+    annotations: { readOnlyHint: true },
+  },
+  async (args) => {
+    const a = [];
+    if (args.scope) a.push("--scope", args.scope);
+    if (args.output_file) a.push("--output-file", args.output_file);
+    return runAndFormat("documents", "signals", a);
+  }
+);
+
+server.registerTool(
   "connaissance_documents_suspects",
   {
     description: "List transcriptions with suspect table patterns (empty cells, orphan pipe lines) that might need re-formatting via the transcrire/fix-ocr skill.",

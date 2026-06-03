@@ -72,16 +72,21 @@ grande réorg tant que ce n'est pas validé.
   faire VOYAGER hors du dossier (ex. regrouper sous `- Protégés/secrets/`),
   une action plan→apply journalisée au ledger. Distinct du garde-fou actif
   ci-dessus (qui suffit à exclure du pipeline sans rien bouger).
-- [ ] 🟡 **Phase B — Extraction de signaux (groupe A, zéro OCR)** ⏭️ *prochaine* :
-  pour chaque doc en vrac (+ docs des sujets), produire un « paquet de signaux »
-  sans Mistral — nom de fichier, chemin, **nom du dossier d'origine** (→ sujet),
-  dates (fichier, EXIF, métadonnées PDF/Office), **texte embarqué** des PDF
-  born-digital (pypdfium2/pdfminer), texte du **cache** OCR existant, extractive
-  summarization (mots-clés / premières lignes). Détecter born-digital vs scanné
-  (page 1 sans texte = scanné → signaux chemin/nom seulement). Nouvelle commande
-  `documents signals` (+ outil MCP), sortie JSON, lecture via le **SSD**
-  (`documents_read_path`), rien déplacé.
-- [ ] 🟡 **Phase C — Pré-classement heuristique** : entité + catégorie + date +
+- [x] **Phase B — Extraction de signaux (groupe A, zéro OCR)** (v2.24.0) :
+  `documents signals` produit un « paquet de signaux » par document via une
+  **cascade du moins cher au plus cher** (n'ouvre pypdfium2 qu'en dernier
+  recours) : nom + chemin + **dossier d'origine** (→ sujet) + dates FS + type
+  (stdlib) → **métadonnées Office** (`docProps`, stdlib zip+XML) → **cache OCR**
+  existant → texte Office/plain (stdlib) → **couche texte PDF born-digital**
+  page 1 (`pypdfium2`, extra optionnel `connaissance[pdf]`). Détecte
+  **born-digital vs scanné**. **Résumé extractif maison** (Luhn + mots-clés +
+  entités montants/dates/refs, `core/summarize_extractif.py`, zéro dépendance —
+  T5/GPT/gensim/sumy écartés). Garde-fous : conteneurs élagués, **secrets
+  exclus** (quarantaine + nom), lecture **SSD** (dataless → nom/chemin seuls,
+  pas de download), **cache** `tracking.db` (table `doc_signals`). Validé sur
+  1 804 docs réels : **86 % born-digital** (texte gratuit), 199 scannés (futur
+  backlog OCR), origines révèlent les entités/sujets. Rien déplacé.
+- [ ] 🟡 **Phase C — Pré-classement heuristique** ⏭️ *prochaine* : entité + catégorie + date +
   titre, avec confiance ; basse confiance → zone d'attente (vrai pipeline
   OCR+LLM plus tard). Réutilise la taxonomie + `resolution.py`. Pose aussi le
   **tag `sujet:`** (depuis `grouped_folders` du triage) — voir modèle sujets.

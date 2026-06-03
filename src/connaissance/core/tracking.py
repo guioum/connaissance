@@ -90,6 +90,17 @@ CREATE TABLE IF NOT EXISTS text_simhash (
 
 CREATE INDEX IF NOT EXISTS idx_text_simhash ON text_simhash(simhash);
 
+-- Cache des paquets de signaux Phase B (documents signals), keyé sur
+-- (rel_path, size, mtime) comme text_simhash. Évite de re-parser/relire un
+-- document inchangé. `signals` = JSON sérialisé du paquet.
+CREATE TABLE IF NOT EXISTS doc_signals (
+    rel_path TEXT NOT NULL UNIQUE,
+    signals TEXT,
+    size INTEGER,
+    mtime REAL,
+    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%S', 'now', 'localtime'))
+);
+
 -- Ledger journalisé des opérations de fichiers (move/rename), réversible.
 -- Chaque ligne 'applied' enregistre l'ancien et le nouveau chemin + le SHA256,
 -- ce qui permet un rollback vérifié (on ne restaure que si le fichier est
@@ -551,6 +562,50 @@ class TrackingDB:
             (str(rel_path), h, size, mtime))
         self._conn.commit()
         return h
+
+    def get_or_compute_signals(self, abs_path, rel_path, compute_fn):
+        """Paquet de signaux Phase B d'un document, caché par ``(rel_path, size,
+        mtime)``.
+
+        ``abs_path`` : chemin à stat (canonique — métadonnées seules, jamais de
+        download). ``rel_path`` : clé de cache LOGIQUE (relatif à ~/Documents).
+        ``compute_fn(abs_path) -> dict`` : calcule le paquet quand le cache est
+        froid/périmé. Retourne le dict (caché ou frais), ou ``None`` si stat
+        échoue.
+        """
+        import json as _json
+        try:
+            st = Path(abs_path).stat()
+        except OSError:
+            return None
+        size = int(st.st_size)
+        mtime = float(st.st_mtime)
+
+        row = self._conn.execute(
+            "SELECT signals, size, mtime FROM doc_signals WHERE rel_path = ?",
+            (str(rel_path),)).fetchone()
+        if row is not None:
+            d = dict(row)
+            if d.get("signals") and d.get("size") == size and d.get("mtime") == mtime:
+                try:
+                    return _json.loads(d["signals"])
+                except (ValueError, TypeError):
+                    pass  # cache corrompu → recalculer
+
+        packet = compute_fn(abs_path)
+        if packet is None:
+            return None
+        self._conn.execute(
+            """INSERT INTO doc_signals (rel_path, signals, size, mtime)
+               VALUES (?, ?, ?, ?)
+               ON CONFLICT(rel_path) DO UPDATE SET
+                 signals=excluded.signals,
+                 size=excluded.size,
+                 mtime=excluded.mtime,
+                 updated_at=strftime('%Y-%m-%dT%H:%M:%S', 'now', 'localtime')""",
+            (str(rel_path), _json.dumps(packet, ensure_ascii=False), size, mtime))
+        self._conn.commit()
+        return packet
 
     # --- Ledger des opérations de fichiers (réversible) ---
 

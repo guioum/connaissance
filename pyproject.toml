@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "connaissance"
-version = "2.23.2"
+version = "2.24.0"
 description = "Personal knowledge base CLI — transcription, summarization, entity organization, synthesis, audit. Built around a local Markdown + SQLite store."
 requires-python = ">=3.10"
 authors = [{ name = "guioum" }]
@@ -19,6 +19,12 @@ connaissance = "connaissance.cli:main"
 
 [project.optional-dependencies]
 test = ["pytest>=8"]
+# Extra `pdf` : couche texte des PDF born-digital pour `documents signals`
+# (Phase B). Optionnel et utilisé en dernier recours — absent, les signaux
+# dégradent proprement vers nom/chemin/métadonnées/cache OCR. pypdfium2 est une
+# lib Python pure (PDFium lié, in-process) : s'installe à l'identique Mac/VM via
+# uv, déterministe, pas de binaire système (cf. décision vs poppler/czkawka).
+pdf = ["pypdfium2>=4"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

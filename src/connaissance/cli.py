@@ -60,6 +60,9 @@ def _cmd_documents(args) -> Any:
             return secrets.quarantine_apply(scope=args.scope,
                                             include_medium=args.include_medium)
         return secrets.scan(scope=args.scope, output_file=args.output_file)
+    if args.verb == "signals":
+        from connaissance.commands import signals
+        return signals.scan(scope=args.scope, output_file=args.output_file)
     if args.verb == "suspects":
         return documents.suspects()
     if args.verb == "verify-preserve":
@@ -418,6 +421,14 @@ def build_parser() -> argparse.ArgumentParser:
                            action="store_true",
                            help="Avec --quarantine : ajouter aussi les "
                                 "détections 'medium' (défaut : high seulement).")
+    p_doc_sig = p_doc_verbs.add_parser("signals")
+    p_doc_sig.add_argument("--scope", type=str, default=None,
+                           help="Restreindre à un sous-dossier de ~/Documents "
+                                "(chemin relatif).")
+    p_doc_sig.add_argument("--output-file", dest="output_file", type=str,
+                           default=None,
+                           help="Écrire le rapport complet dans ce fichier JSON "
+                                "(volumineux sur une grosse base).")
     p_doc_verbs.add_parser("suspects")
     p_doc_vp = p_doc_verbs.add_parser("verify-preserve")
     p_doc_vp.add_argument("before")

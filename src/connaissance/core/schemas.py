@@ -125,6 +125,37 @@ class DocumentsSuspects(TypedDict):
     suspects: list[DocumentSuspect]
 
 
+class DocumentSignals(TypedDict, total=False):
+    rel: str
+    type: str
+    origin_folder: str | None
+    type_hint: str | None
+    name_keywords: list[str]
+    dates: dict          # {from_name, filesystem_created, filesystem_modified, metadata}
+    title_meta: str | None
+    author_meta: str | None
+    born_digital: bool | None
+    text_source: str     # none|ocr_cache|plain|office|pdf_embedded
+    pdf_available: bool
+    summary: dict        # {keywords, sentences, entities, chars}
+
+
+class DocumentsSignals(TypedDict, total=False):
+    total: int
+    scanned: int
+    documents: list[DocumentSignals]
+    skipped: dict
+    note: str
+    # variante --output-file
+    output_file: str
+    total_bytes: int
+    by_text_source: dict
+    by_born_digital: dict
+    by_type: dict
+    top_origin_folders: dict
+    sample: list[str]
+
+
 class VerifyPreserve(TypedDict):
     ok: bool
     missing_tokens: list[str]
