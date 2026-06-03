@@ -286,6 +286,37 @@ class ClassifyPrepare(TypedDict, total=False):
     sample_prompts: list[dict]
 
 
+class ClassifyEntry(TypedDict, total=False):
+    custom_id: str
+    source: str
+    status: Literal["auto", "attente"]
+    dest: str | None
+    entity: str | None
+    entity_type: str
+    entity_slug: str
+    category: str | None
+    date: str | None
+    title: str
+    sujet: str | None
+    confidence: Literal["high", "low"]
+    reasons: list[str]
+
+
+class ClassifyRegister(TypedDict, total=False):
+    total: int
+    auto: int
+    attente: int
+    manifest_file: str
+    entries: list[ClassifyEntry]
+    # variante --output-file
+    output_file: str
+    total_bytes: int
+    by_entity_type: dict
+    by_category: dict
+    attente_reasons: dict
+    sample_auto: list[dict]
+
+
 # --- emails ---
 
 class EmailsStats(TypedDict):

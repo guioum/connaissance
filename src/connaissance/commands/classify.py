@@ -21,7 +21,16 @@ from pathlib import Path
 from connaissance.core import classify as _heur
 from connaissance.core.output_file import write_or_inline
 from connaissance.core.paths import DOCUMENTS_DIR, transit_file
+from connaissance.core.resolution import (chercher_alias, construire_nom_fichier,
+                                          construire_slug)
 from connaissance.core.tracking import TrackingDB
+
+# Taxonomie canonique des catégories (alignée sur prompts/resume_document.md).
+CANONICAL_CATEGORIES = {
+    "achats", "assurances", "banque", "emplois", "impots", "juridique",
+    "logement", "sante", "telecom", "transport", "abonnements", "divers",
+}
+_DATE_OK = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 PROMPTS_DIR = Path(__file__).resolve().parent.parent / "prompts"
 DEFAULT_MODEL = "claude-haiku-4-5-20251001"   # suffisant pour un signal court
@@ -81,8 +90,18 @@ def noise_keyword_tokens() -> set[str]:
     return toks
 
 
+# Noms de dossiers génériques qui ne sont PAS des entités : les exclure de la
+# liste connue évite que le LLM y rattache un doc à tort (cf. A/B : « Document »).
+_JUNK_ENTITY_NAMES = {
+    "document", "documents", "divers", "scan", "scans", "fichier", "fichiers",
+    "note", "notes", "autre", "autres", "inconnu", "inconnus", "temp", "tmp",
+    "a classer", "a trier", "vrac", "sans titre",
+}
+
+
 def known_entities() -> list[str]:
-    """Entités déjà classées sur disque (organismes/ + personnes/), dé-sluggées."""
+    """Entités déjà classées sur disque (organismes/ + personnes/), dé-sluggées,
+    junk générique exclu."""
     names: list[str] = []
     for sub in ("organismes", "personnes"):
         d = DOCUMENTS_DIR / sub
@@ -90,7 +109,10 @@ def known_entities() -> list[str]:
             continue
         for child in sorted(d.iterdir()):
             if child.is_dir() and not child.name.startswith("."):
-                names.append(_deslug(child.name))
+                name = _deslug(child.name)
+                if _norm(name) in _JUNK_ENTITY_NAMES:
+                    continue
+                names.append(name)
     return names[:_MAX_KNOWN_ENTITIES]
 
 
@@ -193,6 +215,137 @@ def prepare(scope: str | None = None, from_signals: str | None = None,
             "transit_file": p["transit_file"],
             "known_entities_count": p["known_entities_count"],
             "sample_prompts": sample,
+        }
+
+    return write_or_inline(payload, output_file=output_file, summary_fn=_summary)
+
+
+# --- Brique 4 : register (résultats Batch → manifeste plan→apply) -----------
+
+def _parse_result_content(content: str) -> dict | None:
+    """Parser le JSON d'une réponse Claude (tolère un bloc ``` et du texte)."""
+    if not content:
+        return None
+    txt = re.sub(r"```(?:json)?", "", content).strip()
+    try:
+        return json.loads(txt)
+    except (ValueError, TypeError):
+        m = re.search(r"\{.*\}", txt, re.S)
+        if m:
+            try:
+                return json.loads(m.group(0))
+            except (ValueError, TypeError):
+                return None
+    return None
+
+
+def _reconcile_entity(name: str, entity_type: str) -> tuple[str, str]:
+    """(entity_type, slug) réconciliés contre le registre existant.
+
+    Un alias de fiche (``chercher_alias``) l'emporte (canonique) ; sinon on
+    construit le slug et on garde le type proposé (validé)."""
+    etype = entity_type if entity_type in ("organismes", "personnes", "divers") else "divers"
+    alias = chercher_alias(name) if name else None
+    if alias and "/" in alias:
+        atype, aslug = alias.split("/", 1)
+        return atype, aslug
+    return etype, construire_slug(name or "")
+
+
+def register(results_file: str, from_prepare: str,
+             output_file: str | None = None) -> dict:
+    """Construire le manifeste de pré-classement (schema ClassifyRegister).
+
+    Consomme les résultats Batch (``results_file`` : ``{results:[{custom_id,
+    content}]}``) + le fichier de ``prepare`` (``from_prepare`` : requêtes avec
+    ``_rel`` source et ``_hint`` de repli). Pour chaque doc : parse la sortie
+    Claude, **valide** (catégorie canonique, date AAAA-MM-JJ), **réconcilie**
+    l'entité (``resolution.py``) et calcule la destination. Confiance basse,
+    date absente ou parse échoué → **zone d'attente** (pas de déplacement auto).
+    **N'écrit/ne déplace rien** : produit un manifeste révisable pour ``apply``.
+    """
+    results = json.loads(Path(results_file).expanduser().read_text(encoding="utf-8"))
+    results = results.get("results", results) if isinstance(results, dict) else results
+    prep = json.loads(Path(from_prepare).expanduser().read_text(encoding="utf-8"))
+    prep_reqs = prep.get("requests", prep) if isinstance(prep, dict) else prep
+    by_id = {r["custom_id"]: r for r in prep_reqs}
+
+    entries: list[dict] = []
+    for res in results:
+        cid = res.get("custom_id", "")
+        req = by_id.get(cid, {})
+        source = req.get("_rel", "")
+        hint = req.get("_hint", {})
+        ext = ("." + source.rsplit(".", 1)[-1]) if "." in source.split("/")[-1] else ""
+        j = _parse_result_content(res.get("content", "")) or {}
+
+        entity = (j.get("entity") or "").strip()
+        etype_raw = j.get("entity_type") or "divers"
+        category = j.get("category") if j.get("category") in CANONICAL_CATEGORIES else None
+        date = j.get("date") if isinstance(j.get("date"), str) and _DATE_OK.match(j.get("date") or "") else None
+        title = (j.get("title") or "").strip()
+        sujet = (j.get("sujet") or "").strip() or None
+        confidence = j.get("confidence") if j.get("confidence") in ("high", "low") else "low"
+
+        reasons = []
+        if not j:
+            reasons.append("parse_échoué")
+        if not entity:
+            reasons.append("entité_absente")
+        if not category:
+            reasons.append("catégorie_invalide")
+        if not date:
+            reasons.append("date_absente")
+
+        etype, slug = _reconcile_entity(entity, etype_raw)
+        namefile = construire_nom_fichier(date or "0000-00-00", title or "sans-titre")
+
+        # Statut : auto seulement si confiance haute ET date ET entité ET catégorie.
+        auto = (confidence == "high" and date and entity and category
+                and etype != "divers" and slug)
+        if auto:
+            dest = f"{etype}/{slug}/{namefile}{ext}"
+            status = "auto"
+        else:
+            dest = None
+            status = "attente"
+            if confidence != "high":
+                reasons.append("confiance_basse")
+            if etype == "divers":
+                reasons.append("entité_divers")
+
+        entries.append({
+            "custom_id": cid, "source": source, "status": status, "dest": dest,
+            "entity": entity or hint.get("entity"), "entity_type": etype,
+            "entity_slug": slug, "category": category, "date": date,
+            "title": title, "sujet": sujet, "confidence": confidence,
+            "reasons": reasons,
+        })
+
+    transit = transit_file("classify-manifest")
+    transit.write_text(json.dumps({"entries": entries}, ensure_ascii=False),
+                       encoding="utf-8")
+
+    auto_n = sum(1 for e in entries if e["status"] == "auto")
+    payload = {
+        "total": len(entries),
+        "auto": auto_n,
+        "attente": len(entries) - auto_n,
+        "manifest_file": str(transit),
+        "entries": entries,
+    }
+
+    def _summary(p: dict) -> dict:
+        from collections import Counter
+        es = p["entries"]
+        return {
+            "total": p["total"], "auto": p["auto"], "attente": p["attente"],
+            "manifest_file": p["manifest_file"],
+            "by_entity_type": dict(Counter(e["entity_type"] for e in es).most_common()),
+            "by_category": dict(Counter(e["category"] for e in es if e["category"]).most_common()),
+            "attente_reasons": dict(Counter(r for e in es for r in e["reasons"]).most_common()),
+            "sample_auto": [{"source": e["source"], "dest": e["dest"]}
+                            for e in es if e["status"] == "auto"][:8],
         }
 
     return write_or_inline(payload, output_file=output_file, summary_fn=_summary)

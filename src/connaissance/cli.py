@@ -132,6 +132,10 @@ def _cmd_classify(args) -> Any:
         return classify.prepare(scope=args.scope, from_signals=args.from_signals,
                                 model=args.model, limit=args.limit,
                                 output_file=args.output_file)
+    if args.verb == "register":
+        return classify.register(results_file=args.results,
+                                 from_prepare=args.from_prepare,
+                                 output_file=args.output_file)
     raise SystemExit(f"verbe inconnu : classify {args.verb}")
 
 
@@ -512,6 +516,16 @@ def build_parser() -> argparse.ArgumentParser:
     p_cls_prep.add_argument("--output-file", dest="output_file", type=str,
                             default=None,
                             help="Écrire les requêtes complètes dans ce fichier.")
+    p_cls_reg = p_cls_verbs.add_parser("register")
+    p_cls_reg.add_argument("--results", required=True,
+                           help="Fichier JSON des résultats Batch "
+                                "(retrieve_batch_results / wait_for_batch).")
+    p_cls_reg.add_argument("--from-prepare", dest="from_prepare", required=True,
+                           help="Fichier produit par `classify prepare "
+                                "--output-file` (source + hint par custom_id).")
+    p_cls_reg.add_argument("--output-file", dest="output_file", type=str,
+                           default=None,
+                           help="Écrire le manifeste complet dans ce fichier.")
     # organize
     p_org = sub.add_parser("organize")
     p_org_verbs = p_org.add_subparsers(dest="verb", required=True)

@@ -78,7 +78,7 @@ immédiatement actives sans reinstall.
 3. Ajouter le sub-parser dans `build_parser()`
 4. Ajouter un wrapper MCP dans `mcpb/server/index.js` via
    `server.registerTool()`
-5. Mettre à jour README et le tableau des 58 outils
+5. Mettre à jour README et le tableau des 59 outils
 
 ### Tests manuels
 

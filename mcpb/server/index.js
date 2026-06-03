@@ -769,6 +769,25 @@ server.registerTool(
 );
 
 server.registerTool(
+  "connaissance_classify_register",
+  {
+    description:
+      "Phase C brique 4 — consume Batch classification results + the classify_prepare file, and build the plan→apply MANIFEST. For each doc: parse Claude's JSON, validate (canonical category, AAAA-MM-JJ date), reconcile the entity against the existing registry (resolution.py aliases/slug), and compute the destination path entity_type/slug/'AAAA-MM-JJ title.ext'. Low confidence, missing date, invalid category, divers entity, or parse failure → 'attente' (waiting zone, NOT moved). Writes a reviewable manifest (transit file + output_file) for classify apply. Moves/writes NOTHING to the corpus.",
+    inputSchema: {
+      results: z.string().describe("Path to the Batch results JSON (retrieve_batch_results / wait_for_batch output)."),
+      from_prepare: z.string().describe("Path to the classify_prepare output file (source rel + hint per custom_id)."),
+      output_file: z.string().optional().describe("Write the full manifest JSON to this path."),
+    },
+    annotations: { readOnlyHint: true },
+  },
+  async (args) => {
+    const a = ["--results", args.results, "--from-prepare", args.from_prepare];
+    if (args.output_file) a.push("--output-file", args.output_file);
+    return runAndFormat("classify", "register", a);
+  }
+);
+
+server.registerTool(
   "connaissance_summarize_prepare",
   {
     description:
