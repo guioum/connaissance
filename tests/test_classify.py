@@ -88,6 +88,12 @@ def test_category_from_keywords_when_no_segments():
     assert r["category"] == "hypotheque"
 
 
+def test_category_from_content_keywords():
+    # Nom muet « scan001 » mais contenu bancaire → catégorie via les mots-clés.
+    s = _sig("x/scan001.pdf", summary={"keywords": ["debit", "credit", "solde"]})
+    assert C.classify(s)["category"] == "releve"
+
+
 def test_sujet_from_origin_folder():
     assert C.guess_sujet("Travaux et rénovations") == "maison"
     assert C.guess_sujet("2024 Impôts") == "impots"

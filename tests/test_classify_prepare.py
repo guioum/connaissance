@@ -53,6 +53,36 @@ def test_prepare_limit(tmp_path, monkeypatch):
     assert res["total"] == 0
 
 
+def test_noise_tokens_include_household_and_boilerplate(tmp_path, monkeypatch):
+    docroot = tmp_path / "Documents"
+    (docroot / "personnes" / "guillaume-monteillet").mkdir(parents=True)
+    monkeypatch.setattr(CMD, "DOCUMENTS_DIR", docroot)
+    noise = CMD.noise_keyword_tokens()
+    assert "monteillet" in noise and "guillaume" in noise   # foyer
+    assert "date" in noise and "total" in noise              # boilerplate
+
+
+def test_prepare_filters_noise_from_prompt_keywords(tmp_path, monkeypatch):
+    docroot = tmp_path / "Documents"
+    (docroot / "personnes" / "guillaume-monteillet").mkdir(parents=True)
+    monkeypatch.setattr(CMD, "DOCUMENTS_DIR", docroot)
+    sigs = {"documents": [{
+        "rel": "x/doc.pdf", "type": "pdf", "origin_folder": None,
+        "type_hint": None, "name_keywords": [],
+        "dates": {"from_name": None, "metadata": None,
+                  "filesystem_created": None, "filesystem_modified": None},
+        "title_meta": None,
+        "summary": {"keywords": ["monteillet", "facture", "loyer", "date"],
+                    "sentences": [], "entities": {}}}]}
+    sf = tmp_path / "s.json"
+    sf.write_text(json.dumps(sigs), encoding="utf-8")
+    res = CMD.prepare(from_signals=str(sf))
+    req = json.loads(Path(res["transit_file"]).read_text(encoding="utf-8"))["requests"][0]
+    kwline = next(l for l in req["user"].splitlines() if l.startswith("Mots-clés"))
+    assert "facture" in kwline and "loyer" in kwline
+    assert "monteillet" not in kwline and "date" not in kwline
+
+
 def test_known_entities_deslug(tmp_path, monkeypatch):
     docroot = tmp_path / "Documents"
     (docroot / "organismes" / "air-transat").mkdir(parents=True)

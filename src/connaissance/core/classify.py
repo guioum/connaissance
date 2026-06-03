@@ -18,16 +18,18 @@ from __future__ import annotations
 import re
 import unicodedata
 
-# Catégories par mots-clés (FR/EN). L'ordre = priorité.
+# Catégories par mots-clés (FR/EN). L'ordre = priorité. Termes de NOM + de
+# CONTENU (minés du corpus : debit/credit/ytd, cotisation, cumul…) pour attraper
+# la catégorie même quand le nom de fichier est muet (« scan001.pdf »).
 _CATEGORY_RULES = [
-    ("impot", re.compile(r"\b(imp[oô]ts?|t[45]\b|rl[123]\b|fiscal|d[eé]claration|avis de cotisation)\b", re.I)),
+    ("impot", re.compile(r"\b(imp[oô]ts?|t[45]\b|rl[123]\b|fiscal|d[eé]clarations?|cotisations?|avis de cotisation|revenu (?:qu[eé]bec|canada)|d'imp[oô]t)\b", re.I)),
     ("taxes", re.compile(r"\b(taxes?\s+(?:municipales?|scolaires?)|compte de taxes)\b", re.I)),
-    ("releve", re.compile(r"\b(relev[eé]|statement|sommaire de compte)\b", re.I)),
-    ("facture", re.compile(r"\b(factures?|invoices?|re[çc]us?|receipts?)\b", re.I)),
-    ("paiement", re.compile(r"\b(paiements?|confirmation (?:de )?paiement|virements?)\b", re.I)),
-    ("paie", re.compile(r"\b(paie|salaire|payslip|paystub|bulletin de paie|t4|relev[eé] 1)\b", re.I)),
+    ("paie", re.compile(r"\b(paie|salaires?|payslip|paystub|bulletin de paie|t4\b|relev[eé] 1|cumul|gains? (?:imposables?|ytd)|remises?\b|ytd)\b", re.I)),
+    ("releve", re.compile(r"\b(relev[eé]|statement|sommaire de compte|d[eé]bit\b|cr[eé]dit\b|solde|imposable|taxable)\b", re.I)),
+    ("facture", re.compile(r"\b(factures?|facturation|invoices?|re[çc]us?|receipts?|sous-total|amount due|montant d[uû])\b", re.I)),
+    ("paiement", re.compile(r"\b(paiements?|confirmation (?:de )?paiement|virements?|op[eé]ration effectu[eé]e)\b", re.I)),
     ("contrat", re.compile(r"\b(contrats?|contracts?|ententes?|mandats?|bail|conventions?)\b", re.I)),
-    ("assurance", re.compile(r"\b(assurances?|polices?|insurance)\b", re.I)),
+    ("assurance", re.compile(r"\b(assurances?|polices?|insurance|policy|primes? d'assurance)\b", re.I)),
     ("hypotheque", re.compile(r"\b(hypoth[eè]ques?|pr[eê]t hypoth[eé]caire|mortgage)\b", re.I)),
     ("certificat", re.compile(r"\b(certificats?|dipl[oô]mes?|attestations?|certificates?)\b", re.I)),
     ("lettre", re.compile(r"\b(lettres?|courriers?|letters?|avis)\b", re.I)),
