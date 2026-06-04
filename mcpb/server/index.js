@@ -806,6 +806,23 @@ server.registerTool(
 );
 
 server.registerTool(
+  "connaissance_classify_status",
+  {
+    description:
+      "Identity card of the document pipeline (read-only). With 'path' (relative to ~/Documents): assembles a document's fiche — Phase-B signals + Phase-C classification (entity/category/date/title/sujet/confidence/status/model) + secrets-quarantine flag, joined from tracking.db. Without 'path': corpus-wide classification summary (counts by status auto/attente, category, entity_type, entity). Backed by the doc_signals + doc_classification tables that accumulate per file across stages and follow the file when it moves.",
+    inputSchema: {
+      path: z.string().optional().describe("Document path relative to ~/Documents for its full fiche. Omit for the corpus summary."),
+    },
+    annotations: { readOnlyHint: true },
+  },
+  async (args) => {
+    const a = [];
+    if (args.path) a.push("--path", args.path);
+    return runAndFormat("classify", "status", a);
+  }
+);
+
+server.registerTool(
   "connaissance_summarize_prepare",
   {
     description:

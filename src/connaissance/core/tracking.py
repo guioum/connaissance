@@ -28,11 +28,19 @@ Usage :
 
 import json
 import sqlite3
+import unicodedata
 from pathlib import Path
 
 from connaissance.core.paths import CONNAISSANCE_ROOT, require_connaissance_root
 
 DB_PATH = CONNAISSANCE_ROOT / ".config" / "tracking.db"
+
+
+def _nfc(rel_path) -> str:
+    """Clé de cache normalisée NFC — macOS écrit les chemins en NFD (accents
+    décomposés) ; on canonicalise pour que stockage et lecture matchent quelle
+    que soit la source du chemin (walk filesystem NFD vs littéral/CLI NFC)."""
+    return unicodedata.normalize("NFC", str(rel_path))
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS operations (
@@ -100,6 +108,32 @@ CREATE TABLE IF NOT EXISTS doc_signals (
     mtime REAL,
     updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%S', 'now', 'localtime'))
 );
+
+-- Étage « classement » de la fiche d'identité d'un document (Phase C). Jointe à
+-- doc_signals par rel_path. `hash` sert d'ancre stable quand le fichier bouge
+-- (relink du rel_path à l'apply). État courant mutable, raffiné à chaque passe.
+CREATE TABLE IF NOT EXISTS doc_classification (
+    rel_path TEXT NOT NULL UNIQUE,
+    hash TEXT,
+    entity TEXT,
+    entity_type TEXT,
+    entity_slug TEXT,
+    category TEXT,
+    date TEXT,
+    title TEXT,
+    sujet TEXT,
+    confidence TEXT,
+    status TEXT,
+    model TEXT,
+    reasons TEXT,
+    size INTEGER,
+    mtime REAL,
+    classified_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%S', 'now', 'localtime')),
+    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%S', 'now', 'localtime'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_doc_cls_status ON doc_classification(status);
+CREATE INDEX IF NOT EXISTS idx_doc_cls_entity ON doc_classification(entity_slug);
 
 -- Ledger journalisé des opérations de fichiers (move/rename), réversible.
 -- Chaque ligne 'applied' enregistre l'ancien et le nouveau chemin + le SHA256,
@@ -580,10 +614,11 @@ class TrackingDB:
             return None
         size = int(st.st_size)
         mtime = float(st.st_mtime)
+        rkey = _nfc(rel_path)
 
         row = self._conn.execute(
             "SELECT signals, size, mtime FROM doc_signals WHERE rel_path = ?",
-            (str(rel_path),)).fetchone()
+            (rkey,)).fetchone()
         if row is not None:
             d = dict(row)
             if d.get("signals") and d.get("size") == size and d.get("mtime") == mtime:
@@ -603,9 +638,75 @@ class TrackingDB:
                  size=excluded.size,
                  mtime=excluded.mtime,
                  updated_at=strftime('%Y-%m-%dT%H:%M:%S', 'now', 'localtime')""",
-            (str(rel_path), _json.dumps(packet, ensure_ascii=False), size, mtime))
+            (rkey, _json.dumps(packet, ensure_ascii=False), size, mtime))
         self._conn.commit()
         return packet
+
+    # --- Fiche d'identité : étage « classement » (doc_classification) ---
+
+    _CLS_COLS = ("hash", "entity", "entity_type", "entity_slug", "category",
+                 "date", "title", "sujet", "confidence", "status", "model",
+                 "reasons", "size", "mtime")
+
+    def get_signals_row(self, rel_path):
+        """Paquet de signaux brut (dict) caché pour ``rel_path``, ou None."""
+        import json as _json
+        row = self._conn.execute(
+            "SELECT signals FROM doc_signals WHERE rel_path = ?",
+            (_nfc(rel_path),)).fetchone()
+        if not row or not row["signals"]:
+            return None
+        try:
+            return _json.loads(row["signals"])
+        except (ValueError, TypeError):
+            return None
+
+    def upsert_classification(self, rel_path, data: dict) -> None:
+        """Insérer/rafraîchir l'étage classement de la fiche d'un document."""
+        import json as _json
+        vals = {c: data.get(c) for c in self._CLS_COLS}
+        if isinstance(vals["reasons"], (list, dict)):
+            vals["reasons"] = _json.dumps(vals["reasons"], ensure_ascii=False)
+        cols = ", ".join(self._CLS_COLS)
+        ph = ", ".join("?" * len(self._CLS_COLS))
+        setexpr = ", ".join(f"{c}=excluded.{c}" for c in self._CLS_COLS)
+        self._conn.execute(
+            f"""INSERT INTO doc_classification (rel_path, {cols})
+                VALUES (?, {ph})
+                ON CONFLICT(rel_path) DO UPDATE SET {setexpr},
+                  updated_at=strftime('%Y-%m-%dT%H:%M:%S', 'now', 'localtime')""",
+            (_nfc(rel_path), *[vals[c] for c in self._CLS_COLS]))
+        self._conn.commit()
+
+    def get_classification(self, rel_path):
+        """Étage classement (dict) de la fiche d'un document, ou None."""
+        row = self._conn.execute(
+            "SELECT * FROM doc_classification WHERE rel_path = ?",
+            (_nfc(rel_path),)).fetchone()
+        return dict(row) if row else None
+
+    def classification_summary(self) -> dict:
+        """Compteurs corpus de l'étage classement (statut, catégorie, type)."""
+        def _by(col):
+            return {r[0]: r[1] for r in self._conn.execute(
+                f"SELECT {col}, COUNT(*) FROM doc_classification "
+                f"WHERE {col} IS NOT NULL GROUP BY {col} ORDER BY COUNT(*) DESC")}
+        total = self._conn.execute(
+            "SELECT COUNT(*) FROM doc_classification").fetchone()[0]
+        return {"total": total, "by_status": _by("status"),
+                "by_category": _by("category"), "by_entity_type": _by("entity_type"),
+                "by_entity": _by("entity")}
+
+    def relink_document(self, old_rel, new_rel) -> None:
+        """Suivre un fichier déplacé : repointer sa fiche (signals + classement)
+        de ``old_rel`` vers ``new_rel`` — la fiche survit au move."""
+        old_k, new_k = _nfc(old_rel), _nfc(new_rel)
+        for tbl in ("doc_signals", "doc_classification"):
+            self._conn.execute(f"DELETE FROM {tbl} WHERE rel_path = ?", (new_k,))
+            self._conn.execute(
+                f"UPDATE {tbl} SET rel_path = ? WHERE rel_path = ?",
+                (new_k, old_k))
+        self._conn.commit()
 
     # --- Ledger des opérations de fichiers (réversible) ---
 

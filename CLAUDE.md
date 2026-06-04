@@ -41,8 +41,11 @@ mcpb/                    → MCPB Node.js, installé dans Claude Desktop
   par des atomes typés (`add_domain_marketing`, `set_weight`, etc.)
   jamais par du YAML composé par l'appelant. `ruamel.yaml` préserve
   les commentaires utilisateur lors des écritures.
-- **`tracking.db`** est la propriété exclusive du CLI. Schéma SQLite
-  byte-identique à la v1.9.0 du plugin cowork (aucune migration).
+- **`tracking.db`** est la propriété exclusive du CLI. Les tables cowork
+  d'origine (`operations`, `files`) restent intactes ; le pipeline ajoute des
+  tables **additives** en `CREATE TABLE IF NOT EXISTS` (`text_simhash`,
+  `file_ledger`, `doc_signals`, `doc_classification` — la « fiche d'identité »
+  par document). Aucune migration destructive.
 
 ## Détection de la racine
 
@@ -78,7 +81,7 @@ immédiatement actives sans reinstall.
 3. Ajouter le sub-parser dans `build_parser()`
 4. Ajouter un wrapper MCP dans `mcpb/server/index.js` via
    `server.registerTool()`
-5. Mettre à jour README et le tableau des 60 outils
+5. Mettre à jour README et le tableau des 61 outils
 
 ### Tests manuels
 

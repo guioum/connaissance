@@ -138,6 +138,8 @@ def _cmd_classify(args) -> Any:
                                  output_file=args.output_file)
     if args.verb == "apply":
         return classify.apply(manifest_file=args.manifest, dry_run=not args.apply)
+    if args.verb == "status":
+        return classify.status(path=args.path)
     raise SystemExit(f"verbe inconnu : classify {args.verb}")
 
 
@@ -535,6 +537,10 @@ def build_parser() -> argparse.ArgumentParser:
                            help="Exécuter les déplacements (sinon DRY-RUN par "
                                 "défaut — rien n'est déplacé). Réversible au "
                                 "ledger (`ledger revert`).")
+    p_cls_st = p_cls_verbs.add_parser("status")
+    p_cls_st.add_argument("--path", type=str, default=None,
+                          help="Fiche d'identité d'un document (chemin relatif à "
+                               "~/Documents). Sans : résumé corpus du classement.")
     # organize
     p_org = sub.add_parser("organize")
     p_org_verbs = p_org.add_subparsers(dest="verb", required=True)

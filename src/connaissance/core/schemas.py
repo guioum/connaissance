@@ -317,6 +317,21 @@ class ClassifyRegister(TypedDict, total=False):
     sample_auto: list[dict]
 
 
+class ClassifyStatus(TypedDict, total=False):
+    # résumé corpus (sans --path)
+    total: int
+    by_status: dict
+    by_category: dict
+    by_entity_type: dict
+    by_entity: dict
+    # fiche d'un document (avec --path)
+    rel: str
+    found: bool
+    quarantined: bool
+    signals: dict | None
+    classification: dict | None
+
+
 class ClassifyApply(TypedDict, total=False):
     dry_run: bool
     auto_total: int

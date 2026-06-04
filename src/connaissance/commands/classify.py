@@ -19,6 +19,7 @@ import unicodedata
 from pathlib import Path
 
 from connaissance.core import classify as _heur
+from connaissance.core import filtres as _filtres
 from connaissance.core import ledger as _ledger
 from connaissance.core.output_file import write_or_inline
 from connaissance.core.paths import DOCUMENTS_DIR, require_paths, transit_file
@@ -221,6 +222,43 @@ def prepare(scope: str | None = None, from_signals: str | None = None,
     return write_or_inline(payload, output_file=output_file, summary_fn=_summary)
 
 
+# --- Fiche d'identité : vue unifiée (status) --------------------------------
+
+def status(path: str | None = None, db: TrackingDB | None = None) -> dict:
+    """Fiche d'identité d'un document (``--path``) ou résumé corpus.
+
+    Avec ``path`` : assemble les étages de la fiche (signaux Phase B +
+    classement Phase C + quarantaine secrets) pour ce fichier. Sans :
+    compteurs corpus de l'étage classement (statut/catégorie/entité).
+    """
+    owns_db = db is None
+    if db is None:
+        db = TrackingDB()
+    try:
+        if not path:
+            return db.classification_summary()
+        # Normaliser en chemin relatif à ~/Documents.
+        p = Path(path)
+        try:
+            rel = str(p.relative_to(DOCUMENTS_DIR)) if p.is_absolute() else path
+        except ValueError:
+            rel = path
+        rel = unicodedata.normalize("NFC", rel)
+        quarantined = rel in _filtres.load_quarantine_set()
+        sig = db.get_signals_row(rel)
+        cls = db.get_classification(rel)
+        return {
+            "rel": rel,
+            "found": bool(sig or cls),
+            "quarantined": quarantined,
+            "signals": sig,
+            "classification": cls,
+        }
+    finally:
+        if owns_db:
+            db.close()
+
+
 # --- Brique 5 : apply (manifeste → déplacements ledger, dry-run par défaut) --
 
 def _unique_dest(dst: Path) -> Path:
@@ -273,6 +311,7 @@ def apply(manifest_file: str, dry_run: bool = True,
                 _ledger.safe_move(db, src, dst,
                                   f"classify {e.get('category') or ''}".strip(),
                                   run_id)
+                db.relink_document(e["source"], rel_dst)  # la fiche suit le move
                 planned.append({"source": e["source"], "dest": rel_dst})
             except OSError as exc:
                 errors.append({"source": e["source"], "error": str(exc)})
@@ -328,7 +367,7 @@ def _reconcile_entity(name: str, entity_type: str) -> tuple[str, str]:
 
 
 def register(results_file: str, from_prepare: str,
-             output_file: str | None = None) -> dict:
+             output_file: str | None = None, db: TrackingDB | None = None) -> dict:
     """Construire le manifeste de pré-classement (schema ClassifyRegister).
 
     Consomme les résultats Batch (``results_file`` : ``{results:[{custom_id,
@@ -344,6 +383,10 @@ def register(results_file: str, from_prepare: str,
     prep = json.loads(Path(from_prepare).expanduser().read_text(encoding="utf-8"))
     prep_reqs = prep.get("requests", prep) if isinstance(prep, dict) else prep
     by_id = {r["custom_id"]: r for r in prep_reqs}
+
+    owns_db = db is None
+    if db is None:
+        db = TrackingDB()
 
     entries: list[dict] = []
     for res in results:
@@ -389,13 +432,26 @@ def register(results_file: str, from_prepare: str,
             if etype == "divers":
                 reasons.append("entité_divers")
 
-        entries.append({
+        entry = {
             "custom_id": cid, "source": source, "status": status, "dest": dest,
             "entity": entity or hint.get("entity"), "entity_type": etype,
             "entity_slug": slug, "category": category, "date": date,
             "title": title, "sujet": sujet, "confidence": confidence,
             "reasons": reasons,
-        })
+        }
+        entries.append(entry)
+
+        # Persister l'étage classement de la fiche (résumable, interrogeable).
+        try:
+            st = (DOCUMENTS_DIR / source).stat()
+            size, mtime = st.st_size, st.st_mtime
+        except OSError:
+            size = mtime = None
+        db.upsert_classification(source, {
+            **entry, "model": req.get("model"), "size": size, "mtime": mtime})
+
+    if owns_db:
+        db.close()
 
     transit = transit_file("classify-manifest")
     transit.write_text(json.dumps({"entries": entries}, ensure_ascii=False),
