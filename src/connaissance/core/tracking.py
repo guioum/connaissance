@@ -763,6 +763,22 @@ class TrackingDB:
         except (ValueError, TypeError):
             return None
 
+    def all_doc_signals(self) -> list[tuple[str, dict]]:
+        """Tous les paquets de signaux cachés : ``[(rel_path, packet_dict)]``.
+
+        Source de la Phase D (doublons) — déjà sans secrets ni conteneurs
+        (élagués par ``documents signals`` à l'écriture)."""
+        import json as _json
+        out: list[tuple[str, dict]] = []
+        for r in self._conn.execute(
+                "SELECT rel_path, signals FROM doc_signals "
+                "WHERE signals IS NOT NULL ORDER BY rel_path"):
+            try:
+                out.append((r[0], _json.loads(r[1])))
+            except (ValueError, TypeError):
+                continue
+        return out
+
     def upsert_classification(self, rel_path, data: dict) -> None:
         """Insérer/rafraîchir l'étage classement de la fiche d'un document."""
         import json as _json
@@ -798,6 +814,19 @@ class TrackingDB:
         return {"total": total, "by_status": _by("status"),
                 "by_category": _by("category"), "by_entity_type": _by("entity_type"),
                 "by_entity": _by("entity")}
+
+    def classifications_with_sujet(self) -> list[dict]:
+        """Fiches ayant un ``sujet`` non vide, pour la vue virtuelle ``- Sujets``.
+
+        Retourne ``rel_path``/``sujet``/``entity_type``/``entity_slug``/
+        ``category`` — la source de vérité du sujet d'un document est cette
+        colonne (pas de frontmatter sur un PDF brut)."""
+        rows = self._conn.execute(
+            """SELECT rel_path, sujet, entity_type, entity_slug, category
+               FROM doc_classification
+               WHERE sujet IS NOT NULL AND TRIM(sujet) != ''
+               ORDER BY sujet, rel_path""").fetchall()
+        return [dict(r) for r in rows]
 
     def relink_document(self, old_rel, new_rel, *, commit: bool = True) -> None:
         """Suivre un fichier déplacé : repointer sa fiche (signals + classement)

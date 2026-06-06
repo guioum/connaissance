@@ -1,6 +1,6 @@
 // MCP server wrapper for the `connaissance` CLI.
 //
-// Exposes 62 tools (mcp__connaissance__*) that shell-out to the
+// Exposes 70 tools (mcp__connaissance__*) that shell-out to the
 // `connaissance` Python CLI installed via `uv tool install` or `pip`.
 // Each tool maps 1:1 to a CLI subcommand `connaissance <group> <verb>`.
 //
@@ -401,11 +401,17 @@ server.registerTool(
       output_file: z.string().optional().describe("Write the full JSON report to this path instead of inline."),
       quarantine: z.boolean().optional().describe("ACTIVE guard: write the detected files into the quarantine list (~/Connaissance/.config/secrets-quarantine.txt) so they are EXCLUDED from OCR, the qmd index and the Batch API (filtres rejects them, reason 'secret_quarantine'). Writes a config file only — moves/deletes nothing."),
       include_medium: z.boolean().optional().describe("With quarantine: also add 'medium' detections (default: high only)."),
+      relocate: z.boolean().optional().describe("Physically MOVE quarantined secrets to ~/Documents/- Protégés/secrets/ via the ledger (reversible). Distinct from the active guard. Dry-run unless apply=true."),
+      apply: z.boolean().optional().describe("With relocate: actually move (default: dry-run)."),
     },
-    annotations: { readOnlyHint: true },
   },
   async (args) => {
     const a = [];
+    if (args.relocate) {
+      a.push("--relocate");
+      if (args.apply) a.push("--apply");
+      return runAndFormat("documents", "secrets", a);
+    }
     if (args.scope) a.push("--scope", args.scope);
     if (args.quarantine) {
       a.push("--quarantine");
@@ -1408,6 +1414,131 @@ server.registerTool(
     // dry_run=true est le défaut argparse du CLI. On pousse --apply pour le flipper.
     if (args.dry_run === false) a.push("--apply");
     return runAndFormat("ledger", "purge", a);
+  }
+);
+
+// ── Sujets (vue virtuelle « - Sujets ») ────────────────────────
+
+server.registerTool(
+  "connaissance_sujet_list",
+  {
+    description: "List subjects (sujets) and document counts, read from doc_classification.sujet (the single source of truth — no frontmatter on raw PDFs). Read-only.",
+    inputSchema: {},
+    annotations: { readOnlyHint: true },
+  },
+  async () => runAndFormat("sujet", "list", [])
+);
+
+server.registerTool(
+  "connaissance_sujet_view",
+  {
+    description: "(Re)generate the navigable per-subject view ~/Documents/- Sujets/ as symlinks pointing to each document's current location, from doc_classification.sujet. Replaces '- Par catégorie/'. Dry-run by default (returns the breakdown) ; pass apply=true to (re)build, or clear=true to remove the view (nothing else touched).",
+    inputSchema: {
+      apply: z.boolean().default(false).describe("(Re)build the symlink view."),
+      clear: z.boolean().default(false).describe("Remove the - Sujets/ view."),
+    },
+  },
+  async (args) => {
+    const a = [];
+    if (args.clear) { a.push("--clear"); return runAndFormat("sujet", "view", a); }
+    if (args.apply) a.push("--apply");
+    return runAndFormat("sujet", "view", a);
+  }
+);
+
+server.registerTool(
+  "connaissance_sujet_export",
+  {
+    description: "Materialize a subject on demand : COPY (or zip) all its documents into a real folder (e.g. to send to an accountant). Never touches the sources. Default dest: ~/Documents/- Sujets-export/<name>.",
+    inputSchema: {
+      name: z.string().describe("The subject name to export."),
+      dest: z.string().optional().describe("Destination folder (default: - Sujets-export/<name>)."),
+      zip: z.boolean().default(false).describe("Produce a .zip instead of a folder."),
+    },
+  },
+  async (args) => {
+    const a = [args.name];
+    pushFlag(a, "dest", args.dest);
+    if (args.zip) a.push("--zip");
+    return runAndFormat("sujet", "export", a);
+  }
+);
+
+// ── Duplicates (Phase D — doublons de ~/Documents) ─────────────
+
+server.registerTool(
+  "connaissance_duplicates_scan",
+  {
+    description: "Detect duplicates across the signal-extracted ~/Documents corpus : exact (same SHA256) + near (close text SimHash on the extractive summary, via doc_simhash). Reads from the doc_signals cache (already secret/container-free). Read content via SSD mirror. Read-only — returns clusters.",
+    inputSchema: {},
+    annotations: { readOnlyHint: true },
+  },
+  async () => runAndFormat("duplicates", "scan", [])
+);
+
+server.registerTool(
+  "connaissance_duplicates_plan",
+  {
+    description: "Build a dedup manifest : keep one file per cluster (the best-filed) and mark the rest for the ledger trash. Writes nothing to the corpus — produces a reviewable plan→apply manifest.",
+    inputSchema: {
+      output_file: z.string().optional().describe("Write the full manifest here (else inline summary + transit path)."),
+    },
+  },
+  async (args) => {
+    const a = [];
+    pushFlag(a, "output-file", args.output_file);
+    return runAndFormat("duplicates", "plan", a);
+  }
+);
+
+server.registerTool(
+  "connaissance_duplicates_apply",
+  {
+    description: "Apply a dedup manifest : send each duplicate to the ledger trash (safe_trash — reversible with ledger revert, destroyed only by ledger purge). Dry-run by default ; pass apply=true to actually move.",
+    inputSchema: {
+      manifest: z.string().describe("Path to the duplicates manifest JSON."),
+      apply: z.boolean().default(false).describe("Actually move to trash (default: dry-run)."),
+    },
+  },
+  async (args) => {
+    const a = [args.manifest];
+    if (args.apply) a.push("--apply");
+    return runAndFormat("duplicates", "apply", a);
+  }
+);
+
+// ── Media (groupe B — médias par date) ─────────────────────────
+
+server.registerTool(
+  "connaissance_media_plan",
+  {
+    description: "Build a manifest to file MEDIA (images/audio/video) under ~/Documents/- Médias/AAAA/MM/ by date (date-in-name, else filesystem birth/mtime — no iCloud download). Code and exports are left as units by triage; this is the media-specific logic. Writes nothing to the corpus — produces a plan→apply manifest.",
+    inputSchema: {
+      scope: z.string().optional().describe("Restrict to a subfolder of ~/Documents."),
+      output_file: z.string().optional().describe("Write the full manifest here."),
+    },
+  },
+  async (args) => {
+    const a = [];
+    pushFlag(a, "scope", args.scope);
+    pushFlag(a, "output-file", args.output_file);
+    return runAndFormat("media", "plan", a);
+  }
+);
+
+server.registerTool(
+  "connaissance_media_apply",
+  {
+    description: "Apply a media manifest : move each media file to its dated folder VIA THE LEDGER (reversible with ledger revert). Dry-run by default ; pass apply=true to actually move. Name collisions handled ((2),(3)…).",
+    inputSchema: {
+      manifest: z.string().describe("Path to the media manifest JSON."),
+      apply: z.boolean().default(false).describe("Actually move (default: dry-run)."),
+    },
+  },
+  async (args) => {
+    const a = [args.manifest];
+    if (args.apply) a.push("--apply");
+    return runAndFormat("media", "apply", a);
   }
 );
 

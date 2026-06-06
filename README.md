@@ -23,6 +23,11 @@ devient un simple shim de skills qui consomme les outils MCP exposés ici.
   nettoyage rétroactif, recherche sémantique qmd
 - **Audit** — 6 vérifications d'intégrité déterministes, reindex de la
   base, réparation d'attachements, archivage de non-documents
+- **Réorganiser** — pré-classement d'un `~/Documents` en désordre **sans OCR**
+  et **réversible** : triage, garde-fou secrets, extraction de signaux gratuits,
+  pré-classement hybride (heuristique + Batch Haiku), vue par sujet, doublons,
+  médias par date. Socle ledger + corbeille. Voir
+  [`docs/reorganisation.md`](docs/reorganisation.md)
 
 ## Documentation
 
@@ -77,7 +82,7 @@ cd ..
 ./setup-claude-desktop.sh
 ```
 
-Redémarrer Claude Desktop pour activer les 62 outils
+Redémarrer Claude Desktop pour activer les 70 outils
 `mcp__connaissance__*`.
 
 ## Usage
@@ -119,7 +124,7 @@ connaissance config scoring-set --add-domain-marketing exemple.fr --dry-run
 
 ### MCP tools (via Claude Desktop / cowork)
 
-62 outils mappés 1:1 vers les sous-commandes CLI :
+70 outils mappés 1:1 vers les sous-commandes CLI :
 
 | Groupe | Outils |
 |---|---|
@@ -138,8 +143,11 @@ connaissance config scoring-set --add-domain-marketing exemple.fr --dry-run
 | config | `scoring_show`, `scoring_set`, `scoring_diff`, `scoring_validate` |
 | manifest | `patch` |
 | ledger | `list`, `show`, `verify`, `revert`, `purge` |
+| sujet | `view`, `export`, `list` |
+| duplicates | `scan`, `plan`, `apply` |
+| media | `plan`, `apply` |
 
-Total : **62 outils** sur **15 groupes**.
+Total : **70 outils** sur **18 groupes**.
 
 ## Architecture
 
@@ -152,7 +160,7 @@ Ce repo contient deux choses :
   `connaissance` (trouvé via `CONNAISSANCE_CLI` env ou auto-détection
   dans `~/.local/bin/`) et parse la sortie JSON.
 
-Les 62 outils MCP ne contiennent aucune logique métier : ils mappent
+Les 70 outils MCP ne contiennent aucune logique métier : ils mappent
 les sous-commandes CLI 1:1 et remontent le JSON tel quel.
 
 ## Prérequis

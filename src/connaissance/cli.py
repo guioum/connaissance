@@ -56,6 +56,8 @@ def _cmd_documents(args) -> Any:
         return triage.triage(output_file=args.output_file)
     if args.verb == "secrets":
         from connaissance.commands import secrets
+        if getattr(args, "relocate", False):
+            return secrets.relocate(dry_run=args.dry_run)
         if getattr(args, "quarantine", False):
             return secrets.quarantine_apply(scope=args.scope,
                                             include_medium=args.include_medium)
@@ -364,6 +366,37 @@ def _cmd_ledger(args) -> Any:
     raise SystemExit(f"verbe inconnu : ledger {args.verb}")
 
 
+def _cmd_media(args) -> Any:
+    from connaissance.commands import media
+    if args.verb == "plan":
+        return media.plan(scope=args.scope, output_file=args.output_file)
+    if args.verb == "apply":
+        return media.apply(args.manifest, dry_run=args.dry_run)
+    raise SystemExit(f"verbe inconnu : media {args.verb}")
+
+
+def _cmd_duplicates(args) -> Any:
+    from connaissance.commands import duplicates
+    if args.verb == "scan":
+        return duplicates.scan()
+    if args.verb == "plan":
+        return duplicates.plan(output_file=args.output_file)
+    if args.verb == "apply":
+        return duplicates.apply(args.manifest, dry_run=args.dry_run)
+    raise SystemExit(f"verbe inconnu : duplicates {args.verb}")
+
+
+def _cmd_sujet(args) -> Any:
+    from connaissance.commands import sujets
+    if args.verb == "view":
+        return sujets.view(apply=not args.dry_run, clear=args.clear)
+    if args.verb == "export":
+        return sujets.export(args.name, dest=args.dest, as_zip=args.zip)
+    if args.verb == "list":
+        return sujets.list_sujets()
+    raise SystemExit(f"verbe inconnu : sujet {args.verb}")
+
+
 _GROUPS: dict[str, Callable] = {
     "documents": _cmd_documents,
     "emails": _cmd_emails,
@@ -380,6 +413,9 @@ _GROUPS: dict[str, Callable] = {
     "config": _cmd_config,
     "manifest": _cmd_manifest,
     "ledger": _cmd_ledger,
+    "sujet": _cmd_sujet,
+    "duplicates": _cmd_duplicates,
+    "media": _cmd_media,
 }
 
 
@@ -455,6 +491,13 @@ def build_parser() -> argparse.ArgumentParser:
                            action="store_true",
                            help="Avec --quarantine : ajouter aussi les "
                                 "détections 'medium' (défaut : high seulement).")
+    p_doc_sec.add_argument("--relocate", action="store_true",
+                           help="Déplacer PHYSIQUEMENT les secrets en quarantaine "
+                                "vers '- Protégés/secrets/' via le ledger "
+                                "(réversible). Dry-run sauf --apply.")
+    p_doc_sec.add_argument("--apply", dest="dry_run", action="store_false",
+                           default=True,
+                           help="Avec --relocate : exécuter (défaut : dry-run).")
     p_doc_sig = p_doc_verbs.add_parser("signals")
     p_doc_sig.add_argument("--scope", type=str, default=None,
                            help="Restreindre à un sous-dossier de ~/Documents "
@@ -793,6 +836,51 @@ def build_parser() -> argparse.ArgumentParser:
                             type=int, default=None,
                             help="Ne purger que les entrées plus vieilles que N jours.")
     add_apply_flag(p_lg_purge)   # destructif → dry-run par défaut, --apply pour exécuter
+
+    # sujet (vue virtuelle « - Sujets »)
+    p_suj = sub.add_parser("sujet")
+    p_suj_verbs = p_suj.add_subparsers(dest="verb", required=True)
+    p_suj_view = p_suj_verbs.add_parser("view")
+    # view est non destructif (symlinks régénérables) → --apply pour écrire,
+    # mais on garde --clear pour supprimer la vue.
+    p_suj_view.add_argument("--apply", dest="dry_run", action="store_false",
+                            default=True,
+                            help="(Re)construire la vue (défaut : dry-run / aperçu).")
+    p_suj_view.add_argument("--clear", action="store_true",
+                            help="Supprimer la vue - Sujets/ (rien d'autre touché).")
+    p_suj_exp = p_suj_verbs.add_parser("export")
+    p_suj_exp.add_argument("name")
+    p_suj_exp.add_argument("--dest", type=str, default=None,
+                           help="Dossier de destination (défaut : - Sujets-export/<nom>).")
+    p_suj_exp.add_argument("--zip", action="store_true",
+                           help="Produire un .zip au lieu d'un dossier.")
+    p_suj_verbs.add_parser("list")
+
+    # duplicates (Phase D — doublons de ~/Documents)
+    p_dup = sub.add_parser("duplicates")
+    p_dup_verbs = p_dup.add_subparsers(dest="verb", required=True)
+    p_dup_verbs.add_parser("scan")
+    p_dup_plan = p_dup_verbs.add_parser("plan")
+    p_dup_plan.add_argument("--output-file", dest="output_file", type=str,
+                            default=None,
+                            help="Écrire le manifeste complet dans ce fichier "
+                                 "(sinon résumé inline + chemin transit).")
+    p_dup_apply = p_dup_verbs.add_parser("apply")
+    p_dup_apply.add_argument("manifest")
+    add_apply_flag(p_dup_apply)   # corbeille → dry-run par défaut, --apply pour exécuter
+
+    # media (groupe B — médias par date)
+    p_med = sub.add_parser("media")
+    p_med_verbs = p_med.add_subparsers(dest="verb", required=True)
+    p_med_plan = p_med_verbs.add_parser("plan")
+    p_med_plan.add_argument("--scope", type=str, default=None,
+                            help="Restreindre à un sous-dossier de ~/Documents.")
+    p_med_plan.add_argument("--output-file", dest="output_file", type=str,
+                            default=None,
+                            help="Écrire le manifeste complet dans ce fichier.")
+    p_med_apply = p_med_verbs.add_parser("apply")
+    p_med_apply.add_argument("manifest")
+    add_apply_flag(p_med_apply)   # déplacement ledger → dry-run par défaut
 
     return parser
 

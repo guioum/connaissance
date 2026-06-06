@@ -12,6 +12,7 @@ marche et pourquoi**.
 | Comprendre le découpage CLI / MCPB et les contrats | [architecture.md](architecture.md) |
 | Savoir où vivent les données et comment elles sont structurées | [data-model.md](data-model.md) |
 | Suivre le parcours d'un document/courriel/note de bout en bout | [pipeline.md](pipeline.md) |
+| Réorganiser un `~/Documents` en désordre sans OCR, de façon réversible | [reorganisation.md](reorganisation.md) |
 | Comprendre le filtrage et le scoring des courriels | [emails.md](emails.md) |
 | Faire tourner ça en natif Mac, en VM cowork, ou via le SSD | [environments.md](environments.md) |
 | Contribuer : ajouter une commande, packager, tester | [development.md](development.md) |

@@ -220,6 +220,83 @@ class LedgerPurge(TypedDict):
     skipped: list[dict]     # [{path, reason}]
 
 
+# --- sujets (vue virtuelle) ---
+
+class SujetView(TypedDict, total=False):
+    sujets: dict            # {sujet: count}
+    total: int
+    missing_source: int
+    applied: bool
+    links_created: int
+    view_dir: str
+    cleared: bool           # présent en mode --clear
+    existed: bool
+
+
+class SujetExport(TypedDict):
+    sujet: str
+    exported: int
+    missing_source: int
+    dest: str
+    zip: bool
+
+
+class SujetList(TypedDict):
+    sujets: dict            # {sujet: count}
+    total_sujets: int
+    total_documents: int
+
+
+# --- duplicates (Phase D) ---
+
+class Duplicates(TypedDict):
+    scanned: int
+    unreadable: int
+    exact_clusters: list[dict]   # [{hash, rels}]
+    quasi_clusters: list[dict]   # [{rels}]
+    exact_duplicates: int
+    quasi_duplicates: int
+    threshold: int
+
+
+class DuplicatesPlan(TypedDict, total=False):
+    total: int
+    exact: int
+    quasi: int
+    scanned: int
+    manifest_file: str
+    entries: list[dict]          # [{trash, keeper, kind, hash}]
+
+
+class MediaPlan(TypedDict, total=False):
+    total: int
+    by_year: dict
+    manifest_file: str
+    entries: list[dict]          # [{source, dest}]
+
+
+class MediaApply(TypedDict, total=False):
+    dry_run: bool
+    planned: int
+    moved: int
+    would_move: int
+    skipped: list[dict]
+    errors: list[dict]
+    moves: list[dict]
+    ledger_run: str
+
+
+class DuplicatesApply(TypedDict, total=False):
+    dry_run: bool
+    planned: int
+    trashed: int
+    would_trash: int
+    skipped: list[dict]
+    errors: list[dict]
+    moves: list[dict]
+    ledger_run: str
+
+
 class Triage(TypedDict, total=False):
     total_files: int        # vrac + groupés + conteneurs
     loose_files: int        # fichiers en vrac, à classer
@@ -279,6 +356,17 @@ class SecretsQuarantine(TypedDict, total=False):
     medium: int
     added_sample: list[str]
     note: str
+
+
+class SecretsRelocate(TypedDict, total=False):
+    dry_run: bool
+    candidates: int
+    moved: int
+    would_move: int
+    skipped: list[dict]
+    dest_root: str
+    sample: list[dict]           # [{from, to}]
+    ledger_run: str
 
 
 class ClassifyPrepare(TypedDict, total=False):

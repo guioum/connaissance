@@ -68,10 +68,11 @@ grande réorg tant que ce n'est pas validé.
   qmd et du Batch API** (chokepoint unique). `documents secrets --quarantine
   [--include-medium]` peuple la liste (high par défaut) — **écrit une config,
   ne déplace/supprime rien**, idempotent, éditable.
-- [ ] 🟢 **Quarantaine — déplacement physique optionnel** : pour les secrets à
-  faire VOYAGER hors du dossier (ex. regrouper sous `- Protégés/secrets/`),
-  une action plan→apply journalisée au ledger. Distinct du garde-fou actif
-  ci-dessus (qui suffit à exclure du pipeline sans rien bouger).
+- [x] **Quarantaine — déplacement physique optionnel** (v2.35.0) :
+  `documents secrets --relocate` regroupe les fichiers en quarantaine sous
+  `~/Documents/- Protégés/secrets/` **via le ledger** (réversible, structure
+  préservée), met à jour la liste de quarantaine, dry-run sauf `--apply`.
+  Distinct du garde-fou actif (qui suffit à exclure du pipeline sans rien bouger).
 - [x] **Phase B — Extraction de signaux (groupe A, zéro OCR)** (v2.24.0) :
   `documents signals` produit un « paquet de signaux » par document via une
   **cascade du moins cher au plus cher** (n'ouvre pypdfium2 qu'en dernier
@@ -99,21 +100,23 @@ grande réorg tant que ce n'est pas validé.
   (5) **`classify apply`** — déplacement **ledger** (réversible), **dry-run par
   défaut**. Validé : 33 auto / 9 attente sur l'échantillon, destinations propres
   (`RE-101(2020-01).pdf` → `organismes/revenu-quebec/2019-12-30 …`). Reste : le
-  **tag `sujet:`** dans le frontmatter (aujourd'hui le sujet est calculé mais pas
-  encore posé en frontmatter), et le run du corpus complet.
-- [ ] 🟡 **Sujets = vue virtuelle unique** (décision actée — modèle sujets) :
-  un doc est classé physiquement par ENTITÉ + tagué `sujet:` ; une seule vue
-  `~/Documents/- Sujets/` (symlinks, régénérable) rassemble par sujet et
-  **remplace `- Par catégorie/`** (la catégorie devient un sujet grossier).
-  Virtuel par défaut ; physique = exception (`divers/<sujet>/`). Pour le cas
-  « envoi au comptable » : commande `sujet export <nom>` (copie/zip réel à la
-  demande), pas de dossier physique permanent.
-- [ ] 🟡 **Phase D — Doublons** : exacts (SHA256 caché) + quasi (SimHash texte).
-  Rail prêt : table `doc_simhash` + `TrackingDB.get_or_compute_doc_simhash`
-  (référentiel `~/Documents`, NFC) — **ne pas réutiliser `text_simhash`** (corpus,
-  référentiel `~/Connaissance`) pour éviter la collision de référentiels.
-- [ ] 🟢 Groupes B/C/D classés par logique propre (code regroupé, médias par
-  date, exports tels quels).
+  run du corpus complet (dry-run only tant que non validé). Le **sujet** est
+  source-de-vérité dans `doc_classification.sujet` (v2.35.0 — pas de frontmatter
+  sur un PDF brut ; la vue `- Sujets` lit la colonne).
+- [x] **Sujets = vue virtuelle unique** (v2.35.0 — modèle sujets) :
+  `sujet view` génère `~/Documents/- Sujets/<sujet>/` en symlinks depuis
+  `doc_classification.sujet` (régénérable), **remplace `- Par catégorie/`** ;
+  `sujet export <nom>` (`--zip`) matérialise un sujet à la demande (copie/zip,
+  ex. comptable) sans dossier physique permanent ; `sujet list` compte.
+- [x] **Phase D — Doublons** (v2.35.0) : `duplicates scan` détecte exacts
+  (SHA256) + quasi (SimHash texte du résumé extractif, cache `doc_simhash`,
+  référentiel `~/Documents`, distinct de `text_simhash`) ; `duplicates plan`
+  garde un keeper par cluster ; `duplicates apply` envoie les doublons à la
+  **corbeille ledger** (réversible, dry-run par défaut).
+- [x] **Groupes B/C/D par logique propre** (v2.35.0) : code et exports gardés en
+  unités par le triage (Phase A) ; `media plan|apply` range les **médias** sous
+  `~/Documents/- Médias/AAAA/MM/` par date (nom sinon filesystem), via le ledger,
+  dry-run par défaut.
 - [x] **« Corbeille ledger »** (v2.34.0) : `optimize` dedup ET cleanup_orphans
   n'`unlink` plus — ils envoient le fichier à `~/Connaissance/.trash/<run_id>/`
   via `ledger.safe_trash` (`op='trash'`), réversible par `ledger revert` et
@@ -185,7 +188,7 @@ grande réorg tant que ce n'est pas validé.
 
 ## Documentation (fait)
 
-- [x] **Décompte d'outils reconcilié** : README + `CLAUDE.md` à **62 outils /
+- [x] **Décompte d'outils reconcilié** : README + `CLAUDE.md` à **70 outils /
   15 groupes** (source de vérité : les `registerTool` de `index.js`). Le palier
   intermédiaire « 48 / 13 » a été dépassé par les phases triage/secrets/signals
   (+3), classify (+4), ledger (+4), manifest (+1) et les `backlog_count`.

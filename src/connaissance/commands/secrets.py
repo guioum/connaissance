@@ -29,10 +29,14 @@ from pathlib import Path
 from connaissance.commands.triage import (BUNDLE_SUFFIXES, CODE_MARKERS,
                                            MARKER_DIRS)
 from connaissance.core import filtres as _filtres
+from connaissance.core import ledger as _ledger
 from connaissance.core import secrets as _secrets
 from connaissance.core.output_file import write_or_inline
 from connaissance.core.paths import (DOCUMENTS_DIR, documents_read_path,
                                       is_dataless, require_connaissance_root)
+
+# Zone physique des secrets relocalisés (préfixe « - » → hors scan pipeline).
+PROTECTED_SUBDIR = "- Protégés/secrets"
 
 # Sous-dossiers de dépendances/build : du code tiers, jamais TES secrets. On n'y
 # descend pas (un `password=` dans une fixture de test n'est pas un identifiant
@@ -245,3 +249,68 @@ def quarantine_apply(scope: str | None = None,
             "Pour lever une entrée, retire sa ligne du fichier."
         ),
     }
+
+
+def relocate(dry_run: bool = True, db=None) -> dict:
+    """Déplacer PHYSIQUEMENT les secrets en quarantaine vers ``- Protégés/secrets/``
+    (schema SecretsRelocate).
+
+    Distinct du garde-fou actif (qui suffit à exclure du pipeline sans rien
+    bouger) : ici on regroupe les fichiers listés en quarantaine sous un dossier
+    dédié (préfixe « - » → hors scan), **via le ledger** (réversible). Structure
+    d'origine préservée. **Dry-run par défaut.** Met à jour la liste de
+    quarantaine vers les nouveaux chemins quand le déplacement est appliqué.
+    """
+    require_connaissance_root()
+    from connaissance.core.tracking import TrackingDB
+    rels = sorted(_filtres.load_quarantine_set())
+    owns = db is None
+    if db is None:
+        db = TrackingDB()
+    run_id = _ledger.new_run_id("secrets-relocate")
+    moved: list[dict] = []
+    skipped: list[dict] = []
+    new_quarantine: set[str] = set()
+    try:
+        for rel in rels:
+            # Déjà sous la zone protégée → ne pas re-déplacer, garder tel quel.
+            if rel.startswith(PROTECTED_SUBDIR):
+                new_quarantine.add(rel)
+                continue
+            src = DOCUMENTS_DIR / rel
+            if not src.exists():
+                skipped.append({"path": rel, "reason": "introuvable"})
+                new_quarantine.add(rel)   # on conserve l'entrée telle quelle
+                continue
+            new_rel = f"{PROTECTED_SUBDIR}/{rel}"
+            if dry_run:
+                moved.append({"from": rel, "to": new_rel})
+                new_quarantine.add(rel)
+                continue
+            try:
+                _ledger.safe_move(db, src, DOCUMENTS_DIR / new_rel,
+                                  "secret relocate", run_id)
+                moved.append({"from": rel, "to": new_rel})
+                new_quarantine.add(new_rel)
+            except OSError as exc:
+                skipped.append({"path": rel, "reason": str(exc)})
+                new_quarantine.add(rel)
+    finally:
+        if owns:
+            db.close()
+
+    if not dry_run and moved:
+        _filtres.write_quarantine_set(new_quarantine)
+
+    result = {
+        "dry_run": dry_run,
+        "candidates": len(rels),
+        "moved": 0 if dry_run else len(moved),
+        "would_move": len(moved) if dry_run else 0,
+        "skipped": skipped,
+        "dest_root": str(DOCUMENTS_DIR / PROTECTED_SUBDIR),
+        "sample": moved[:20],
+    }
+    if not dry_run and moved:
+        result["ledger_run"] = run_id
+    return result
