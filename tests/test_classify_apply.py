@@ -63,6 +63,55 @@ def test_apply_handles_name_collision(tmp_path, monkeypatch, tracking_db):
     assert (dest / "2024-01-01 titre.pdf").read_bytes() == b"existant"  # intact
 
 
+def test_apply_ledger_and_relink_committed_together(tmp_path, monkeypatch,
+                                                    tracking_db):
+    """Succès : la ligne ledger ET le relink de la fiche sont persistés."""
+    root = tmp_path / "Documents"
+    (root / "src").mkdir(parents=True)
+    (root / "src" / "a.pdf").write_bytes(b"%PDF data")
+    monkeypatch.setattr(CMD, "DOCUMENTS_DIR", root)
+    # Une fiche existante sur l'ancien rel_path doit suivre le move.
+    tracking_db.upsert_classification(
+        "src/a.pdf", {"status": "auto", "category": "banque"})
+    mf = _manifest(tmp_path, [
+        {"status": "auto", "source": "src/a.pdf",
+         "dest": "organismes/bn/2024-01-01 releve.pdf", "category": "banque"},
+    ])
+    res = CMD.apply(mf, dry_run=False, db=tracking_db)
+    assert res["moved"] == 1
+    n = tracking_db._conn.execute("SELECT COUNT(*) FROM file_ledger").fetchone()[0]
+    assert n == 1                                          # ledger journalisé
+    assert tracking_db.get_classification("src/a.pdf") is None       # ancien parti
+    assert tracking_db.get_classification(
+        "organismes/bn/2024-01-01 releve.pdf") is not None          # fiche suivie
+
+
+def test_apply_atomic_rollback_on_relink_failure(tmp_path, monkeypatch,
+                                                 tracking_db):
+    """Si le relink échoue, l'insertion ledger est annulée avec lui : jamais
+    une fiche désynchronisée d'un ledger à moitié écrit (atomicité #4)."""
+    root = tmp_path / "Documents"
+    (root / "src").mkdir(parents=True)
+    (root / "src" / "a.pdf").write_bytes(b"%PDF data")
+    monkeypatch.setattr(CMD, "DOCUMENTS_DIR", root)
+
+    def boom(*a, **k):
+        raise OSError("relink simulé KO")
+    monkeypatch.setattr(tracking_db, "relink_document", boom)
+
+    mf = _manifest(tmp_path, [
+        {"status": "auto", "source": "src/a.pdf",
+         "dest": "organismes/x/2024-01-01 t.pdf", "category": "divers"},
+    ])
+    res = CMD.apply(mf, dry_run=False, db=tracking_db)
+    assert res["moved"] == 0 and len(res["errors"]) == 1
+    # Le move FS a bien eu lieu (non transactionnel)…
+    assert (root / "organismes/x/2024-01-01 t.pdf").exists()
+    # …mais AUCUNE ligne ledger : ledger_record a été rollback avec le relink.
+    n = tracking_db._conn.execute("SELECT COUNT(*) FROM file_ledger").fetchone()[0]
+    assert n == 0
+
+
 def test_apply_skips_missing_source(tmp_path, monkeypatch, tracking_db):
     root = tmp_path / "Documents"
     root.mkdir()

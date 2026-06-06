@@ -21,6 +21,7 @@ from pathlib import Path
 from connaissance.core import classify as _heur
 from connaissance.core import filtres as _filtres
 from connaissance.core import ledger as _ledger
+from connaissance.core.manifest_io import load_entries, unique_dest, unwrap
 from connaissance.core.output_file import write_or_inline
 from connaissance.core.paths import DOCUMENTS_DIR, require_paths, transit_file
 from connaissance.core.resolution import (chercher_alias, construire_nom_fichier,
@@ -261,19 +262,6 @@ def status(path: str | None = None, db: TrackingDB | None = None) -> dict:
 
 # --- Brique 5 : apply (manifeste → déplacements ledger, dry-run par défaut) --
 
-def _unique_dest(dst: Path) -> Path:
-    """Éviter d'écraser : ``nom.pdf`` → ``nom (2).pdf`` si la cible existe."""
-    if not dst.exists():
-        return dst
-    stem, suf = dst.stem, dst.suffix
-    i = 2
-    while True:
-        cand = dst.with_name(f"{stem} ({i}){suf}")
-        if not cand.exists():
-            return cand
-        i += 1
-
-
 def apply(manifest_file: str, dry_run: bool = True,
           db: TrackingDB | None = None) -> dict:
     """Appliquer le manifeste de pré-classement (schema ClassifyApply).
@@ -284,8 +272,7 @@ def apply(manifest_file: str, dry_run: bool = True,
     (flag ``--apply``). Collisions de noms gérées (`(2)`, `(3)`…).
     """
     require_paths(DOCUMENTS_DIR, context="classify apply")
-    payload_in = json.loads(Path(manifest_file).expanduser().read_text(encoding="utf-8"))
-    entries = payload_in.get("entries", payload_in) if isinstance(payload_in, dict) else payload_in
+    _, entries = load_entries(manifest_file)
     autos = [e for e in entries if e.get("status") == "auto" and e.get("dest")]
 
     owns_db = db is None
@@ -302,16 +289,20 @@ def apply(manifest_file: str, dry_run: bool = True,
             if not src.exists():
                 skipped.append({"source": e["source"], "reason": "source_introuvable"})
                 continue
-            dst = _unique_dest(DOCUMENTS_DIR / e["dest"])
+            dst = unique_dest(DOCUMENTS_DIR / e["dest"])
             rel_dst = str(dst.relative_to(DOCUMENTS_DIR))
             if dry_run:
                 planned.append({"source": e["source"], "dest": rel_dst})
                 continue
             try:
-                _ledger.safe_move(db, src, dst,
-                                  f"classify {e.get('category') or ''}".strip(),
-                                  run_id)
-                db.relink_document(e["source"], rel_dst)  # la fiche suit le move
+                # Ledger + relink de la fiche atomiques : soit les deux sont
+                # journalisés, soit aucun (jamais une fiche désynchronisée du
+                # ledger). Le shutil.move dans safe_move reste hors-transaction.
+                with db.transaction():
+                    _ledger.safe_move(db, src, dst,
+                                      f"classify {e.get('category') or ''}".strip(),
+                                      run_id, commit=False)
+                    db.relink_document(e["source"], rel_dst, commit=False)
                 planned.append({"source": e["source"], "dest": rel_dst})
             except OSError as exc:
                 errors.append({"source": e["source"], "error": str(exc)})
@@ -336,8 +327,36 @@ def apply(manifest_file: str, dry_run: bool = True,
 
 # --- Brique 4 : register (résultats Batch → manifeste plan→apply) -----------
 
-def _parse_result_content(content: str) -> dict | None:
-    """Parser le JSON d'une réponse Claude (tolère un bloc ``` et du texte)."""
+def _coerce_content_text(content) -> str:
+    """Normaliser le champ ``content`` d'un résultat Batch en texte brut.
+
+    L'API Messages renvoie typiquement une liste de blocs
+    ``[{"type": "text", "text": "..."}]`` ; certains exports l'aplatissent en
+    chaîne. On accepte les deux (liste de blocs → concat des ``text``, chaîne →
+    telle quelle) pour ne pas faire échouer tout le register sur la forme.
+    """
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = []
+        for block in content:
+            if isinstance(block, dict):
+                parts.append(block.get("text") or block.get("content") or "")
+            elif isinstance(block, str):
+                parts.append(block)
+        return "".join(parts)
+    if isinstance(content, dict):
+        return content.get("text") or content.get("content") or ""
+    return ""
+
+
+def _parse_result_content(content) -> dict | None:
+    """Parser le JSON d'une réponse Claude (tolère un bloc ``` et du texte).
+
+    ``content`` peut être une chaîne, une liste de blocs Messages, ou un dict ;
+    voir ``_coerce_content_text``.
+    """
+    content = _coerce_content_text(content)
     if not content:
         return None
     txt = re.sub(r"```(?:json)?", "", content).strip()
@@ -357,8 +376,12 @@ def _reconcile_entity(name: str, entity_type: str) -> tuple[str, str]:
     """(entity_type, slug) réconciliés contre le registre existant.
 
     Un alias de fiche (``chercher_alias``) l'emporte (canonique) ; sinon on
-    construit le slug et on garde le type proposé (validé)."""
-    etype = entity_type if entity_type in ("organismes", "personnes", "divers") else "divers"
+    construit le slug et on garde le type proposé (validé). Un type non
+    reconnu retombe sur ``inconnus`` (et non ``divers``) — cohérent avec le
+    heuristique ``guess_entity`` et ``organize.py`` : ``divers`` est une vraie
+    catégorie de rangement, ``inconnus`` = entité indéterminée."""
+    etype = entity_type if entity_type in (
+        "organismes", "personnes", "divers", "inconnus") else "inconnus"
     alias = chercher_alias(name) if name else None
     if alias and "/" in alias:
         atype, aslug = alias.split("/", 1)
@@ -378,10 +401,12 @@ def register(results_file: str, from_prepare: str,
     date absente ou parse échoué → **zone d'attente** (pas de déplacement auto).
     **N'écrit/ne déplace rien** : produit un manifeste révisable pour ``apply``.
     """
-    results = json.loads(Path(results_file).expanduser().read_text(encoding="utf-8"))
-    results = results.get("results", results) if isinstance(results, dict) else results
-    prep = json.loads(Path(from_prepare).expanduser().read_text(encoding="utf-8"))
-    prep_reqs = prep.get("requests", prep) if isinstance(prep, dict) else prep
+    results = unwrap(
+        json.loads(Path(results_file).expanduser().read_text(encoding="utf-8")),
+        "results")
+    prep_reqs = unwrap(
+        json.loads(Path(from_prepare).expanduser().read_text(encoding="utf-8")),
+        "requests")
     by_id = {r["custom_id"]: r for r in prep_reqs}
 
     owns_db = db is None
@@ -418,9 +443,10 @@ def register(results_file: str, from_prepare: str,
         etype, slug = _reconcile_entity(entity, etype_raw)
         namefile = construire_nom_fichier(date or "0000-00-00", title or "sans-titre")
 
-        # Statut : auto seulement si confiance haute ET date ET entité ET catégorie.
+        # Statut : auto seulement si confiance haute ET date ET entité ET
+        # catégorie ET type d'entité exploitable (ni divers ni inconnus).
         auto = (confidence == "high" and date and entity and category
-                and etype != "divers" and slug)
+                and etype not in ("divers", "inconnus") and slug)
         if auto:
             dest = f"{etype}/{slug}/{namefile}{ext}"
             status = "auto"
@@ -429,8 +455,8 @@ def register(results_file: str, from_prepare: str,
             status = "attente"
             if confidence != "high":
                 reasons.append("confiance_basse")
-            if etype == "divers":
-                reasons.append("entité_divers")
+            if etype in ("divers", "inconnus"):
+                reasons.append(f"entité_{etype}")
 
         entry = {
             "custom_id": cid, "source": source, "status": status, "dest": dest,

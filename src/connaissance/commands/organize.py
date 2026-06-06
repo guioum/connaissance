@@ -3,7 +3,8 @@
 Expose :
 - `plan() -> OrganizePlan` : génère un manifeste auto/alias_match/a_confirmer.
 - `enrich(manifest_path, qmd_results) -> OrganizePlan` : injecte des candidats.
-- `apply(manifest_path, dry_run=False) -> OrganizeApply` : applique un manifeste.
+- `apply(manifest_path, dry_run=True) -> OrganizeApply` : applique un manifeste
+  (dry-run par défaut — passer dry_run=False / `--apply` en CLI pour exécuter).
 - `resolve(name=None, date=None, title=None, alias=None) -> OrganizeResolve`.
 """
 
@@ -17,6 +18,7 @@ import yaml
 
 from connaissance.core.paths import BASE_PATH
 from connaissance.core import ledger as _ledger
+from connaissance.core.manifest_io import load_entries
 from connaissance.core.tracking import TrackingDB
 from connaissance.core.resolution import construire_slug, construire_nom_fichier, chercher_alias
 
@@ -178,12 +180,8 @@ def _apply_manifest(manifest_path, dry_run=False) -> dict:
       `{total, auto, alias_match, a_confirmer, entrees: [...]}`
     """
     empty_result = {"moved": 0, "skipped": 0, "errors": 0}
-    raw = json.loads(Path(manifest_path).read_text())
-    if isinstance(raw, dict) and "entrees" in raw:
-        entries = raw["entrees"] or []
-    elif isinstance(raw, list):
-        entries = raw
-    else:
+    envelope, entries = load_entries(manifest_path, list_keys=("entrees",))
+    if envelope is not None and "entrees" not in envelope:
         raise ValueError(
             "Format de manifeste non reconnu : attendu une liste "
             "ou un dict avec clé 'entrees'."
@@ -546,8 +544,8 @@ def enrich(manifest_path: str, qmd_results: list[dict]) -> dict:
     }
 
 
-def apply(manifest: str, dry_run: bool = False) -> dict:
-    """Appliquer un manifeste (schema OrganizeApply)."""
+def apply(manifest: str, dry_run: bool = True) -> dict:
+    """Appliquer un manifeste (schema OrganizeApply). Dry-run par défaut."""
     result = _apply_manifest(manifest, dry_run=dry_run)
     return {
         "moved": result.get("moved", 0),

@@ -207,8 +207,12 @@ def apply_user_filters(obsoletes: list[dict],
     return result
 
 
-def archive_items(obsoletes: list[dict], db: TrackingDB, scoring_config: dict) -> Path:
-    """Déplacer les fichiers flagués vers l'archive et mettre à jour la DB."""
+def archive_items(obsoletes: list[dict], db: TrackingDB,
+                  scoring_config: dict) -> tuple[Path, str]:
+    """Déplacer les fichiers flagués vers l'archive et mettre à jour la DB.
+
+    Retourne ``(archive_dir, run_id)`` — le ``run_id`` est le handle ledger
+    pour ``ledger revert`` (réversibilité uniforme avec organize/classify)."""
     require_connaissance_root()
 
     run_id = _ledger.new_run_id("cleanup-courriel")   # lot ledger réversible
@@ -289,7 +293,7 @@ def archive_items(obsoletes: list[dict], db: TrackingDB, scoring_config: dict) -
         encoding="utf-8"
     )
 
-    return archive_dir
+    return archive_dir, run_id
 
 
 # --- API publique ---
@@ -342,15 +346,17 @@ def cleanup_obsolete(dry_run: bool = True,
                 "would_archive": would_archive,
                 "archived_to": "",
                 "manifest_path": "",
+                "ledger_run": "",
                 "total_scanned": total_scanned,
                 "dry_run": True,
             }
 
-        archive_dir = archive_items(obsoletes, db, filtres.scoring_config)
+        archive_dir, run_id = archive_items(obsoletes, db, filtres.scoring_config)
         return {
             "would_archive": would_archive,
             "archived_to": str(archive_dir),
             "manifest_path": str(archive_dir / "manifest.json"),
+            "ledger_run": run_id,
             "total_scanned": total_scanned,
             "dry_run": False,
         }

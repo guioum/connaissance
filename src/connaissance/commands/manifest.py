@@ -17,6 +17,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from connaissance.core.manifest_io import load_entries
 from connaissance.core.paths import BASE_PATH
 
 
@@ -55,14 +56,12 @@ def _normalize_candidates(raw: str) -> list[str]:
 
 
 def _load_manifest(path: Path) -> tuple[dict | None, list[dict]]:
-    """Charger un manifeste. Retourne (enveloppe_ou_None, entries)."""
-    data = json.loads(path.read_text(encoding="utf-8"))
-    if isinstance(data, dict) and "entrees" in data:
-        entries = data["entrees"] if isinstance(data["entrees"], list) else []
-        return data, entries
-    if isinstance(data, list):
-        return None, data
-    return None, []
+    """Charger un manifeste organize. Retourne (enveloppe_ou_None, entries).
+
+    Délègue au loader commun en restreignant la clé à ``entrees`` (format
+    organize), pour conserver la sémantique historique de ``manifest patch``.
+    """
+    return load_entries(path, list_keys=("entrees",))
 
 
 def _save_manifest(path: Path, envelope: dict | None, entries: list[dict]) -> None:

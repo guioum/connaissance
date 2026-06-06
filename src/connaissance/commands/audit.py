@@ -347,7 +347,8 @@ def repair_attachments(dry_run: bool = False) -> dict:
     return audit_attachments.repair(dry_run=dry_run)
 
 
-def archive_non_documents(dry_run: bool = False) -> dict:
-    """Archiver les non-documents hors du périmètre (wrapper audit_archive)."""
+def archive_non_documents(dry_run: bool = True) -> dict:
+    """Archiver les non-documents hors du périmètre (wrapper audit_archive).
+    Dry-run par défaut — passer dry_run=False / `--apply` en CLI pour exécuter."""
     from connaissance.commands import audit_archive
     return audit_archive.archive(dry_run=dry_run)

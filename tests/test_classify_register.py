@@ -74,3 +74,34 @@ def test_register_divers_with_sujet_is_attente_not_auto(tmp_path, monkeypatch):
     rf, pf = _files(tmp_path, prep, results)
     e = CMD.register(rf, pf)["entries"][0]
     assert e["status"] == "attente" and "entité_divers" in e["reasons"]
+
+
+def test_register_content_liste_de_blocs_messages(tmp_path, monkeypatch):
+    # L'API Messages renvoie content=[{type:text, text:...}] : doit être parsé
+    # comme une chaîne (tolérance #8), pas basculer en parse_échoué.
+    monkeypatch.setattr(CMD, "chercher_alias", lambda *a, **k: None)
+    prep = {"requests": [{"custom_id": "c", "_rel": "x/d.pdf", "_hint": {}}]}
+    results = {"results": [{"custom_id": "c", "content": [
+        {"type": "text", "text":
+            '{"entity":"Hydro","entity_type":"organismes","category":"banque",'
+            '"date":"2024-06-01","title":"Facture","confidence":"high"}'},
+    ]}]}
+    rf, pf = _files(tmp_path, prep, results)
+    e = CMD.register(rf, pf)["entries"][0]
+    assert e["status"] == "auto"
+    assert e["entity_type"] == "organismes"
+    assert "parse_échoué" not in e["reasons"]
+
+
+def test_register_type_inconnu_reste_inconnus_pas_divers(tmp_path, monkeypatch):
+    # Un entity_type non canonique retombe sur 'inconnus' (#5), pas 'divers'.
+    monkeypatch.setattr(CMD, "chercher_alias", lambda *a, **k: None)
+    prep = {"requests": [{"custom_id": "c", "_rel": "x/d.pdf", "_hint": {}}]}
+    results = {"results": [{"custom_id": "c", "content":
+        '{"entity":"Truc","entity_type":"BIDON","category":"divers",'
+        '"date":"2024-01-01","title":"t","confidence":"high"}'}]}
+    rf, pf = _files(tmp_path, prep, results)
+    e = CMD.register(rf, pf)["entries"][0]
+    assert e["entity_type"] == "inconnus"
+    assert e["status"] == "attente"
+    assert "entité_inconnus" in e["reasons"]

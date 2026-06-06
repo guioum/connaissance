@@ -1,6 +1,6 @@
 // MCP server wrapper for the `connaissance` CLI.
 //
-// Exposes 48 tools (mcp__connaissance__*) that shell-out to the
+// Exposes 61 tools (mcp__connaissance__*) that shell-out to the
 // `connaissance` Python CLI installed via `uv tool install` or `pip`.
 // Each tool maps 1:1 to a CLI subcommand `connaissance <group> <verb>`.
 //
@@ -555,7 +555,8 @@ server.registerTool(
   },
   async (args) => {
     const a = emailsCommonArgs(args);
-    if (args.dry_run) a.push("--dry-run");
+    // dry_run=true est le défaut argparse du CLI. On pousse --apply pour le flipper.
+    if (args.dry_run === false) a.push("--apply");
     pushFlag(a, "only-domain", args.only_domain);
     pushFlag(a, "only-entity", args.only_entity);
     return runAndFormat("emails", "cleanup-obsolete", a);
@@ -666,12 +667,13 @@ server.registerTool(
     description: "Apply an organization manifest : move summaries, transcriptions, original documents to their entity directories. Always dry-run first.",
     inputSchema: {
       manifest: z.string().describe("Absolute path to the manifest JSON."),
-      dry_run: z.boolean().default(false).describe("Preview file moves without executing."),
+      dry_run: z.boolean().default(true).describe("Default dry-run ; pass false to actually move files."),
     },
   },
   async (args) => {
     const a = [args.manifest];
-    if (args.dry_run) a.push("--dry-run");
+    // dry_run=true est le défaut argparse du CLI. On pousse --apply pour le flipper.
+    if (args.dry_run === false) a.push("--apply");
     return runAndFormat("organize", "apply", a);
   }
 );
@@ -715,12 +717,13 @@ server.registerTool(
   {
     description: "Promote document attachments and deduplicate identical files. Dry-run by default.",
     inputSchema: {
-      dry_run: z.boolean().default(false),
+      dry_run: z.boolean().default(true).describe("Default dry-run ; pass false to actually promote/dedup."),
     },
   },
   async (args) => {
     const a = [];
-    if (args.dry_run) a.push("--dry-run");
+    // dry_run=true est le défaut argparse du CLI. On pousse --apply pour le flipper.
+    if (args.dry_run === false) a.push("--apply");
     return runAndFormat("optimize", "apply", a);
   }
 );
@@ -1178,12 +1181,13 @@ server.registerTool(
   {
     description: "Archive non-document folders (code, photos, bundles) out of ~/Documents/ into ~/Documents/- Archives/. Updates filtres.yaml to remove the moved paths.",
     inputSchema: {
-      dry_run: z.boolean().default(true),
+      dry_run: z.boolean().default(true).describe("Default dry-run ; pass false to actually move folders."),
     },
   },
   async (args) => {
     const a = [];
-    if (args.dry_run) a.push("--dry-run");
+    // dry_run=true est le défaut argparse du CLI. On pousse --apply pour le flipper.
+    if (args.dry_run === false) a.push("--apply");
     return runAndFormat("audit", "archive-non-documents", a);
   }
 );

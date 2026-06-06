@@ -177,11 +177,12 @@ grande réorg tant que ce n'est pas validé.
 
 ## Documentation (fait)
 
-- [x] **Décompte d'outils reconcilié** : README + `CLAUDE.md` passés de
-  « 42 / 12 groupes » à **48 outils / 13 groupes** (source de vérité : les
-  `registerTool` de `index.js`). Tableau README corrigé (`pipeline simulate`
-  fantôme retiré, groupe `actions` ajouté, `backlog_count` /
-  `synthesis entity_paths,list_all,prepare` ajoutés).
+- [x] **Décompte d'outils reconcilié** : README + `CLAUDE.md` à **61 outils /
+  15 groupes** (source de vérité : les `registerTool` de `index.js`). Le palier
+  intermédiaire « 48 / 13 » a été dépassé par les phases triage/secrets/signals
+  (+3), classify (+4), ledger (+4), manifest (+1) et les `backlog_count`.
+  Tableau README corrigé (`pipeline simulate` fantôme retiré, groupes `actions`,
+  `classify`, `ledger`, `manifest` ajoutés).
 - [x] **Quick start** : version figée `connaissance-2.1.0.mcpb` → générique.
 - [x] **Pointeur `docs/`** ajouté en tête de `CLAUDE.md`.
 

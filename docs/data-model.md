@@ -104,12 +104,27 @@ SQLite sous `~/Connaissance/.config/tracking.db`, **propriété exclusive du
 CLI**. Schéma byte-compatible avec la v1.9.0 du plugin cowork d'origine
 (aucune migration destructive). Tables :
 
-| Table | Rôle |
-|---|---|
-| `operations` | journal horodaté des opérations (plugin, operation, source/dest, status). |
-| `files` | fichiers connus : type, entité, `message_id`, `hash` SHA256, `size`, `mtime`. Cœur du cache JIT de déduplication. |
-| `text_simhash` | cache des SimHash texte des transcriptions (quasi-doublons), clé = chemin **logique** relatif à la racine. Voir [pipeline.md](pipeline.md). |
-| `llm_usage` | tokens et coûts par appel (input/output, cache, `cost_usd`). |
+Toutes les tables ajoutées par le pipeline sont **additives**
+(`CREATE TABLE IF NOT EXISTS`). Les colonnes manquantes d'une base ancienne
+sont rattrapées par `_migrate()` (`PRAGMA table_info` → `ALTER TABLE ADD
+COLUMN`) ; pour `doc_classification` la liste attendue est dérivée de
+`_CLS_COLS`, si bien qu'ajouter une colonne à la fiche migre automatiquement
+les bases existantes.
+
+| Table | Clé d'identité | Rôle |
+|---|---|---|
+| `operations` | — | journal horodaté des opérations (plugin, operation, source/dest, status). |
+| `files` | `path` (absolu) | fichiers connus : type, entité, `message_id`, `hash` SHA256, `size`, `mtime`. Cœur du cache JIT de déduplication. |
+| `text_simhash` | `rel_path` (relatif à `CONNAISSANCE_ROOT`) | cache des SimHash texte des transcriptions (quasi-doublons). Voir [pipeline.md](pipeline.md). |
+| `doc_signals` | `rel_path` (relatif à `~/Documents`) | **fiche d'identité, étage signaux** (Phase B) : paquet JSON nom/chemin/dates/métadonnées/texte born-digital/résumé extractif, caché par `(rel_path, size, mtime)`. |
+| `doc_classification` | `rel_path` (relatif à `~/Documents`) | **fiche d'identité, étage classement** (Phase C) : entité/catégorie/date/titre/sujet + `confidence` + `status` (`auto`/`attente`) + `model`. État mutable raffiné à chaque passe ; `hash` sert d'ancre quand le fichier bouge. |
+| `file_ledger` | `run_id` + `old_path`/`new_path` | journal réversible des déplacements (`safe_move`) : `sha256` + `(size, mtime)` permettent un `revert` vérifié par hash. 1 `run_id` = 1 lot révertible. |
+| `llm_usage` | — | tokens et coûts par appel (input/output, cache, `cost_usd`). |
+
+> ⚠️ Les deux colonnes nommées `rel_path` (`text_simhash` vs
+> `doc_signals`/`doc_classification`) n'ont **pas le même référentiel** :
+> `CONNAISSANCE_ROOT` pour la première, `~/Documents` pour les deux fiches.
+> Ne pas les joindre naïvement par `USING(rel_path)`.
 
 ### Le cache JIT
 

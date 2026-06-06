@@ -29,6 +29,7 @@ Usage :
 import json
 import sqlite3
 import unicodedata
+from contextlib import contextmanager
 from pathlib import Path
 
 from connaissance.core.paths import CONNAISSANCE_ROOT, require_connaissance_root
@@ -132,8 +133,9 @@ CREATE TABLE IF NOT EXISTS doc_classification (
     updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%S', 'now', 'localtime'))
 );
 
-CREATE INDEX IF NOT EXISTS idx_doc_cls_status ON doc_classification(status);
-CREATE INDEX IF NOT EXISTS idx_doc_cls_entity ON doc_classification(entity_slug);
+-- Index doc_classification(status) et (entity_slug) créés dans _migrate(),
+-- après les ALTER TABLE : sur une base ancienne ces colonnes peuvent manquer
+-- au moment du SCHEMA, ce qui ferait échouer la création d'index.
 
 -- Ledger journalisé des opérations de fichiers (move/rename), réversible.
 -- Chaque ligne 'applied' enregistre l'ancien et le nouveau chemin + le SHA256,
@@ -237,19 +239,53 @@ class TrackingDB:
         self._migrate()
         self._conn.commit()
 
+    # Type SQLite des colonnes non-TEXT (défaut TEXT pour les autres). Sert à
+    # la migration générique ci-dessous.
+    _COL_TYPES = {"size": "INTEGER", "mtime": "REAL"}
+
+    def _expected_columns(self) -> dict[str, dict[str, str]]:
+        """Colonnes attendues par table, au-delà du CREATE d'origine.
+
+        ``_migrate()`` ajoute ce qui manque sur une base ancienne. La fiche
+        ``doc_classification`` est dérivée de ``_CLS_COLS`` : ajouter une
+        colonne à ``_CLS_COLS`` suffit à migrer les bases existantes (son
+        ``INSERT`` est généré dynamiquement — sans migration, il planterait).
+        """
+        return {
+            "files": {"size": "INTEGER"},
+            "doc_classification": {c: self._COL_TYPES.get(c, "TEXT")
+                                   for c in self._CLS_COLS},
+        }
+
     def _migrate(self):
         """Migrations légères pour bases existantes.
 
         ``CREATE TABLE IF NOT EXISTS`` ne modifie pas une table déjà créée
-        avec un schéma plus ancien. On ajoute ici les colonnes manquantes
-        et leurs index associés. Tout est idempotent.
+        avec un schéma plus ancien. Pour chaque table, on ajoute les colonnes
+        manquantes (``PRAGMA table_info`` vs colonnes attendues) puis les
+        index associés. Tout est idempotent. Les noms de tables/colonnes sont
+        des constantes internes (jamais d'entrée utilisateur).
         """
-        cols = {r[1] for r in self._conn.execute("PRAGMA table_info(files)").fetchall()}
-        if "size" not in cols:
-            self._conn.execute("ALTER TABLE files ADD COLUMN size INTEGER")
-        # Index size créé ici (pas dans SCHEMA) pour rester compatible avec
-        # les DB créées avant l'ajout de la colonne.
+        for table, expected in self._expected_columns().items():
+            existing = {r[1] for r in
+                        self._conn.execute(
+                            f"PRAGMA table_info({table})").fetchall()}
+            if not existing:
+                continue  # table absente (ne devrait pas arriver après SCHEMA)
+            for col, coltype in expected.items():
+                if col not in existing:
+                    self._conn.execute(
+                        f"ALTER TABLE {table} ADD COLUMN {col} {coltype}")
+        # Index créés ici (pas dans SCHEMA) car ils portent sur des colonnes
+        # potentiellement ajoutées par les ALTER ci-dessus : sur une base
+        # ancienne, les créer dans SCHEMA échouerait (colonne inexistante).
         self._conn.execute("CREATE INDEX IF NOT EXISTS idx_files_size ON files(size)")
+        self._conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_doc_cls_status "
+            "ON doc_classification(status)")
+        self._conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_doc_cls_entity "
+            "ON doc_classification(entity_slug)")
 
     def _cleanup_fuse_hidden(self):
         """Supprimer les fichiers .fuse_hidden* orphelins du dossier de la DB.
@@ -266,6 +302,26 @@ class TrackingDB:
                     pass
         except OSError:
             pass
+
+    @contextmanager
+    def transaction(self):
+        """Grouper plusieurs écritures en une unité atomique.
+
+        ``COMMIT`` à la sortie normale, ``ROLLBACK`` sur exception. Les méthodes
+        appelées dans le bloc doivent passer ``commit=False`` pour ne pas
+        committer prématurément (sinon l'atomicité est rompue). Sert notamment
+        à `classify apply` pour que l'enregistrement ledger et le relink de la
+        fiche soient indissociables.
+
+        Note : une opération filesystem (``shutil.move``) exécutée dans le bloc
+        n'est PAS annulée par le rollback — seules les écritures SQLite le sont.
+        """
+        try:
+            yield self._conn
+            self._conn.commit()
+        except Exception:
+            self._conn.rollback()
+            raise
 
     def close(self):
         try:
@@ -697,21 +753,28 @@ class TrackingDB:
                 "by_category": _by("category"), "by_entity_type": _by("entity_type"),
                 "by_entity": _by("entity")}
 
-    def relink_document(self, old_rel, new_rel) -> None:
+    def relink_document(self, old_rel, new_rel, *, commit: bool = True) -> None:
         """Suivre un fichier déplacé : repointer sa fiche (signals + classement)
-        de ``old_rel`` vers ``new_rel`` — la fiche survit au move."""
+        de ``old_rel`` vers ``new_rel`` — la fiche survit au move.
+
+        ``commit=False`` laisse l'écriture dans la transaction courante (pour
+        grouper avec ``ledger_record`` via ``transaction()``)."""
         old_k, new_k = _nfc(old_rel), _nfc(new_rel)
         for tbl in ("doc_signals", "doc_classification"):
             self._conn.execute(f"DELETE FROM {tbl} WHERE rel_path = ?", (new_k,))
             self._conn.execute(
                 f"UPDATE {tbl} SET rel_path = ? WHERE rel_path = ?",
                 (new_k, old_k))
-        self._conn.commit()
+        if commit:
+            self._conn.commit()
 
     # --- Ledger des opérations de fichiers (réversible) ---
 
-    def ledger_record(self, entry: dict) -> None:
-        """Enregistrer une opération de fichier appliquée (status 'applied')."""
+    def ledger_record(self, entry: dict, *, commit: bool = True) -> None:
+        """Enregistrer une opération de fichier appliquée (status 'applied').
+
+        ``commit=False`` laisse l'insertion dans la transaction courante (pour
+        l'atomicité ledger+fiche via ``transaction()``)."""
         self._conn.execute(
             """INSERT INTO file_ledger
                (run_id, op, old_path, new_path, sha256, size, mtime, reason, status)
@@ -719,7 +782,8 @@ class TrackingDB:
             (entry["run_id"], entry["op"], entry.get("old_path"),
              entry.get("new_path"), entry.get("sha256"), entry.get("size"),
              entry.get("mtime"), entry.get("reason")))
-        self._conn.commit()
+        if commit:
+            self._conn.commit()
 
     def ledger_runs(self, limit: int = 20) -> list[dict]:
         """Lister les runs récents avec le compte d'opérations par statut."""

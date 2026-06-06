@@ -392,6 +392,9 @@ class EmailsCleanupObsolete(TypedDict):
     would_archive: list[dict]
     archived_to: str
     manifest_path: str
+    ledger_run: str          # handle ledger pour `ledger revert` ("" en dry-run)
+    total_scanned: int
+    dry_run: bool
 
 
 # --- notes ---

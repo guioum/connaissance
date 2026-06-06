@@ -393,6 +393,18 @@ def build_parser() -> argparse.ArgumentParser:
         p.add_argument("--since", type=str, default=None)
         p.add_argument("--until", type=str, default=None)
 
+    def add_apply_flag(p):
+        """Mutations sûres par défaut : dry-run, exécution opt-in via --apply.
+
+        Convention unique pour TOUTES les commandes qui déplacent/suppriment
+        des fichiers (organize/optimize/emails cleanup/audit archive), alignée
+        sur `config scoring set`. `--dry-run` reste accepté (explicite, no-op
+        car déjà le défaut) ; `--apply` bascule `dry_run` à False."""
+        p.add_argument("--dry-run", dest="dry_run", action="store_true",
+                       default=True)
+        p.add_argument("--apply", dest="dry_run", action="store_false",
+                       help="Exécuter réellement (défaut : dry-run / aperçu).")
+
     # documents
     p_doc = sub.add_parser("documents")
     p_doc_verbs = p_doc.add_subparsers(dest="verb", required=True)
@@ -460,10 +472,13 @@ def build_parser() -> argparse.ArgumentParser:
         vp.add_argument("--account", type=str, default=None)
         vp.add_argument("--folder", type=str, default=None)
         add_date_range(vp)
-        if verb in ("extract", "cleanup-obsolete"):
-            vp.add_argument("--dry-run", action="store_true")
         if verb == "extract":
+            # extract : action primaire = écrire ; dry-run reste opt-in.
+            vp.add_argument("--dry-run", action="store_true")
             vp.add_argument("--no-images", action="store_true")
+        if verb == "cleanup-obsolete":
+            # mutation destructive (archive) : sûre par défaut.
+            add_apply_flag(vp)
         if verb in ("calibrate", "senders"):
             vp.add_argument("--sample", type=int, default=None)
         if verb == "cleanup-obsolete":
@@ -555,7 +570,7 @@ def build_parser() -> argparse.ArgumentParser:
                            help="Lire le JSON des résultats qmd depuis stdin.")
     p_org_apply = p_org_verbs.add_parser("apply")
     p_org_apply.add_argument("manifest")
-    p_org_apply.add_argument("--dry-run", action="store_true")
+    add_apply_flag(p_org_apply)
     p_org_res = p_org_verbs.add_parser("resolve")
     p_org_res.add_argument("--name", type=str, default=None)
     p_org_res.add_argument("--date", type=str, default=None)
@@ -567,7 +582,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_opt_verbs = p_opt.add_subparsers(dest="verb", required=True)
     p_opt_verbs.add_parser("plan")
     p_opt_apply = p_opt_verbs.add_parser("apply")
-    p_opt_apply.add_argument("--dry-run", action="store_true")
+    add_apply_flag(p_opt_apply)
 
     # summarize
     p_sum = sub.add_parser("summarize")
@@ -686,7 +701,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_aud_check.add_argument("--steps", type=str, default=None)
     for verb in ("reindex-db", "repair-attachments", "archive-non-documents"):
         vp = p_aud_verbs.add_parser(verb)
-        vp.add_argument("--dry-run", action="store_true")
+        if verb == "archive-non-documents":
+            # mutation destructive (déplace des dossiers) : sûre par défaut.
+            add_apply_flag(vp)
+        else:
+            # reindex-db / repair-attachments : action primaire, dry-run opt-in.
+            vp.add_argument("--dry-run", action="store_true")
 
     # actions
     p_act = sub.add_parser("actions")

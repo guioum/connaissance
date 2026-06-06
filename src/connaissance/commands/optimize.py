@@ -2,7 +2,8 @@
 
 Expose :
 - `plan() -> OptimizePlan` : liste promotable + duplicates.
-- `apply(dry_run=False) -> OptimizeApply` : applique promotion + dédup.
+- `apply(dry_run=True) -> OptimizeApply` : applique promotion + dédup
+  (dry-run par défaut — passer dry_run=False / `--apply` en CLI pour exécuter).
 """
 from __future__ import annotations
 import sys
@@ -455,7 +456,7 @@ def plan(db: TrackingDB | None = None) -> dict:
             db.close()
 
 
-def apply(dry_run: bool = False, promote_docs: bool = True,
+def apply(dry_run: bool = True, promote_docs: bool = True,
           dedup_attachments: bool = True, cleanup_orphans_flag: bool = True,
           db: TrackingDB | None = None) -> dict:
     """Appliquer promotion + déduplication + nettoyage orphelins (schema OptimizeApply)."""

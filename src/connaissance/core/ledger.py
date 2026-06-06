@@ -25,13 +25,17 @@ def new_run_id(prefix: str = "run") -> str:
 
 
 def safe_move(db, old_path, new_path, reason: str, run_id: str,
-              *, dry_run: bool = False) -> dict:
+              *, dry_run: bool = False, commit: bool = True) -> dict:
     """Déplacer/renommer un fichier en le journalisant (réversible).
 
     - ``dry_run`` : retourne l'entrée ``status='planned'`` SANS rien écrire.
     - sinon : calcule le hash (cache JIT, lecture via miroir SSD si dispo —
       aucun téléchargement iCloud), déplace, et enregistre une ligne
       ``status='applied'`` dans le ledger.
+
+    ``commit=False`` : l'insertion ledger reste dans la transaction courante de
+    l'appelant (ex. ``with db.transaction():`` pour grouper avec un relink de
+    fiche). Le ``shutil.move`` lui-même n'est jamais transactionnel.
 
     L'``op`` est ``rename`` si seul le nom change (même dossier parent), sinon
     ``move``.
@@ -62,7 +66,7 @@ def safe_move(db, old_path, new_path, reason: str, run_id: str,
 
     new.parent.mkdir(parents=True, exist_ok=True)
     shutil.move(str(old), str(new))
-    db.ledger_record(entry)
+    db.ledger_record(entry, commit=commit)
     entry["status"] = "applied"
     return entry
 
