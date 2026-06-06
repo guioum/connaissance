@@ -249,14 +249,15 @@ aussi [data-model.md](data-model.md), table `file_ledger`) :
 ### Historique — naviguer le passé (`ledger snapshot`)
 
 Même principe que `- Sujets` mais pour le **temps** : `ledger snapshot` génère
-`~/Documents/- Historique/` avec un **sous-dossier daté par run** qui reconstruit
-l'**ancienne arborescence** (noms + structure d'avant les déplacements) en
-**symlinks** pointant l'emplacement **actuel** de chaque fichier (la chaîne
-old→new est suivie, donc un fichier déplacé plusieurs fois pointe bien sa
-position finale). Lecture seule, régénérable, quasi gratuit (les données sont
-déjà dans `file_ledger`). Un fichier disparu (corbeille purgée) laisse un
-marqueur `.disparu`. Distinct de `revert` : ici on **navigue** le passé sans
-rien défaire. `--run` cible un run ; `--clear` retire la vue.
+`~/Documents/- Historique/` avec **un sous-dossier par jour** (`AAAA-MM-JJ`) qui
+reconstruit l'**ancienne arborescence** (noms + structure d'avant les
+déplacements) en **symlinks** pointant l'emplacement **actuel** de chaque
+fichier. La chaîne old→new est suivie (un fichier déplacé plusieurs fois pointe
+sa position finale), et seules les **origines** sont incluses (pas les chemins
+intermédiaires d'une chaîne). Lecture seule, régénérable, quasi gratuit (données
+déjà dans `file_ledger`) ; fichier disparu (corbeille purgée) → marqueur
+`.disparu`. Distinct de `revert` : on **navigue** le passé sans rien défaire.
+`--run` cible un run ; `--clear` retire la vue.
 
 ### Corbeille — suppressions réversibles
 

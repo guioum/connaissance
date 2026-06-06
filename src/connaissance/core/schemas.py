@@ -221,8 +221,8 @@ class LedgerPurge(TypedDict):
 
 
 class LedgerSnapshot(TypedDict, total=False):
-    runs: int               # nb de runs représentés
-    entries: int            # anciens chemins reconstruits
+    days: int               # nb de jours représentés (un dossier par jour)
+    entries: int            # anciens chemins d'origine reconstruits
     linked: int             # symlinks créés (apply)
     would_link: int         # symlinks prévus (dry-run)
     gone: int               # fichiers disparus (corbeille purgée) → marqueur

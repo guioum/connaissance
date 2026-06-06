@@ -25,13 +25,12 @@ def test_snapshot_chains_to_current_location(tmp_path, monkeypatch, tracking_db)
               docs / "final" / "doc.pdf", "move2", r2)
 
     res = CL.snapshot(apply=True, db=tracking_db)
-    assert res["linked"] >= 2          # 2 anciens chemins reconstruits
+    assert res["linked"] == 1          # SEULE l'origine (a), pas l'intermédiaire (b)
     view = docs / CL.SNAPSHOT_VIEW
-    # le symlink de l'ancien chemin d'origine pointe la position FINALE (chaîne)
-    links = list(view.rglob("doc.pdf"))
-    assert links, "aucun symlink créé"
-    assert all(l.resolve() == (docs / "final" / "doc.pdf").resolve()
-               for l in links if l.is_symlink())
+    links = [l for l in view.rglob("doc.pdf") if l.is_symlink()]
+    assert len(links) == 1
+    assert "vieux" in links[0].parts                 # à l'emplacement d'ORIGINE
+    assert links[0].resolve() == (docs / "final" / "doc.pdf").resolve()
 
 
 def test_snapshot_dry_run_and_clear(tmp_path, monkeypatch, tracking_db):

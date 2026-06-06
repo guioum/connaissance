@@ -142,9 +142,11 @@ def snapshot_entries(db, *, run_id: str | None = None) -> list[dict]:
     """
     ops = db.ledger_all_ops(status="applied")
     forward: dict[str, str] = {}
+    destinations: set[str] = set()
     for o in ops:
         if o.get("old_path") and o.get("new_path"):
             forward[o["old_path"]] = o["new_path"]
+            destinations.add(o["new_path"])
 
     def resolve(p: str) -> str:
         seen = {p}
@@ -166,6 +168,9 @@ def snapshot_entries(db, *, run_id: str | None = None) -> list[dict]:
             "op": o.get("op"), "reason": o.get("reason"),
             "old_path": old, "terminal": terminal,
             "exists": Path(terminal).exists(),
+            # origine = chemin jamais redevenu une destination (vrai point de
+            # départ ; les intermédiaires d'une chaîne sont exclus du snapshot).
+            "is_origin": old not in destinations,
         })
     return out
 
