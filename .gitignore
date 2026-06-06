@@ -10,3 +10,6 @@ mcpb/server/index.js.bundled
 .DS_Store
 scratch/
 uv.lock
+# Artefacts runtime locaux (jamais versionnés)
+.claude/scheduled_tasks.lock
+.claude/settings.local.json
