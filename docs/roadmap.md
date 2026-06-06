@@ -126,6 +126,21 @@ grande réorg tant que ce n'est pas validé.
   run du corpus complet (dry-run only tant que non validé). Le **sujet** est
   source-de-vérité dans `doc_classification.sujet` (v2.35.0 — pas de frontmatter
   sur un PDF brut ; la vue `- Sujets` lit la colonne).
+- [x] **Calibrage Phase C sur lot test réel** (v2.44.0) : 3 batches test de 200
+  docs (Haiku 4.5, ~$0,60) ont réglé prompt + porte auto. **Constat clé : le
+  prompt caching ne fire PAS en Batch** (workers parallèles froids — vérifié,
+  `cache_read=0`) ⇒ corpus complet ≈ $9,6 en 1 doc/requête ; le seul levier
+  déterministe d'amortissement du system serait de **grouper N docs/requête**
+  (K=10 ≈ $5,7, mais réécriture prepare/register + retest). Réglages livrés :
+  (a) prompt — désambiguïsation entités (BNC=Banque Nationale ≠ BDC ; doc de
+  travail ≠ banque ; diplôme→organisme), `abonnements` resserré (services
+  récurrents only), règle **anti-devinette** (pas d'émetteur clair →
+  `entity_type=divers`, ne pas piocher une entité connue au hasard) ;
+  (b) `classify register` — **porte auto assouplie** : auto dès que la fiche est
+  structurellement complète (type exploitable + entité + catégorie + date), la
+  confiance basse ne bloque plus (réversible via ledger) ; `auto_low_confidence`
+  exposé, `attente_reasons` restreint aux attente. Effet lot 200 : auto 83→97,
+  zéro BDC, zéro hallucination en auto, `abonnements` maîtrisé.
 - [x] **Sujets = vue virtuelle unique** (v2.35.0 — modèle sujets) :
   `sujet view` génère `~/Documents/- Sujets/<sujet>/` en symlinks depuis
   `doc_classification.sujet` (régénérable), **remplace `- Par catégorie/`** ;

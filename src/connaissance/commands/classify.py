@@ -397,9 +397,13 @@ def register(results_file: str, from_prepare: str,
     content}]}``) + le fichier de ``prepare`` (``from_prepare`` : requêtes avec
     ``_rel`` source et ``_hint`` de repli). Pour chaque doc : parse la sortie
     Claude, **valide** (catégorie canonique, date AAAA-MM-JJ), **réconcilie**
-    l'entité (``resolution.py``) et calcule la destination. Confiance basse,
-    date absente ou parse échoué → **zone d'attente** (pas de déplacement auto).
-    **N'écrit/ne déplace rien** : produit un manifeste révisable pour ``apply``.
+    l'entité (``resolution.py``) et calcule la destination. Une fiche
+    **structurellement complète** (type exploitable + entité + catégorie + date)
+    passe en **auto** même à confiance basse (le déplacement est réversible via
+    le ledger) ; il ne reste en **zone d'attente** que ce qui manque une donnée
+    (entité ``divers``/``inconnus``, sans catégorie ou sans date) ou dont le parse
+    a échoué. **N'écrit/ne déplace rien** : produit un manifeste révisable pour
+    ``apply``.
     """
     results = unwrap(
         json.loads(Path(results_file).expanduser().read_text(encoding="utf-8")),
@@ -443,9 +447,14 @@ def register(results_file: str, from_prepare: str,
         etype, slug = _reconcile_entity(entity, etype_raw)
         namefile = construire_nom_fichier(date or "0000-00-00", title or "sans-titre")
 
-        # Statut : auto seulement si confiance haute ET date ET entité ET
-        # catégorie ET type d'entité exploitable (ni divers ni inconnus).
-        auto = (confidence == "high" and date and entity and category
+        # Statut : auto dès que la fiche est structurellement COMPLÈTE — type
+        # d'entité exploitable (ni divers ni inconnus) ET entité ET catégorie ET
+        # date ET slug. La confiance basse de Haiku ne bloque PLUS le passage en
+        # auto : le déplacement passe par le ledger (réversible), et le modèle se
+        # déclare souvent « low » par prudence sur des docs pourtant complets. On
+        # garde en attente uniquement ce qui MANQUE une donnée (entité divers/
+        # inconnue, sans catégorie ou sans date) ou dont le parsing a échoué.
+        auto = (date and entity and category
                 and etype not in ("divers", "inconnus") and slug)
         if auto:
             dest = f"{etype}/{slug}/{namefile}{ext}"
@@ -453,10 +462,12 @@ def register(results_file: str, from_prepare: str,
         else:
             dest = None
             status = "attente"
-            if confidence != "high":
-                reasons.append("confiance_basse")
             if etype in ("divers", "inconnus"):
                 reasons.append(f"entité_{etype}")
+        # Trace informative : la confiance basse est consignée (dans `reasons` et
+        # dans la fiche) mais n'est plus un motif de mise en attente à elle seule.
+        if confidence != "high" and "confiance_basse" not in reasons:
+            reasons.append("confiance_basse")
 
         entry = {
             "custom_id": cid, "source": source, "status": status, "dest": dest,
@@ -504,7 +515,15 @@ def register(results_file: str, from_prepare: str,
             "manifest_file": p["manifest_file"],
             "by_entity_type": dict(Counter(e["entity_type"] for e in es).most_common()),
             "by_category": dict(Counter(e["category"] for e in es if e["category"]).most_common()),
-            "attente_reasons": dict(Counter(r for e in es for r in e["reasons"]).most_common()),
+            # Motifs d'attente : restreints aux entrées réellement en attente
+            # (la confiance basse, désormais informative, peut décorer un auto).
+            "attente_reasons": dict(Counter(
+                r for e in es if e["status"] == "attente" for r in e["reasons"]
+            ).most_common()),
+            # Combien d'auto proviennent de l'assouplissement (confiance basse
+            # mais fiche complète) — mesure l'effet du changement de porte.
+            "auto_low_confidence": sum(
+                1 for e in es if e["status"] == "auto" and e["confidence"] != "high"),
             "sample_auto": [{"source": e["source"], "dest": e["dest"]}
                             for e in es if e["status"] == "auto"][:8],
         }
