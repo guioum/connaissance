@@ -25,7 +25,8 @@ def test_well_named_document_high_confidence():
     assert r["entity"] == "Banque Nationale"
     assert r["entity_type"] == "organismes"
     assert r["category"] in ("paiement", "taxes")
-    assert r["sujet"] == "maison"
+    # Granulaire : dossier le plus profond "Municipalité" (pas le thème "maison").
+    assert r["sujet"] == "municipalité"
     assert "scolaires" in r["title"].lower()
     assert r["confidence"] == "high"
 
@@ -96,5 +97,6 @@ def test_category_from_content_keywords():
 
 def test_sujet_from_origin_folder():
     assert C.guess_sujet("Travaux et rénovations") == "maison"
-    assert C.guess_sujet("2024 Impôts") == "impôts"
+    assert C.guess_sujet("2024 Impôts") == "impôts-2024"   # daté → impôts-AAAA
+    assert C.guess_sujet("Impôts") == "impôts"             # sans année
     assert C.guess_sujet(None) is None

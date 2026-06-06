@@ -175,8 +175,8 @@ Sur le corpus déjà signalé (donc sans secrets ni conteneurs) :
 > **Dédup consciente du contexte.** Un même fichier classé dans plusieurs
 > dossiers encode souvent plusieurs **appartenances** (ex. un avis de cotisation
 > sous `impôts 2025` ET sous `preuves marge BNC`). Avant de corbeiller, `apply`
-> capture le **sujet de chaque copie** (`sujet_from_path`, heuristique tunable :
-> règle curatée puis slug du dossier non générique) et les attache **tous** au
+> capture le **sujet de chaque copie** (`sujet_from_path`, heuristique tunable —
+> voir ci-dessous) et les attache **tous** au
 > fichier gardé dans `doc_sujets` (multi-sujet). La vue `- Sujets` éventaille
 > ensuite le fichier sous chacun : le multi-classement physique devient virtuel,
 > **aucune association n'est perdue**. Le `ledger` conserve de toute façon le
@@ -211,6 +211,24 @@ slugs (`ville-de-montreal` vs `ville-montreal`, `monteillet-conseil` vs
   fiche à la **corbeille** et supprime ses dossiers vidés. Dry-run par défaut,
   réversible. `entities candidates` scanne aussi les dossiers `~/Documents` pour
   repérer les entités sans fiche (acronymes `bdc`/`bnc`…).
+
+### Dérivation des sujets (`sujet_from_path`)
+
+Pour le dossier-projet le plus profond exploitable d'un chemin (en **sautant**
+les conteneurs génériques, les dossiers « année seule » et les dossiers de
+**personne** — fournis par l'appelant, car ce sont des entités) :
+
+1. **impôts daté** → `impôts-AAAA` (dossier daté préservé, personne retirée) ;
+   **thème diffus** (`maison`, `santé`, `véhicule`, `voyage`, `formation`,
+   `assurance`, `taxes`, `enfants`) → le thème propre ;
+2. sinon → **slug granulaire tel quel** : finance / factures / paie restent
+   **éclatés** par sous-dossier (`bnc-paiements-mastercard`, `factures-aws`,
+   `payes-québecor-2015-2016`) et les dossiers-projets datés sont préservés
+   (`bnc-contrat-marge-de-crédit-2024`).
+
+⚠️ Le texte des dossiers est **normalisé NFC** avant tout match de règle —
+macOS écrit en NFD, sans quoi les regex accentuées (`impôt`, `santé`…) ratent.
+Heuristique tunable (`core/classify._SUJET_RULES`, `sujet_from_path`).
 
 ## Le socle réversible
 

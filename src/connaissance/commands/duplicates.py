@@ -163,6 +163,12 @@ def apply(manifest_file: str, dry_run: bool = True,
     # Capture consciente du contexte : sujet(s) de CHAQUE copie d'un cluster →
     # attachés au fichier gardé (multi-sujet). Le contexte des copies supprimées
     # survit comme sujets virtuels du gardé. {keeper_rel: set(sujets)}.
+    # Personnes connues (→ entités, jamais sujets) pour nettoyer la capture.
+    persons: set = set()
+    for ent in db.distinct_entities():
+        if ent.get("entity_type") == "personnes" and ent.get("entity_slug"):
+            persons.add(ent["entity_slug"])
+            persons.add(ent["entity_slug"].split("-")[0])
     captured: dict[str, set] = {}
     for e in entries:
         keeper = e.get("keeper")
@@ -170,7 +176,7 @@ def apply(manifest_file: str, dry_run: bool = True,
             continue
         bag = captured.setdefault(keeper, set())
         for rel in (keeper, e["trash"]):
-            s = _heur.sujet_from_path(rel)
+            s = _heur.sujet_from_path(rel, known_persons=persons)
             if s:
                 bag.add(s)
     sujets_captured = 0

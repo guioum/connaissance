@@ -44,16 +44,24 @@ _ORG_MARKERS = re.compile(
     r"inc\b|lt[eé]e\b|ltd\b|corp\b|s\.?e\.?n\.?c|google|amazon|aws|microsoft|"
     r"apple|stripe|paypal)\b", re.I)
 
-# Dossiers d'origine → sujet (normalisé). Sinon : forme normalisée du dossier.
+# Thèmes « diffus » curatés → un sujet propre. Le texte est NFC-normalisé AVANT
+# le match (macOS écrit les noms en NFD : sans ça les regex accentuées ratent).
+# finance / factures / paie / impôts NE sont PAS ici : ils restent **granulaires**
+# (le sous-dossier précis fait le sujet, ex. `bnc-paiements-mastercard`,
+# `factures-aws`, `payes-québecor-2015-2016`) ; impôts est normalisé en
+# `impôts-AAAA` (dossier daté préservé, personne retirée).
 _SUJET_RULES = [
-    (re.compile(r"\b(maison|logement|immeuble|hypoth|propri[eé]t|travaux|r[eé]novation|municipalit)", re.I), "maison"),
-    (re.compile(r"\b(imp[oô]t|fiscal|d[eé]claration)", re.I), "impôts"),
-    (re.compile(r"\b(paie|salaire|emploi|rh|ressources humaines)", re.I), "emploi"),
-    (re.compile(r"\b(sant[eé]|m[eé]dical|clinique|h[oô]pital|assurance)", re.I), "santé"),
-    (re.compile(r"\b(voyage|vacances|billet)", re.I), "voyage"),
-    (re.compile(r"\b(auto|voiture|v[eé]hicule|saaq)", re.I), "véhicule"),
-    (re.compile(r"\b(formation|cours|certification|dipl[oô]me)", re.I), "formation"),
+    (re.compile(r"maison|logement|immeuble|hypoth|propri[eé]t|r[eé]nov|travaux|cuisine|d[eé]coration|d[eé]m[eé]nag", re.I), "maison"),
+    (re.compile(r"sant[eé]|m[eé]dical|clinique|h[oô]pital|physio|dentaire|pharmacie", re.I), "santé"),
+    (re.compile(r"\bauto\b|voiture|v[eé]hicule|saaq|immatricul|permis de conduire|vespa", re.I), "véhicule"),
+    (re.compile(r"voyage|vacances|billet|h[oô]tel|s[eé]jour|cancun|mexique", re.I), "voyage"),
+    (re.compile(r"formation|\bcours\b|certification|dipl[oô]me|universit|uqam", re.I), "formation"),
+    (re.compile(r"assurance", re.I), "assurance"),
+    (re.compile(r"taxes? (?:municipal|scolaire)|compte de taxes", re.I), "taxes"),
+    (re.compile(r"activit[eé]s enfants|garderie", re.I), "enfants"),
 ]
+_IMPOT_RE = re.compile(r"imp[oô]t|fiscal|avis de cotisation|d[eé]claration", re.I)
+_YEAR_RE = re.compile(r"(?:19|20)\d\d")
 
 _DATE_RE = re.compile(r"(19[89]\d|20\d{2})[-/.]?(0[1-9]|1[0-2])[-/.]?(0[1-9]|[12]\d|3[01])")
 _PERSON_RE = re.compile(r"^[A-ZÀ-Ö][a-zà-ÿ'’-]+(?:\s+[A-ZÀ-Ö][a-zà-ÿ'’-]+){1,2}$")
@@ -129,20 +137,28 @@ def guess_category(signals: dict, segments: list[str]) -> str | None:
 
 
 def guess_sujet(origin_folder: str | None) -> str | None:
+    """Thème curaté d'un dossier, ou None. Normalise **NFC** avant le match
+    (macOS écrit en NFD ; sinon les regex accentuées ratent). Les impôts sont
+    normalisés en ``impôts-AAAA`` (dossier daté préservé) ou ``impôts``."""
     if not origin_folder:
         return None
+    s = unicodedata.normalize("NFC", origin_folder)
+    if _IMPOT_RE.search(s):
+        m = _YEAR_RE.search(s)
+        return f"impôts-{m.group(0)}" if m else "impôts"
     for rx, sujet in _SUJET_RULES:
-        if rx.search(origin_folder):
+        if rx.search(s):
             return sujet
     return None
 
 
-# Dossiers « contenants » sans valeur de sujet (slugs) — sautés par le repli.
+# Dossiers « contenants » sans valeur de sujet (slugs) — sautés.
 _GENERIC_FOLDERS = {
-    "classer", "a-classer", "inbox", "preuves", "perso", "personnel",
-    "personel", "famille", "divers", "documents", "document", "scans", "scan",
-    "pdf", "autres", "autre", "general", "fichiers", "downloads",
-    "telechargements", "temp", "tmp",
+    "classer", "a-classer", "à-classer", "inbox", "preuves", "preuve", "perso",
+    "personnel", "personel", "famille", "divers", "documents", "document",
+    "scans", "scan", "pdf", "autres", "autre", "general", "fichiers",
+    "downloads", "telechargements", "temp", "tmp", "package", "comptable",
+    "archives", "backup", "sauvegarde", "demande-faite", "demandes",
 }
 
 
@@ -152,23 +168,36 @@ def _slugify(text: str) -> str:
     return slugify(text)
 
 
-def sujet_from_path(rel: str) -> str | None:
-    """Sujet déduit du CHEMIN d'un fichier — pour la dédup consciente du contexte.
+def _is_person_folder(slug: str, known_persons) -> bool:
+    """Le slug d'un dossier est-il une personne (→ entité, jamais un sujet) ?"""
+    if not known_persons:
+        return False
+    if slug in known_persons:
+        return True
+    toks = slug.split("-")
+    return len(toks) == 2 and toks[0] in known_persons and toks[1] in known_persons
 
-    Règle curatée (``guess_sujet``) sur n'importe quel dossier ancêtre, le plus
-    spécifique d'abord (donne des sujets propres : ``impots``, ``maison``…) ;
-    sinon **slug du dossier non générique le plus profond** (préserve un contexte
-    spécifique : ``bnc-contrat-marge-de-credit-2024``). Heuristique tunable.
+
+def sujet_from_path(rel: str, known_persons=None) -> str | None:
+    """Sujet déduit du CHEMIN d'un fichier (dédup consciente, hint).
+
+    Pour le dossier-projet le plus profond exploitable (en sautant conteneurs
+    génériques, dossiers « année seule » et dossiers de personne) :
+    1. **impôts daté** → ``impôts-AAAA`` ; **thème diffus** (maison/santé/…) →
+       le thème propre (``guess_sujet``) ;
+    2. sinon → **slug granulaire tel quel** (finance/factures/paie éclatés, et
+       dossiers-projets datés préservés : ``bnc-contrat-marge-de-crédit-2024``).
+
+    ``known_persons`` : ensemble de slugs/prénoms à traiter comme entités (à
+    fournir par l'appelant — core reste pur). Heuristique tunable.
     """
-    folders = [f for f in re.split(r"[/\\]", str(rel)) if f][:-1]
-    for folder in reversed(folders):
-        s = guess_sujet(folder)
-        if s:
-            return s
-    for folder in reversed(folders):
+    for folder in reversed([f for f in re.split(r"[/\\]", str(rel)) if f][:-1]):
         sl = _slugify(folder)
-        if sl and sl not in _GENERIC_FOLDERS and not sl.isdigit() and len(sl) >= 2:
-            return sl
+        if not sl or len(sl) < 2 or sl in _GENERIC_FOLDERS or "vrac" in sl:
+            continue
+        if _YEAR_RE.fullmatch(sl) or _is_person_folder(sl, known_persons):
+            continue
+        return guess_sujet(folder) or sl
     return None
 
 
@@ -249,7 +278,10 @@ def classify(signals: dict, known_entities: list[str] | None = None) -> dict:
     date, date_src = pick_date(signals)
     entity, entity_type, known = guess_entity(signals, segments, known_entities)
     category = guess_category(signals, segments)
-    sujet = guess_sujet(signals.get("origin_folder"))
+    # Sujet primaire depuis le chemin complet (granulaire, impôts-AAAA, thèmes) ;
+    # repli sur le dossier d'origine seul.
+    sujet = (sujet_from_path(signals.get("rel") or "")
+             or guess_sujet(signals.get("origin_folder")))
     title = guess_title(stem, segments, entity)
 
     # Confiance : haute si on a une date + une entité (connue, ou nom bien
