@@ -268,6 +268,28 @@ class DuplicatesPlan(TypedDict, total=False):
     entries: list[dict]          # [{trash, keeper, kind, hash}]
 
 
+class EntitiesCandidates(TypedDict):
+    total_entities: int
+    candidates: list[dict]       # [{type, a, b, score, reasons}]
+    count: int
+
+
+class EntitiesMerge(TypedDict, total=False):
+    dry_run: bool
+    from_: str
+    into: str
+    docs_to_reassign: int
+    resumes_to_move: int
+    aliases_to_add: list[str]
+    from_fiche_exists: bool
+    reassigned: int
+    resumes_moved: int
+    aliases_added: list[str]
+    from_fiche_trashed: bool
+    ledger_run: str
+    error: str
+
+
 class MediaPlan(TypedDict, total=False):
     total: int
     by_year: dict

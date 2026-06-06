@@ -124,6 +124,13 @@ grande réorg tant que ce n'est pas validé.
   défaut, `--apply` pour exécuter). `optimize apply` expose `ledger_run` +
   `trashed_recoverable` ; l'espace n'est « libéré » qu'à la purge. Le pruning de
   dossiers vides reste un `rmdir` direct (aucune donnée).
+- [x] **Dédup du registre d'entités** (v2.36.0) : `entities candidates` repère
+  les quasi-doublons d'entités (containment, Jaccard, edit distance, acronyme ;
+  variantes annuelles `impots-2023/2024` exclues) sur l'union fiches Synthèse +
+  `doc_classification`. `entities merge --from --into` (plan→apply) repointe la
+  DB (atomique), fusionne les aliases dans la fiche gardée, déplace les résumés
+  (ledger) et corbeille la fiche perdante. Validé sur le vrai registre (111
+  entités → 16 paires : ville-de/ville-montreal, monteillet-conseil(-inc)…).
 
 ## Améliorations
 
@@ -188,7 +195,7 @@ grande réorg tant que ce n'est pas validé.
 
 ## Documentation (fait)
 
-- [x] **Décompte d'outils reconcilié** : README + `CLAUDE.md` à **70 outils /
+- [x] **Décompte d'outils reconcilié** : README + `CLAUDE.md` à **72 outils /
   15 groupes** (source de vérité : les `registerTool` de `index.js`). Le palier
   intermédiaire « 48 / 13 » a été dépassé par les phases triage/secrets/signals
   (+3), classify (+4), ledger (+4), manifest (+1) et les `backlog_count`.

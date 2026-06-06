@@ -366,6 +366,16 @@ def _cmd_ledger(args) -> Any:
     raise SystemExit(f"verbe inconnu : ledger {args.verb}")
 
 
+def _cmd_entities(args) -> Any:
+    from connaissance.commands import entities
+    if args.verb == "candidates":
+        return entities.candidates()
+    if args.verb == "merge":
+        return entities.merge(args.from_entity, args.into,
+                              dry_run=args.dry_run)
+    raise SystemExit(f"verbe inconnu : entities {args.verb}")
+
+
 def _cmd_media(args) -> Any:
     from connaissance.commands import media
     if args.verb == "plan":
@@ -416,6 +426,7 @@ _GROUPS: dict[str, Callable] = {
     "sujet": _cmd_sujet,
     "duplicates": _cmd_duplicates,
     "media": _cmd_media,
+    "entities": _cmd_entities,
 }
 
 
@@ -881,6 +892,17 @@ def build_parser() -> argparse.ArgumentParser:
     p_med_apply = p_med_verbs.add_parser("apply")
     p_med_apply.add_argument("manifest")
     add_apply_flag(p_med_apply)   # déplacement ledger → dry-run par défaut
+
+    # entities (dédup du registre d'entités)
+    p_ent = sub.add_parser("entities")
+    p_ent_verbs = p_ent.add_subparsers(dest="verb", required=True)
+    p_ent_verbs.add_parser("candidates")
+    p_ent_merge = p_ent_verbs.add_parser("merge")
+    p_ent_merge.add_argument("--from", dest="from_entity", required=True,
+                             help="Entité à fusionner (perdant), format type/slug.")
+    p_ent_merge.add_argument("--into", dest="into", required=True,
+                             help="Entité gardée (canonique), format type/slug.")
+    add_apply_flag(p_ent_merge)   # mutation (DB + ledger) → dry-run par défaut
 
     return parser
 

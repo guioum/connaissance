@@ -1,6 +1,6 @@
 // MCP server wrapper for the `connaissance` CLI.
 //
-// Exposes 70 tools (mcp__connaissance__*) that shell-out to the
+// Exposes 72 tools (mcp__connaissance__*) that shell-out to the
 // `connaissance` Python CLI installed via `uv tool install` or `pip`.
 // Each tool maps 1:1 to a CLI subcommand `connaissance <group> <verb>`.
 //
@@ -1539,6 +1539,35 @@ server.registerTool(
     const a = [args.manifest];
     if (args.apply) a.push("--apply");
     return runAndFormat("media", "apply", a);
+  }
+);
+
+// ── Entities (dédup du registre d'entités) ─────────────────────
+
+server.registerTool(
+  "connaissance_entities_candidates",
+  {
+    description: "Detect near-duplicate ENTITIES in the registry (e.g. ville-de-montreal vs ville-montreal, monteillet-conseil vs monteillet-conseil-inc, banque-nationale vs bnc). Lexical signals only (containment, token Jaccard, edit distance, acronym) across Synthèse fiches + entities in use in doc_classification. Read-only — a human picks the merge.",
+    inputSchema: {},
+    annotations: { readOnlyHint: true },
+  },
+  async () => runAndFormat("entities", "candidates", [])
+);
+
+server.registerTool(
+  "connaissance_entities_merge",
+  {
+    description: "Merge one entity into another (from → into, format type/slug). Repoints doc_classification + files (atomic), appends the loser's name/aliases to the kept fiche's aliases, moves its summaries via the ledger and sends its fiche to the trash. Reversible with ledger revert. Dry-run by default ; pass apply=true to execute.",
+    inputSchema: {
+      from: z.string().describe("Entity to merge away (loser), format type/slug."),
+      into: z.string().describe("Entity to keep (canonical), format type/slug."),
+      apply: z.boolean().default(false).describe("Actually merge (default: dry-run)."),
+    },
+  },
+  async (args) => {
+    const a = ["--from", args.from, "--into", args.into];
+    if (args.apply) a.push("--apply");
+    return runAndFormat("entities", "merge", a);
   }
 );
 

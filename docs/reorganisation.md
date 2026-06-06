@@ -176,6 +176,23 @@ Le code et les exports restent en unités (gérés par le triage) ; les **média
 - **`media apply`** (`--apply` pour agir) : déplace via le ledger, dry-run par
   défaut, collisions de noms gérées.
 
+### Hygiène du registre — `entities candidates` / `entities merge`
+
+Le classement par entité se fragmente quand le même organisme apparaît sous deux
+slugs (`ville-de-montreal` vs `ville-montreal`, `monteillet-conseil` vs
+`monteillet-conseil-inc`, `banque-nationale` vs `bnc`).
+
+- **`entities candidates`** (lecture seule) : repère les paires suspectes par
+  signaux lexicaux — *containment*, Jaccard de tokens, *edit distance*,
+  acronyme — sur l'union des fiches `Synthèse/` et des entités en usage dans
+  `doc_classification`. Les **variantes annuelles** (`impots-2023` vs
+  `impots-2024`) sont exclues : ce sont des entités distinctes par conception. Un
+  humain tranche — jamais d'auto-fusion.
+- **`entities merge --from <type/slug> --into <type/slug>`** (`--apply`) :
+  repointe `doc_classification` + `files` (atomique), ajoute le nom/aliases du
+  perdant aux `aliases` de la fiche gardée, déplace ses résumés **via le ledger**
+  et envoie sa fiche à la **corbeille**. Dry-run par défaut, réversible.
+
 ## Le socle réversible
 
 Toutes les phases mutatrices reposent sur deux mécanismes transverses (voir

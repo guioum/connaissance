@@ -815,6 +815,37 @@ class TrackingDB:
                 "by_category": _by("category"), "by_entity_type": _by("entity_type"),
                 "by_entity": _by("entity")}
 
+    def distinct_entities(self) -> list[dict]:
+        """Entités EN USAGE dans les fiches de classement : ``[{entity,
+        entity_type, entity_slug, count}]``, pour la détection de doublons
+        d'entités (``entities candidates``)."""
+        rows = self._conn.execute(
+            """SELECT entity, entity_type, entity_slug, COUNT(*) AS count
+               FROM doc_classification
+               WHERE entity_slug IS NOT NULL AND TRIM(entity_slug) != ''
+               GROUP BY entity_type, entity_slug
+               ORDER BY count DESC""").fetchall()
+        return [dict(r) for r in rows]
+
+    def reassign_entity(self, from_type, from_slug, to_type, to_slug,
+                        to_name, *, commit: bool = True) -> int:
+        """Repointer les fiches de classement d'une entité vers une autre
+        (fusion). Retourne le nombre de lignes mises à jour."""
+        cur = self._conn.execute(
+            """UPDATE doc_classification
+               SET entity = ?, entity_type = ?, entity_slug = ?
+               WHERE entity_type = ? AND entity_slug = ?""",
+            (to_name, to_type, to_slug, from_type, from_slug))
+        n = cur.rowcount
+        # Table `files` (corpus) : même repointage si l'entité y figure.
+        self._conn.execute(
+            """UPDATE files SET entity_type = ?, entity_slug = ?
+               WHERE entity_type = ? AND entity_slug = ?""",
+            (to_type, to_slug, from_type, from_slug))
+        if commit:
+            self._conn.commit()
+        return n
+
     def classifications_with_sujet(self) -> list[dict]:
         """Fiches ayant un ``sujet`` non vide, pour la vue virtuelle ``- Sujets``.
 
