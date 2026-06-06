@@ -1,6 +1,6 @@
 // MCP server wrapper for the `connaissance` CLI.
 //
-// Exposes 73 tools (mcp__connaissance__*) that shell-out to the
+// Exposes 74 tools (mcp__connaissance__*) that shell-out to the
 // `connaissance` Python CLI installed via `uv tool install` or `pip`.
 // Each tool maps 1:1 to a CLI subcommand `connaissance <group> <verb>`.
 //
@@ -1414,6 +1414,25 @@ server.registerTool(
     // dry_run=true est le défaut argparse du CLI. On pousse --apply pour le flipper.
     if (args.dry_run === false) a.push("--apply");
     return runAndFormat("ledger", "purge", a);
+  }
+);
+
+server.registerTool(
+  "connaissance_ledger_snapshot",
+  {
+    description: "Build the ~/Documents/- Historique/ view: dated per-run snapshots reconstructing the OLD file structure/names BEFORE moves/renames, as symlinks pointing to each file's CURRENT location (move chain followed). Read-only, regenerable, cheap (symlinks from the ledger). Purged files → .disparu marker. Dry-run by default ; apply=true (re)builds, clear=true removes the view.",
+    inputSchema: {
+      run_id: z.string().optional().describe("Limit to a single run_id (default: all runs)."),
+      apply: z.boolean().default(false).describe("(Re)build the - Historique view."),
+      clear: z.boolean().default(false).describe("Remove the - Historique view."),
+    },
+  },
+  async (args) => {
+    const a = [];
+    if (args.run_id) a.push("--run", args.run_id);
+    if (args.clear) { a.push("--clear"); return runAndFormat("ledger", "snapshot", a); }
+    if (args.apply) a.push("--apply");
+    return runAndFormat("ledger", "snapshot", a);
   }
 );
 

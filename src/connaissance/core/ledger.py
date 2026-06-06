@@ -132,6 +132,44 @@ def purge_run(db, *, run_id: str | None = None,
     return result
 
 
+def snapshot_entries(db, *, run_id: str | None = None) -> list[dict]:
+    """Reconstruire l'historique : pour chaque déplacement journalisé, l'ancien
+    chemin et l'emplacement **actuel** du fichier (en suivant la chaîne des
+    déplacements old→new jusqu'au terminal).
+
+    Retourne ``[{run_id, timestamp, op, old_path, terminal, exists}]`` (filtrable
+    par ``run_id``). Sert à la vue ``- Historique`` (snapshots en symlinks).
+    """
+    ops = db.ledger_all_ops(status="applied")
+    forward: dict[str, str] = {}
+    for o in ops:
+        if o.get("old_path") and o.get("new_path"):
+            forward[o["old_path"]] = o["new_path"]
+
+    def resolve(p: str) -> str:
+        seen = {p}
+        while p in forward and forward[p] not in seen:
+            p = forward[p]
+            seen.add(p)
+        return p
+
+    out: list[dict] = []
+    for o in ops:
+        if run_id and o["run_id"] != run_id:
+            continue
+        old, new = o.get("old_path"), o.get("new_path")
+        if not old or not new:
+            continue
+        terminal = resolve(new)
+        out.append({
+            "run_id": o["run_id"], "timestamp": o.get("timestamp"),
+            "op": o.get("op"), "reason": o.get("reason"),
+            "old_path": old, "terminal": terminal,
+            "exists": Path(terminal).exists(),
+        })
+    return out
+
+
 def revert_run(db, run_id: str, *, dry_run: bool = False) -> dict:
     """Annuler un run : remettre chaque fichier à son ancien emplacement.
 

@@ -363,6 +363,9 @@ def _cmd_ledger(args) -> Any:
         return ledger.purge(run_id=args.run_id,
                             older_than_days=args.older_than_days,
                             dry_run=args.dry_run)
+    if args.verb == "snapshot":
+        return ledger.snapshot(run_id=args.run_id,
+                               apply=not args.dry_run, clear=args.clear)
     raise SystemExit(f"verbe inconnu : ledger {args.verb}")
 
 
@@ -850,6 +853,14 @@ def build_parser() -> argparse.ArgumentParser:
                             type=int, default=None,
                             help="Ne purger que les entrées plus vieilles que N jours.")
     add_apply_flag(p_lg_purge)   # destructif → dry-run par défaut, --apply pour exécuter
+    p_lg_snap = p_lg_verbs.add_parser("snapshot")
+    p_lg_snap.add_argument("--run", dest="run_id", type=str, default=None,
+                           help="Limiter à un run_id (défaut : tous).")
+    p_lg_snap.add_argument("--clear", action="store_true",
+                           help="Supprimer la vue - Historique/.")
+    p_lg_snap.add_argument("--apply", dest="dry_run", action="store_false",
+                           default=True,
+                           help="(Re)construire la vue (défaut : dry-run / aperçu).")
 
     # sujet (vue virtuelle « - Sujets »)
     p_suj = sub.add_parser("sujet")

@@ -220,6 +220,18 @@ class LedgerPurge(TypedDict):
     skipped: list[dict]     # [{path, reason}]
 
 
+class LedgerSnapshot(TypedDict, total=False):
+    runs: int               # nb de runs représentés
+    entries: int            # anciens chemins reconstruits
+    linked: int             # symlinks créés (apply)
+    would_link: int         # symlinks prévus (dry-run)
+    gone: int               # fichiers disparus (corbeille purgée) → marqueur
+    applied: bool
+    view_dir: str
+    cleared: bool
+    existed: bool
+
+
 # --- sujets (vue virtuelle) ---
 
 class SujetView(TypedDict, total=False):

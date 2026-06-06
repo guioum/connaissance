@@ -1011,6 +1011,17 @@ class TrackingDB:
         q += " ORDER BY id"
         return [dict(r) for r in self._conn.execute(q, params).fetchall()]
 
+    def ledger_all_ops(self, status: str | None = None) -> list[dict]:
+        """Toutes les opérations du ledger (optionnellement par statut), ordre
+        chrono — pour reconstruire l'historique (snapshots)."""
+        q = "SELECT * FROM file_ledger"
+        params: list = []
+        if status:
+            q += " WHERE status = ?"
+            params.append(status)
+        q += " ORDER BY id"
+        return [dict(r) for r in self._conn.execute(q, params).fetchall()]
+
     def ledger_mark_reverted(self, row_id: int) -> None:
         self._conn.execute(
             "UPDATE file_ledger SET status = 'reverted' WHERE id = ?", (int(row_id),))
