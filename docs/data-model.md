@@ -119,6 +119,7 @@ les bases existantes.
 | `doc_simhash` | `rel_path` NFC (relatif à `~/Documents`) | cache des SimHash texte des **fichiers bruts** (Phase D — doublons du pré-classement). Table séparée de `text_simhash` : un référentiel par table. |
 | `doc_signals` | `rel_path` (relatif à `~/Documents`) | **fiche d'identité, étage signaux** (Phase B) : paquet JSON nom/chemin/dates/métadonnées/texte born-digital/résumé extractif, caché par `(rel_path, size, mtime)`. |
 | `doc_classification` | `rel_path` (relatif à `~/Documents`) | **fiche d'identité, étage classement** (Phase C) : entité/catégorie/date/titre/sujet + `confidence` + `status` (`auto`/`attente`) + `model`. État mutable raffiné à chaque passe ; `hash` sert d'ancre quand le fichier bouge. |
+| `doc_sujets` | `(rel_path, sujet)` (relatif à `~/Documents`) | **appartenances multi-sujet** : un doc physique → N sujets, pour que la vue `- Sujets` l'éventaille. Alimentée par `classify` (`source='classify'`, sujet primaire) et la **dédup consciente du contexte** (`source='dedup'`, contextes des copies supprimées). |
 | `file_ledger` | `run_id` + `old_path`/`new_path` | journal réversible des déplacements (`safe_move`) : `sha256` + `(size, mtime)` permettent un `revert` vérifié par hash. 1 `run_id` = 1 lot révertible. |
 | `llm_usage` | — | tokens et coûts par appel (input/output, cache, `cost_usd`). |
 

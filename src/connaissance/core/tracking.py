@@ -154,6 +154,22 @@ CREATE TABLE IF NOT EXISTS doc_classification (
 -- après les ALTER TABLE : sur une base ancienne ces colonnes peuvent manquer
 -- au moment du SCHEMA, ce qui ferait échouer la création d'index.
 
+-- Appartenances MULTI-SUJET d'un document (un doc physique → N sujets).
+-- Permet à la vue virtuelle « - Sujets » de montrer un fichier sous tous ses
+-- contextes. Alimentée par classify (source 'classify', le sujet primaire) et
+-- par la dédup consciente du contexte (source 'dedup', les dossiers des copies
+-- supprimées) — voir docs/reorganisation.md. rel_path relatif à ~/Documents.
+CREATE TABLE IF NOT EXISTS doc_sujets (
+    rel_path TEXT NOT NULL,
+    sujet TEXT NOT NULL,
+    source TEXT,
+    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%S', 'now', 'localtime')),
+    UNIQUE(rel_path, sujet)
+);
+
+CREATE INDEX IF NOT EXISTS idx_doc_sujets_sujet ON doc_sujets(sujet);
+CREATE INDEX IF NOT EXISTS idx_doc_sujets_rel ON doc_sujets(rel_path);
+
 -- Ledger journalisé des opérations de fichiers, réversible. Chaque ligne
 -- 'applied' enregistre l'ancien et le nouveau chemin + le SHA256, ce qui permet
 -- un rollback vérifié (on ne restaure que si le fichier est intact). Les
@@ -859,14 +875,51 @@ class TrackingDB:
                ORDER BY sujet, rel_path""").fetchall()
         return [dict(r) for r in rows]
 
+    # --- Appartenances multi-sujet (doc_sujets) ---
+
+    def add_doc_sujets(self, rel_path, sujets, source: str,
+                       *, commit: bool = True) -> int:
+        """Ajouter des appartenances (rel_path, sujet) — un doc → N sujets.
+
+        Idempotent (``INSERT OR IGNORE`` sur ``UNIQUE(rel_path, sujet)``).
+        Retourne le nombre de lignes effectivement ajoutées."""
+        rkey = _nfc(rel_path)
+        added = 0
+        for s in sujets:
+            s = (s or "").strip()
+            if not s:
+                continue
+            cur = self._conn.execute(
+                "INSERT OR IGNORE INTO doc_sujets (rel_path, sujet, source) "
+                "VALUES (?, ?, ?)", (rkey, s, source))
+            added += cur.rowcount
+        if commit:
+            self._conn.commit()
+        return added
+
+    def sujet_memberships(self) -> list[dict]:
+        """Toutes les appartenances ``(rel_path, sujet)`` pour la vue ``- Sujets``.
+
+        Union de ``doc_sujets`` (multi-sujet : classify + dedup) et du sujet
+        primaire de ``doc_classification`` (compat des fiches d'avant doc_sujets).
+        """
+        rows = self._conn.execute(
+            """SELECT rel_path, sujet FROM doc_sujets
+               WHERE TRIM(sujet) != ''
+               UNION
+               SELECT rel_path, sujet FROM doc_classification
+               WHERE sujet IS NOT NULL AND TRIM(sujet) != ''
+               ORDER BY sujet, rel_path""").fetchall()
+        return [dict(r) for r in rows]
+
     def relink_document(self, old_rel, new_rel, *, commit: bool = True) -> None:
-        """Suivre un fichier déplacé : repointer sa fiche (signals + classement)
-        de ``old_rel`` vers ``new_rel`` — la fiche survit au move.
+        """Suivre un fichier déplacé : repointer sa fiche (signals + classement
+        + sujets) de ``old_rel`` vers ``new_rel`` — la fiche survit au move.
 
         ``commit=False`` laisse l'écriture dans la transaction courante (pour
         grouper avec ``ledger_record`` via ``transaction()``)."""
         old_k, new_k = _nfc(old_rel), _nfc(new_rel)
-        for tbl in ("doc_signals", "doc_classification"):
+        for tbl in ("doc_signals", "doc_classification", "doc_sujets"):
             self._conn.execute(f"DELETE FROM {tbl} WHERE rel_path = ?", (new_k,))
             self._conn.execute(
                 f"UPDATE {tbl} SET rel_path = ? WHERE rel_path = ?",

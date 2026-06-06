@@ -315,6 +315,7 @@ class DuplicatesApply(TypedDict, total=False):
     planned: int
     trashed: int
     would_trash: int
+    sujets_captured: int     # appartenances multi-sujet capturées des copies
     skipped: list[dict]
     errors: list[dict]
     moves: list[dict]

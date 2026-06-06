@@ -166,6 +166,16 @@ Sur le corpus déjà signalé (donc sans secrets ni conteneurs) :
 - **`duplicates apply`** (`--apply` pour agir) : envoie les doublons à la
   **corbeille ledger** (réversible). Dry-run par défaut.
 
+> **Dédup consciente du contexte.** Un même fichier classé dans plusieurs
+> dossiers encode souvent plusieurs **appartenances** (ex. un avis de cotisation
+> sous `impôts 2025` ET sous `preuves marge BNC`). Avant de corbeiller, `apply`
+> capture le **sujet de chaque copie** (`sujet_from_path`, heuristique tunable :
+> règle curatée puis slug du dossier non générique) et les attache **tous** au
+> fichier gardé dans `doc_sujets` (multi-sujet). La vue `- Sujets` éventaille
+> ensuite le fichier sous chacun : le multi-classement physique devient virtuel,
+> **aucune association n'est perdue**. Le `ledger` conserve de toute façon le
+> chemin exact de chaque copie supprimée.
+
 ### Médias — `media` (plan → apply)
 
 Le code et les exports restent en unités (gérés par le triage) ; les **médias**

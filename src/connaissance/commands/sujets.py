@@ -43,7 +43,7 @@ def list_sujets(db: TrackingDB | None = None) -> dict:
     if db is None:
         db = TrackingDB()
     try:
-        rows = db.classifications_with_sujet()
+        rows = db.sujet_memberships()
     finally:
         if owns:
             db.close()
@@ -57,16 +57,21 @@ def list_sujets(db: TrackingDB | None = None) -> dict:
 
 def view(apply: bool = False, clear: bool = False,
          db: TrackingDB | None = None) -> dict:
-    """Vue navigable par SUJET en raccourcis (symlinks), depuis
-    ``doc_classification.sujet`` (schema SujetView).
+    """Vue navigable par SUJET en raccourcis (symlinks), depuis les
+    appartenances **multi-sujet** ``doc_sujets`` + ``doc_classification.sujet``
+    (schema SujetView).
+
+    Un document appartenant à N sujets apparaît sous N dossiers (éventail) —
+    c'est ce qui remplace le multi-classement physique : le fichier vit une fois,
+    se voit partout. Sources : le sujet primaire (classify) + les contextes
+    capturés par la dédup consciente.
 
     - défaut : **dry-run** — renvoie la répartition sans rien écrire.
     - ``apply`` : (re)construit ``~/Documents/- Sujets/`` à neuf (idempotent).
     - ``clear`` : supprime la vue (réversible — aucun fichier source touché).
 
-    Le préfixe « - » exclut le dossier du scan du pipeline. Les raccourcis
-    pointent le vrai fichier à son emplacement courant ; régénérer après un
-    ``classify apply`` (ou tout déplacement) remet la vue à jour.
+    Le préfixe « - » exclut le dossier du scan. Les raccourcis pointent le vrai
+    fichier à son emplacement courant ; régénérer après tout déplacement.
     """
     require_paths(DOCUMENTS_DIR, context="sujet view")
     view_dir = DOCUMENTS_DIR / SUJETS_VIEW_NAME
@@ -81,7 +86,7 @@ def view(apply: bool = False, clear: bool = False,
     if db is None:
         db = TrackingDB()
     try:
-        rows = db.classifications_with_sujet()
+        rows = db.sujet_memberships()
     finally:
         if owns:
             db.close()
@@ -93,10 +98,8 @@ def view(apply: bool = False, clear: bool = False,
         if src is None:
             missing_source += 1
             continue
-        etype = r.get("entity_type") or "?"
-        eslug = r.get("entity_slug") or "?"
-        # Pas de séparateur de chemin dans un nom de lien (sinon symlink cassé).
-        label = f"[{etype}-{eslug}] {src.name}".replace("/", "-")
+        # Nom de lien = nom du fichier (sans séparateur de chemin).
+        label = src.name.replace("/", "-")
         by_sujet.setdefault(r["sujet"], []).append((label, src))
 
     counts = {s: len(v) for s, v in
@@ -145,7 +148,7 @@ def export(name: str, dest: str | None = None, as_zip: bool = False,
     if db is None:
         db = TrackingDB()
     try:
-        rows = [r for r in db.classifications_with_sujet()
+        rows = [r for r in db.sujet_memberships()
                 if unicodedata.normalize("NFC", r["sujet"]) ==
                    unicodedata.normalize("NFC", name)]
     finally:

@@ -137,6 +137,42 @@ def guess_sujet(origin_folder: str | None) -> str | None:
     return None
 
 
+# Dossiers « contenants » sans valeur de sujet (slugs) — sautés par le repli.
+_GENERIC_FOLDERS = {
+    "classer", "a-classer", "inbox", "preuves", "perso", "personnel",
+    "personel", "famille", "divers", "documents", "document", "scans", "scan",
+    "pdf", "autres", "autre", "general", "fichiers", "downloads",
+    "telechargements", "temp", "tmp",
+}
+
+
+def _slugify(text: str) -> str:
+    s = unicodedata.normalize("NFD", (text or "").lower())
+    s = s.encode("ascii", "ignore").decode()
+    s = re.sub(r"[^a-z0-9]+", "-", s).strip("-")
+    return re.sub(r"-{2,}", "-", s)
+
+
+def sujet_from_path(rel: str) -> str | None:
+    """Sujet déduit du CHEMIN d'un fichier — pour la dédup consciente du contexte.
+
+    Règle curatée (``guess_sujet``) sur n'importe quel dossier ancêtre, le plus
+    spécifique d'abord (donne des sujets propres : ``impots``, ``maison``…) ;
+    sinon **slug du dossier non générique le plus profond** (préserve un contexte
+    spécifique : ``bnc-contrat-marge-de-credit-2024``). Heuristique tunable.
+    """
+    folders = [f for f in re.split(r"[/\\]", str(rel)) if f][:-1]
+    for folder in reversed(folders):
+        s = guess_sujet(folder)
+        if s:
+            return s
+    for folder in reversed(folders):
+        sl = _slugify(folder)
+        if sl and sl not in _GENERIC_FOLDERS and not sl.isdigit() and len(sl) >= 2:
+            return sl
+    return None
+
+
 def _classify_entity_type(name: str) -> str:
     if _ORG_MARKERS.search(name):
         return "organismes"

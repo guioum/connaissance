@@ -475,6 +475,10 @@ def register(results_file: str, from_prepare: str,
             size = mtime = None
         db.upsert_classification(source, {
             **entry, "model": req.get("model"), "size": size, "mtime": mtime})
+        # Sujet primaire → table multi-sujet (source 'classify'), pour que la
+        # vue « - Sujets » lise une source unique (cf. dédup consciente).
+        if sujet:
+            db.add_doc_sujets(source, [sujet], "classify")
 
     if owns_db:
         db.close()

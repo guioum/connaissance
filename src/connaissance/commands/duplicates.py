@@ -17,6 +17,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from connaissance.core import classify as _heur
 from connaissance.core import dedup as _dedup
 from connaissance.core import ledger as _ledger
 from connaissance.core.manifest_io import load_entries
@@ -159,6 +160,20 @@ def apply(manifest_file: str, dry_run: bool = True,
     trashed: list[dict] = []
     skipped: list[dict] = []
     errors: list[dict] = []
+    # Capture consciente du contexte : sujet(s) de CHAQUE copie d'un cluster →
+    # attachés au fichier gardé (multi-sujet). Le contexte des copies supprimées
+    # survit comme sujets virtuels du gardé. {keeper_rel: set(sujets)}.
+    captured: dict[str, set] = {}
+    for e in entries:
+        keeper = e.get("keeper")
+        if not keeper:
+            continue
+        bag = captured.setdefault(keeper, set())
+        for rel in (keeper, e["trash"]):
+            s = _heur.sujet_from_path(rel)
+            if s:
+                bag.add(s)
+    sujets_captured = 0
     try:
         for e in entries:
             src = DOCUMENTS_DIR / e["trash"]
@@ -175,6 +190,15 @@ def apply(manifest_file: str, dry_run: bool = True,
                 trashed.append({"trash": e["trash"], "keeper": e.get("keeper")})
             except OSError as exc:
                 errors.append({"trash": e["trash"], "error": str(exc)})
+        # N'attacher les sujets que pour les keepers dont au moins une copie a
+        # bien été corbeillée (sinon rien n'a changé).
+        if not dry_run:
+            trashed_keepers = {t["keeper"] for t in trashed}
+            for keeper, bag in captured.items():
+                if keeper in trashed_keepers and bag:
+                    sujets_captured += db.add_doc_sujets(
+                        keeper, sorted(bag), "dedup", commit=False)
+            db._conn.commit()
     finally:
         if owns:
             db.close()
@@ -184,6 +208,8 @@ def apply(manifest_file: str, dry_run: bool = True,
         "planned": len(entries),
         "trashed": 0 if dry_run else len(trashed),
         "would_trash": len(trashed) if dry_run else 0,
+        "sujets_captured": (sum(len(b) for b in captured.values())
+                            if dry_run else sujets_captured),
         "skipped": skipped,
         "errors": errors,
         "moves": trashed[:50],
