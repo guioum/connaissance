@@ -457,7 +457,20 @@ class TrackingDB:
             "SELECT * FROM files WHERE path = ?", (str(path),)).fetchone()
         return dict(row) if row else None
 
-    def move_file(self, old_path, new_path, entity_type=None, entity_slug=None):
+    def rename_text_simhash(self, old_rel, new_rel, *, commit: bool = True) -> int:
+        """Repointer la clé d'une transcription dans text_simhash (rel relatif à
+        CONNAISSANCE_ROOT) après déplacement. ``UPDATE OR IGNORE`` (collision →
+        garde l'existant). Retourne le nombre de lignes touchées."""
+        cur = self._conn.execute(
+            "UPDATE OR IGNORE text_simhash SET rel_path = ? WHERE rel_path = ?",
+            (str(new_rel), str(old_rel)))
+        n = cur.rowcount
+        if commit:
+            self._conn.commit()
+        return n
+
+    def move_file(self, old_path, new_path, entity_type=None, entity_slug=None,
+                  *, commit: bool = True):
         """Mettre à jour le chemin d'un fichier (après déplacement)."""
         self._conn.execute(
             """UPDATE files SET path = ?,
@@ -466,7 +479,8 @@ class TrackingDB:
                updated_at = strftime('%Y-%m-%dT%H:%M:%S', 'now', 'localtime')
                WHERE path = ?""",
             (str(new_path), entity_type, entity_slug, str(old_path)))
-        self._conn.commit()
+        if commit:
+            self._conn.commit()
 
     def has_message_id(self, message_id):
         """Vérifier si un message-id est déjà enregistré.

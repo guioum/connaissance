@@ -3,6 +3,24 @@
 Liste vivante de ce qu'il reste à faire. Cocher quand c'est livré, retirer
 quand c'est obsolète. Priorités indicatives : 🔴 haute · 🟡 moyenne · 🟢 basse.
 
+## Intégrité référentielle des déplacements
+
+- [x] **Primitive `core.relocate.relocate_document`** (v2.42.0) : déplace le
+  graphe complet d'un document (source + transcription + résumé) et met à jour
+  toutes les références (`source` frontmatter, `doc_*`, `text_simhash`, `files`)
+  en une transaction ledger. Localise la transcription via le `source` du résumé
+  (récupère les orphelines) ; `old==new` = réalignement idempotent. Tests.
+  Appliqué : ré-accent des 79 noms de fichiers (triplet, via la table d'accents
+  apprise des titres de résumés) + réalignement des transcriptions orphelines
+  des entités renommées/fusionnées.
+- [ ] 🔴 **Retrofitter le flow sur `relocate_document`** : `classify apply`,
+  `organize`, `entities rename|merge` doivent l'utiliser (ils ne déplaçaient
+  qu'un sous-ensemble → transcriptions orphelines, `source`/`text_simhash`
+  périmés). C'est la vraie correction de fond.
+- [ ] 🟢 **Nettoyer les transcriptions orphelines sans doc vivant** (résidu des
+  fusions/dédup : ~10 sous d'anciens slugs `revenu-quebec`/`bdc`/`ville-de-montreal`)
+  — un step `audit` qui les repère/archive.
+
 ## Grand chantier : réorganisation de ~/Documents (pré-classement)
 
 Objectif : ranger un `~/Documents` très désordonné (~67k fichiers, ~48 Go, 23

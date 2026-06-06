@@ -246,6 +246,24 @@ aussi [data-model.md](data-model.md), table `file_ledger`) :
 - `ledger revert <run>` — rollback ; ne restaure un fichier que si son **hash**
   est intact (jamais d'écrasement aveugle).
 
+### Déplacer un document de façon cohérente (`core.relocate`)
+
+Un document a 3 représentations partageant `<type>/<slug>/<stem>` (source
+`~/Documents`, **transcription** et **résumé** sous `~/Connaissance`) et des
+**références** : `source` du résumé → transcription, tables
+`doc_classification`/`doc_signals`/`doc_sujets` (rel ~/Documents), `text_simhash`
+(rel transcription), `files`. `core.relocate.relocate_document(old_rel → new_rel)`
+**déplace le graphe complet** via le ledger et met à jour **toutes** ces
+références en une transaction. La transcription est localisée via le `source` du
+résumé (donc une transcription orpheline sous un ancien slug est récupérée et
+réalignée). Appelé avec `old_rel == new_rel`, il sert de **réalignement
+idempotent** (ramène une transcription égarée à sa place sans rien renommer).
+
+> ⚠️ **Dette restante** : les opérations historiques `classify apply` /
+> `organize` / `entities rename|merge` ne passent pas encore toutes par
+> `relocate_document` (elles déplaçaient un sous-ensemble) → à **retrofitter**
+> pour que tout le flow garantisse la cohérence du graphe. Voir roadmap.
+
 ### Historique — naviguer le passé (`ledger snapshot`)
 
 Même principe que `- Sujets` mais pour le **temps** : `ledger snapshot` génère
