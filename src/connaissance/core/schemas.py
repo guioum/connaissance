@@ -292,6 +292,20 @@ class EntitiesMerge(TypedDict, total=False):
     error: str
 
 
+class EntitiesRename(TypedDict, total=False):
+    dry_run: bool
+    from_: str
+    new_slug: str
+    files_to_move: int
+    docs_entity: int
+    sujet_refs: int
+    files_moved: int
+    db: dict
+    fiche_updated: bool
+    ledger_run: str
+    error: str
+
+
 class MediaPlan(TypedDict, total=False):
     total: int
     by_year: dict

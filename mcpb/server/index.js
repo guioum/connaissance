@@ -1,6 +1,6 @@
 // MCP server wrapper for the `connaissance` CLI.
 //
-// Exposes 72 tools (mcp__connaissance__*) that shell-out to the
+// Exposes 73 tools (mcp__connaissance__*) that shell-out to the
 // `connaissance` Python CLI installed via `uv tool install` or `pip`.
 // Each tool maps 1:1 to a CLI subcommand `connaissance <group> <verb>`.
 //
@@ -1568,6 +1568,23 @@ server.registerTool(
     const a = ["--from", args.from, "--into", args.into];
     if (args.apply) a.push("--apply");
     return runAndFormat("entities", "merge", a);
+  }
+);
+
+server.registerTool(
+  "connaissance_entities_rename",
+  {
+    description: "Rename an entity's slug (same type) — e.g. re-accent (revenu-quebec → revenu-québec). Moves its folders (~/Documents, Synthèse, Résumés) via the ledger, updates the DB (entity_slug + rel_path segments + sujet values) and the fiche slug field. Reversible. Dry-run by default ; pass apply=true to execute.",
+    inputSchema: {
+      from: z.string().describe("Entity to rename, format type/old-slug."),
+      to_slug: z.string().describe("New slug (same type), accents allowed."),
+      apply: z.boolean().default(false).describe("Actually rename (default: dry-run)."),
+    },
+  },
+  async (args) => {
+    const a = ["--from", args.from, "--to-slug", args.to_slug];
+    if (args.apply) a.push("--apply");
+    return runAndFormat("entities", "rename", a);
   }
 );
 

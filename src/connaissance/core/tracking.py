@@ -862,6 +862,46 @@ class TrackingDB:
             self._conn.commit()
         return n
 
+    def rename_slug(self, old_type, old_slug, new_slug,
+                    *, commit: bool = True) -> dict:
+        """Renommer un slug PARTOUT dans la base (ré-accentuation, etc.).
+
+        Met à jour : ``entity_slug`` (doc_classification + files), les **segments
+        de ``rel_path``** ``<type>/<old>/…`` → ``<type>/<new>/…`` (doc_classification,
+        doc_signals, doc_sujets), et les **valeurs de sujet** égales au slug
+        (doc_sujets.sujet, doc_classification.sujet). Retourne des compteurs.
+        ``UPDATE OR IGNORE`` partout pour absorber d'éventuelles collisions.
+        """
+        old_seg = _nfc(f"{old_type}/{old_slug}/")
+        new_seg = _nfc(f"{old_type}/{new_slug}/")
+        c: dict = {}
+        c["entity_doc_classification"] = self._conn.execute(
+            "UPDATE doc_classification SET entity_slug=? "
+            "WHERE entity_type=? AND entity_slug=?",
+            (new_slug, old_type, old_slug)).rowcount
+        c["entity_files"] = self._conn.execute(
+            "UPDATE files SET entity_slug=? WHERE entity_type=? AND entity_slug=?",
+            (new_slug, old_type, old_slug)).rowcount
+        for tbl in ("doc_classification", "doc_signals", "doc_sujets"):
+            rows = self._conn.execute(
+                f"SELECT rowid, rel_path FROM {tbl} WHERE rel_path LIKE ?",
+                (old_seg + "%",)).fetchall()
+            for r in rows:
+                nrp = new_seg + r["rel_path"][len(old_seg):]
+                self._conn.execute(
+                    f"UPDATE OR IGNORE {tbl} SET rel_path=? WHERE rowid=?",
+                    (nrp, r["rowid"]))
+            c[f"rel_{tbl}"] = len(rows)
+        c["sujet_doc_sujets"] = self._conn.execute(
+            "UPDATE OR IGNORE doc_sujets SET sujet=? WHERE sujet=?",
+            (new_slug, old_slug)).rowcount
+        c["sujet_doc_classification"] = self._conn.execute(
+            "UPDATE doc_classification SET sujet=? WHERE sujet=?",
+            (new_slug, old_slug)).rowcount
+        if commit:
+            self._conn.commit()
+        return c
+
     def classifications_with_sujet(self) -> list[dict]:
         """Fiches ayant un ``sujet`` non vide, pour la vue virtuelle ``- Sujets``.
 

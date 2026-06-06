@@ -373,6 +373,9 @@ def _cmd_entities(args) -> Any:
     if args.verb == "merge":
         return entities.merge(args.from_entity, args.into,
                               dry_run=args.dry_run)
+    if args.verb == "rename":
+        return entities.rename(args.from_entity, args.new_slug,
+                               dry_run=args.dry_run)
     raise SystemExit(f"verbe inconnu : entities {args.verb}")
 
 
@@ -903,6 +906,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_ent_merge.add_argument("--into", dest="into", required=True,
                              help="Entité gardée (canonique), format type/slug.")
     add_apply_flag(p_ent_merge)   # mutation (DB + ledger) → dry-run par défaut
+    p_ent_ren = p_ent_verbs.add_parser("rename")
+    p_ent_ren.add_argument("--from", dest="from_entity", required=True,
+                           help="Entité à renommer, format type/old-slug.")
+    p_ent_ren.add_argument("--to-slug", dest="new_slug", required=True,
+                           help="Nouveau slug (même type), accents permis.")
+    add_apply_flag(p_ent_ren)     # mutation (DB + ledger) → dry-run par défaut
 
     return parser
 

@@ -144,6 +144,89 @@ def _add_aliases(etype: str, slug: str, new_aliases: list[str]) -> list[str]:
     return added
 
 
+def _set_fiche_slug(etype: str, slug: str) -> bool:
+    """Mettre le champ ``slug:`` de la fiche à jour après un renommage."""
+    fiche = SYNTHESE / etype / slug / "fiche.md"
+    if not fiche.is_file():
+        return False
+    content = fiche.read_text(encoding="utf-8")
+    if not content.startswith("---"):
+        return False
+    try:
+        _, fm_text, body = content.split("---", 2)
+    except ValueError:
+        return False
+    fm = yaml.safe_load(fm_text) or {}
+    if not isinstance(fm, dict):
+        return False
+    fm["slug"] = slug
+    new_fm = yaml.safe_dump(fm, allow_unicode=True, sort_keys=False).strip()
+    fiche.write_text(f"---\n{new_fm}\n---{body}", encoding="utf-8")
+    return True
+
+
+def rename(from_entity: str, new_slug: str, dry_run: bool = True,
+           db: TrackingDB | None = None) -> dict:
+    """Renommer le slug d'une entité (même type) — ré-accentuation, correction.
+
+    Déplace les dossiers (``~/Documents``, ``Synthèse``, ``Résumés``) via le
+    **ledger** (réversible), met à jour la base (``rename_slug`` : entity_slug +
+    segments de rel_path + valeurs de sujet) et le champ ``slug`` de la fiche.
+    **Dry-run par défaut.**
+    """
+    require_connaissance_root()
+    etype, old_slug = _split(from_entity)
+    if old_slug == new_slug:
+        return {"error": "old == new"}
+    owns = db is None
+    if db is None:
+        db = TrackingDB()
+    run_id = _ledger.new_run_id("entities-rename")
+    bases = ([DOCUMENTS_DIR / etype, SYNTHESE / etype]
+             + [RESUMES / lbl / etype for lbl in _SOURCE_LABELS])
+    moves: list[tuple] = []
+    for base in bases:
+        old_dir = base / old_slug
+        if old_dir.is_dir():
+            for p in old_dir.rglob("*"):
+                if p.is_file():
+                    moves.append((p, base / new_slug / p.relative_to(old_dir)))
+
+    if dry_run:
+        try:
+            dc = db._conn.execute(
+                "SELECT COUNT(*) FROM doc_classification WHERE entity_type=? "
+                "AND entity_slug=?", (etype, old_slug)).fetchone()[0]
+            su = db._conn.execute(
+                "SELECT COUNT(*) FROM doc_sujets WHERE sujet=?",
+                (old_slug,)).fetchone()[0]
+        finally:
+            if owns:
+                db.close()
+        return {"dry_run": True, "from": from_entity, "new_slug": new_slug,
+                "files_to_move": len(moves), "docs_entity": dc,
+                "sujet_refs": su}
+
+    moved = 0
+    try:
+        for src, dest in moves:
+            try:
+                _ledger.safe_move(db, src, dest, "entity rename", run_id)
+                moved += 1
+            except OSError:
+                pass
+        counts = db.rename_slug(etype, old_slug, new_slug)
+        fiche_updated = _set_fiche_slug(etype, new_slug)
+        for base in bases:
+            _rmdir_if_empty(base / old_slug)
+    finally:
+        if owns:
+            db.close()
+    return {"dry_run": False, "from": from_entity, "new_slug": new_slug,
+            "files_moved": moved, "db": counts,
+            "fiche_updated": fiche_updated, "ledger_run": run_id}
+
+
 def merge(from_entity: str, into_entity: str, dry_run: bool = True,
           db: TrackingDB | None = None) -> dict:
     """Fusionner ``from_entity`` → ``into_entity`` (schema EntitiesMerge).

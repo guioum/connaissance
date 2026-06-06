@@ -140,3 +140,39 @@ def test_merge_moves_raw_documents_and_cleans_dirs(tmp_path, monkeypatch,
     assert (keeper / "2024-10 paie.pdf").exists()
     # dossier perdant vidé puis supprimé
     assert not loser.exists()
+
+
+def test_rename_reaccents_dirs_db_and_fiche(tmp_path, monkeypatch, tracking_db):
+    # Renommer revenu-quebec → revenu-québec : dossiers + DB + fiche + sujets.
+    import connaissance.commands.entities as CE2
+    syn, res, docs = _setup(tmp_path, monkeypatch)
+    _fiche(syn, "organismes", "revenu-quebec", "Revenu Quebec")
+    (docs / "organismes" / "revenu-quebec").mkdir(parents=True)
+    (docs / "organismes" / "revenu-quebec" / "2024 avis.pdf").write_bytes(b"x")
+    tracking_db.upsert_classification(
+        "organismes/revenu-quebec/2024 avis.pdf",
+        {"status": "auto", "entity": "Revenu Quebec",
+         "entity_type": "organismes", "entity_slug": "revenu-quebec"})
+
+    out = CE2.rename("organismes/revenu-quebec", "revenu-québec",
+                     dry_run=False, db=tracking_db)
+    # 2 fichiers déplacés : le doc brut + le fiche.md (Synthèse)
+    assert out["files_moved"] == 2 and "ledger_run" in out
+    # dossier renommé
+    assert (docs / "organismes" / "revenu-québec" / "2024 avis.pdf").exists()
+    assert not (docs / "organismes" / "revenu-quebec").exists()
+    # DB : entity_slug + rel_path repointés
+    row = tracking_db.get_classification("organismes/revenu-québec/2024 avis.pdf")
+    assert row and row["entity_slug"] == "revenu-québec"
+    # fiche slug mis à jour
+    assert CE2._fiche_frontmatter("organismes", "revenu-québec")["slug"] == "revenu-québec"
+
+
+def test_rename_dry_run_changes_nothing(tmp_path, monkeypatch, tracking_db):
+    import connaissance.commands.entities as CE2
+    syn, res, docs = _setup(tmp_path, monkeypatch)
+    (docs / "organismes" / "cafe-x").mkdir(parents=True)
+    (docs / "organismes" / "cafe-x" / "f.pdf").write_bytes(b"x")
+    out = CE2.rename("organismes/cafe-x", "café-x", dry_run=True, db=tracking_db)
+    assert out["dry_run"] and out["files_to_move"] == 1
+    assert (docs / "organismes" / "cafe-x").exists()        # rien bougé
