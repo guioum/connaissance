@@ -16,13 +16,75 @@ import yaml
 
 from connaissance.core import entities as _ent
 from connaissance.core import ledger as _ledger
+from connaissance.core import relocate as _reloc
 from connaissance.core.paths import (CONNAISSANCE_ROOT, DOCUMENTS_DIR,
                                       require_connaissance_root)
 from connaissance.core.tracking import TrackingDB
 
 RESUMES = CONNAISSANCE_ROOT / "Résumés"
+TRANSCRIPTIONS = CONNAISSANCE_ROOT / "Transcriptions"
 SYNTHESE = CONNAISSANCE_ROOT / "Synthèse"
 _SOURCE_LABELS = ("Documents", "Courriels", "Notes")
+
+
+def _relocate_entity_docs(db, ft, fs, it, is_, run_id) -> int:
+    """Déplacer chaque DOCUMENT (label Documents) de ``ft/fs`` → ``it/is_`` via la
+    primitive ``relocate_document`` (graphe complet + toutes les références).
+    Retourne le nombre de documents relocalisés."""
+    docs_dir = DOCUMENTS_DIR / ft / fs
+    n = 0
+    if docs_dir.is_dir():
+        for p in sorted(docs_dir.rglob("*")):
+            if p.is_file():
+                sub = p.relative_to(docs_dir)
+                _reloc.relocate_document(
+                    db, f"{ft}/{fs}/{sub}", f"{it}/{is_}/{sub}", run_id)
+                n += 1
+    return n
+
+
+def _sweep_entity_rest(db, ft, fs, it, is_, run_id, *, trash_fiche=False) -> int:
+    """Déplacer le RESTE de ``ft/fs`` → ``it/is_`` : résumés/transcriptions
+    Courriels/Notes + orphelins Documents que ``relocate`` n'a pas pris faute de
+    source. La fiche Synthèse est déplacée (rename) ou mise en corbeille
+    (``trash_fiche`` pour une fusion). Retourne le nombre de fichiers traités."""
+    moved = 0
+    # Synthèse (fiche) : déplacer (rename) ou corbeiller (merge).
+    syn_old = SYNTHESE / ft / fs
+    if syn_old.is_dir():
+        for p in sorted(syn_old.rglob("*")):
+            if p.is_file():
+                try:
+                    if trash_fiche:
+                        _ledger.safe_trash(db, p, "entities merge (fiche)", run_id)
+                    else:
+                        _ledger.safe_move(db, p, SYNTHESE / it / is_ / p.relative_to(syn_old),
+                                          "entity rename (fiche)", run_id)
+                    moved += 1
+                except OSError:
+                    pass
+    # Résumés/transcriptions de TOUS les labels (Documents orphelins + Courriels/Notes).
+    for root in (RESUMES, TRANSCRIPTIONS):
+        for lbl in _SOURCE_LABELS:
+            old_dir = root / lbl / ft / fs
+            if not old_dir.is_dir():
+                continue
+            for p in sorted(old_dir.rglob("*")):
+                if p.is_file():
+                    try:
+                        _ledger.safe_move(db, p, root / lbl / it / is_ / p.relative_to(old_dir),
+                                          "entity move (rest)", run_id)
+                        moved += 1
+                    except OSError:
+                        pass
+    return moved
+
+
+def _cleanup_entity_dirs(ft, fs) -> None:
+    for base in ([DOCUMENTS_DIR / ft, SYNTHESE / ft]
+                 + [RESUMES / lbl / ft for lbl in _SOURCE_LABELS]
+                 + [TRANSCRIPTIONS / lbl / ft for lbl in _SOURCE_LABELS]):
+        _rmdir_if_empty(base / fs)
 
 
 def _rmdir_if_empty(d) -> None:
@@ -182,21 +244,12 @@ def rename(from_entity: str, new_slug: str, dry_run: bool = True,
     if db is None:
         db = TrackingDB()
     run_id = _ledger.new_run_id("entities-rename")
-    bases = ([DOCUMENTS_DIR / etype, SYNTHESE / etype]
-             + [RESUMES / lbl / etype for lbl in _SOURCE_LABELS])
-    moves: list[tuple] = []
-    for base in bases:
-        old_dir = base / old_slug
-        if old_dir.is_dir():
-            for p in old_dir.rglob("*"):
-                if p.is_file():
-                    moves.append((p, base / new_slug / p.relative_to(old_dir)))
+    docs_dir = DOCUMENTS_DIR / etype / old_slug
+    n_docs = sum(1 for p in docs_dir.rglob("*") if p.is_file()) \
+        if docs_dir.is_dir() else 0
 
     if dry_run:
         try:
-            dc = db._conn.execute(
-                "SELECT COUNT(*) FROM doc_classification WHERE entity_type=? "
-                "AND entity_slug=?", (etype, old_slug)).fetchone()[0]
             su = db._conn.execute(
                 "SELECT COUNT(*) FROM doc_sujets WHERE sujet=?",
                 (old_slug,)).fetchone()[0]
@@ -204,27 +257,23 @@ def rename(from_entity: str, new_slug: str, dry_run: bool = True,
             if owns:
                 db.close()
         return {"dry_run": True, "from": from_entity, "new_slug": new_slug,
-                "files_to_move": len(moves), "docs_entity": dc,
-                "sujet_refs": su}
+                "documents": n_docs, "sujet_refs": su}
 
-    moved = 0
     try:
-        for src, dest in moves:
-            try:
-                _ledger.safe_move(db, src, dest, "entity rename", run_id)
-                moved += 1
-            except OSError:
-                pass
+        # 1. Documents → relocate_document (graphe complet + toutes les refs).
+        relocated = _relocate_entity_docs(db, etype, old_slug, etype, new_slug, run_id)
+        # 2. Le reste (fiche Synthèse déplacée, Courriels/Notes, orphelins).
+        moved = _sweep_entity_rest(db, etype, old_slug, etype, new_slug, run_id)
+        # 3. DB : entity_slug + valeurs de sujet (rel_path déjà fait par relocate).
         counts = db.rename_slug(etype, old_slug, new_slug)
         fiche_updated = _set_fiche_slug(etype, new_slug)
-        for base in bases:
-            _rmdir_if_empty(base / old_slug)
+        _cleanup_entity_dirs(etype, old_slug)
     finally:
         if owns:
             db.close()
     return {"dry_run": False, "from": from_entity, "new_slug": new_slug,
-            "files_moved": moved, "db": counts,
-            "fiche_updated": fiche_updated, "ledger_run": run_id}
+            "documents_relocated": relocated, "files_moved": moved,
+            "db": counts, "fiche_updated": fiche_updated, "ledger_run": run_id}
 
 
 def merge(from_entity: str, into_entity: str, dry_run: bool = True,
@@ -258,27 +307,10 @@ def merge(from_entity: str, into_entity: str, dry_run: bool = True,
     alias_payload = [from_name, f_slug] + [str(a) for a in
                                            (from_fm.get("aliases") or [])]
 
-    # Résumés du perdant à déplacer (~/Connaissance/Résumés/<label>/<type>/<slug>/).
-    resume_moves: list[tuple] = []
-    for label in _SOURCE_LABELS:
-        d = RESUMES / label / f_type / f_slug
-        if d.is_dir():
-            for p in d.rglob("*"):
-                if p.is_file():
-                    dest = RESUMES / label / i_type / i_slug / p.relative_to(d)
-                    resume_moves.append((p, dest))
-
-    # Documents BRUTS du perdant à déplacer (~/Documents/<type>/<slug>/) — le cas
-    # que la première version oubliait : l'utilisateur range ses docs ici.
-    doc_moves: list[tuple] = []
-    from_docs_dir = DOCUMENTS_DIR / f_type / f_slug
-    if from_docs_dir.is_dir():
-        for p in from_docs_dir.rglob("*"):
-            if p.is_file():
-                dest = DOCUMENTS_DIR / i_type / i_slug / p.relative_to(from_docs_dir)
-                doc_moves.append((p, dest))
-
     from_fiche_dir = SYNTHESE / f_type / f_slug
+    from_docs_dir = DOCUMENTS_DIR / f_type / f_slug
+    n_docs_files = sum(1 for p in from_docs_dir.rglob("*") if p.is_file()) \
+        if from_docs_dir.is_dir() else 0
 
     if dry_run:
         if owns:
@@ -287,44 +319,24 @@ def merge(from_entity: str, into_entity: str, dry_run: bool = True,
             "dry_run": True,
             "from": from_entity, "into": into_entity,
             "docs_to_reassign": docs_n,
-            "resumes_to_move": len(resume_moves),
-            "documents_to_move": len(doc_moves),
+            "documents_to_move": n_docs_files,
             "aliases_to_add": alias_payload,
             "from_fiche_exists": from_fiche_dir.is_dir(),
         }
 
     reassigned = 0
-    moved = 0
-    docs_moved = 0
     try:
         with db.transaction():
             reassigned = db.reassign_entity(f_type, f_slug, i_type, i_slug,
                                             into_name, commit=False)
         added = _add_aliases(i_type, i_slug, alias_payload)
-        for src, dest in resume_moves:
-            try:
-                _ledger.safe_move(db, src, dest, "entities merge", run_id)
-                moved += 1
-            except OSError:
-                pass
-        for src, dest in doc_moves:
-            try:
-                _ledger.safe_move(db, src, dest, "entities merge (document)",
-                                  run_id)
-                docs_moved += 1
-            except OSError:
-                pass
-        trashed = False
-        if from_fiche_dir.is_dir():
-            for p in sorted(from_fiche_dir.rglob("*")):
-                if p.is_file():
-                    _ledger.safe_trash(db, p, "entities merge (fiche)", run_id)
-            trashed = True
-        # Nettoyer les dossiers vidés du perdant (Synthèse + Documents + Résumés).
-        _rmdir_if_empty(from_fiche_dir)
-        _rmdir_if_empty(from_docs_dir)
-        for label in _SOURCE_LABELS:
-            _rmdir_if_empty(RESUMES / label / f_type / f_slug)
+        # Documents → relocate_document vers l'entité gardée (graphe + refs).
+        docs_moved = _relocate_entity_docs(db, f_type, f_slug, i_type, i_slug, run_id)
+        # Le reste : Courriels/Notes + orphelins déplacés ; fiche perdante → corbeille.
+        moved = _sweep_entity_rest(db, f_type, f_slug, i_type, i_slug, run_id,
+                                   trash_fiche=True)
+        trashed = from_fiche_dir.is_dir()
+        _cleanup_entity_dirs(f_type, f_slug)
     finally:
         if owns:
             db.close()

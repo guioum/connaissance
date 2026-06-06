@@ -13,10 +13,15 @@ quand c'est obsolète. Priorités indicatives : 🔴 haute · 🟡 moyenne · �
   Appliqué : ré-accent des 79 noms de fichiers (triplet, via la table d'accents
   apprise des titres de résumés) + réalignement des transcriptions orphelines
   des entités renommées/fusionnées.
-- [ ] 🔴 **Retrofitter le flow sur `relocate_document`** : `classify apply`,
-  `organize`, `entities rename|merge` doivent l'utiliser (ils ne déplaçaient
-  qu'un sous-ensemble → transcriptions orphelines, `source`/`text_simhash`
-  périmés). C'est la vraie correction de fond.
+- [x] **`entities rename|merge` sur `relocate_document`** (v2.43.0) : chaque
+  document de l'entité passe par la primitive (graphe complet + refs) ; le reste
+  (fiche Synthèse, Courriels/Notes, orphelins) est balayé via le ledger. C'était
+  la source de l'orphelinage des transcriptions. `classify apply` reste pré-OCR
+  (pas de triplet → juste source + relink, correct) ; `organize` déplace déjà le
+  triplet + met à jour `source` (mature).
+- [ ] 🟢 **Uniformiser `organize` sur `relocate_document`** : il gère déjà
+  triplet + `source`, mais ne met pas à jour `text_simhash`/`doc_classification`
+  (flow legacy). Le faire passer par la primitive pour une cohérence totale.
 - [ ] 🟢 **Nettoyer les transcriptions orphelines sans doc vivant** (résidu des
   fusions/dédup : ~10 sous d'anciens slugs `revenu-quebec`/`bdc`/`ville-de-montreal`)
   — un step `audit` qui les repère/archive.

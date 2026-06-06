@@ -52,15 +52,22 @@ def test_find_candidates_groups_same_type_only():
 # --- merge (commands/entities.py) ---
 
 def _setup(tmp_path, monkeypatch):
+    import connaissance.core.relocate as R
     syn = tmp_path / "Synthèse"
     res = tmp_path / "Résumés"
     docs = tmp_path / "Documents"
     docs.mkdir()
     monkeypatch.setattr(CE, "SYNTHESE", syn)
     monkeypatch.setattr(CE, "RESUMES", res)
+    monkeypatch.setattr(CE, "TRANSCRIPTIONS", tmp_path / "Transcriptions")
     monkeypatch.setattr(CE, "DOCUMENTS_DIR", docs)
     monkeypatch.setattr(CE, "require_connaissance_root", lambda: None)
     monkeypatch.setattr(Lmod, "CONNAISSANCE_ROOT", tmp_path)
+    # entities délègue à relocate : patcher aussi ses constantes vers tmp.
+    monkeypatch.setattr(R, "DOCUMENTS_DIR", docs)
+    monkeypatch.setattr(R, "RESUMES", res / "Documents")
+    monkeypatch.setattr(R, "TRANSCR", tmp_path / "Transcriptions" / "Documents")
+    monkeypatch.setattr(R, "CONNAISSANCE_ROOT", tmp_path)
     return syn, res, docs
 
 
@@ -156,8 +163,9 @@ def test_rename_reaccents_dirs_db_and_fiche(tmp_path, monkeypatch, tracking_db):
 
     out = CE2.rename("organismes/revenu-quebec", "revenu-québec",
                      dry_run=False, db=tracking_db)
-    # 2 fichiers déplacés : le doc brut + le fiche.md (Synthèse)
-    assert out["files_moved"] == 2 and "ledger_run" in out
+    # 1 document relocalisé (via la primitive) + le fiche.md déplacé (sweep)
+    assert out["documents_relocated"] == 1 and out["files_moved"] >= 1
+    assert "ledger_run" in out
     # dossier renommé
     assert (docs / "organismes" / "revenu-québec" / "2024 avis.pdf").exists()
     assert not (docs / "organismes" / "revenu-quebec").exists()
@@ -174,5 +182,5 @@ def test_rename_dry_run_changes_nothing(tmp_path, monkeypatch, tracking_db):
     (docs / "organismes" / "cafe-x").mkdir(parents=True)
     (docs / "organismes" / "cafe-x" / "f.pdf").write_bytes(b"x")
     out = CE2.rename("organismes/cafe-x", "café-x", dry_run=True, db=tracking_db)
-    assert out["dry_run"] and out["files_to_move"] == 1
+    assert out["dry_run"] and out["documents"] == 1
     assert (docs / "organismes" / "cafe-x").exists()        # rien bougé
