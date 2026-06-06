@@ -109,6 +109,9 @@ grande réorg tant que ce n'est pas validé.
   « envoi au comptable » : commande `sujet export <nom>` (copie/zip réel à la
   demande), pas de dossier physique permanent.
 - [ ] 🟡 **Phase D — Doublons** : exacts (SHA256 caché) + quasi (SimHash texte).
+  Rail prêt : table `doc_simhash` + `TrackingDB.get_or_compute_doc_simhash`
+  (référentiel `~/Documents`, NFC) — **ne pas réutiliser `text_simhash`** (corpus,
+  référentiel `~/Connaissance`) pour éviter la collision de référentiels.
 - [ ] 🟢 Groupes B/C/D classés par logique propre (code regroupé, médias par
   date, exports tels quels).
 - [ ] 🟢 « Corbeille ledger » : transformer les suppressions (dedup) en

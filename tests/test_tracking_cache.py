@@ -83,3 +83,33 @@ def test_simhash_empty_file_returns_none(tracking_db, tmp_path):
     f = tmp_path / "empty.md"
     f.write_text("", encoding="utf-8")
     assert tracking_db.get_or_compute_simhash(f, "Transcriptions/Documents/empty.md") is None
+
+
+def test_simhash_nfc_normalized_key(tracking_db, tmp_path):
+    # Écriture clé NFD (walk macOS) puis relecture NFC → cache hit, une seule ligne.
+    import unicodedata
+    f = tmp_path / "doc.md"
+    f.write_text("transcription accentuée répétée pour un simhash stable " * 3,
+                 encoding="utf-8")
+    rel_nfd = unicodedata.normalize("NFD", "Transcriptions/Documents/relevé.md")
+    rel_nfc = unicodedata.normalize("NFC", "Transcriptions/Documents/relevé.md")
+    assert rel_nfd != rel_nfc
+    h1 = tracking_db.get_or_compute_simhash(f, rel_nfd)
+    h2 = tracking_db.get_or_compute_simhash(f, rel_nfc)
+    assert h1 is not None and h1 == h2                       # cache hit malgré NFD↔NFC
+    n = tracking_db._conn.execute(
+        "SELECT COUNT(*) FROM text_simhash").fetchone()[0]
+    assert n == 1                                            # pas de doublon NFD/NFC
+
+
+def test_doc_simhash_separate_table_from_text_simhash(tracking_db, tmp_path):
+    # get_or_compute_doc_simhash écrit dans doc_simhash, pas text_simhash.
+    f = tmp_path / "brut.md"
+    f.write_text("contenu d'un fichier brut documents répété pour simhash " * 3,
+                 encoding="utf-8")
+    h = tracking_db.get_or_compute_doc_simhash(f, "organismes/x/2024 relevé.pdf")
+    assert h is not None and len(h) == 16
+    assert tracking_db._conn.execute(
+        "SELECT COUNT(*) FROM doc_simhash").fetchone()[0] == 1
+    assert tracking_db._conn.execute(
+        "SELECT COUNT(*) FROM text_simhash").fetchone()[0] == 0  # univers séparés

@@ -85,10 +85,12 @@ CREATE INDEX IF NOT EXISTS idx_files_hash ON files(hash);
 -- idx_files_size créé dans _migrate() après ALTER TABLE ADD COLUMN size,
 -- pour rester compatible avec les DB v2.13.0 et antérieures.
 
--- Cache des SimHash texte des transcriptions (détection de quasi-doublons).
--- Indexé sur le chemin LOGIQUE relatif à CONNAISSANCE_ROOT : clé stable et
--- identique en Mac natif (~/Connaissance) comme en cowork VM (~/mnt/Connaissance),
--- pour que le cache soit partagé entre environnements. Validé par (size, mtime).
+-- Cache des SimHash texte des TRANSCRIPTIONS (détection de quasi-doublons du
+-- corpus). Univers : ~/Connaissance/Transcriptions/**. rel_path relatif à
+-- CONNAISSANCE_ROOT (clé stable Mac natif ~/Connaissance comme cowork VM
+-- ~/mnt/Connaissance). NFC-normalisé, validé par (size, mtime).
+-- ⚠️ Ne PAS y mettre de SimHash de fichiers bruts ~/Documents : référentiel
+-- différent → table doc_simhash ci-dessous (Phase D).
 CREATE TABLE IF NOT EXISTS text_simhash (
     rel_path TEXT NOT NULL UNIQUE,
     simhash TEXT,
@@ -98,6 +100,21 @@ CREATE TABLE IF NOT EXISTS text_simhash (
 );
 
 CREATE INDEX IF NOT EXISTS idx_text_simhash ON text_simhash(simhash);
+
+-- Cache des SimHash texte des FICHIERS BRUTS ~/Documents (Phase D — doublons
+-- du pré-classement). Même forme que text_simhash mais référentiel DISTINCT :
+-- rel_path relatif à DOCUMENTS_DIR (~/Documents), comme doc_signals /
+-- doc_classification. Table séparée par conception : un seul référentiel par
+-- table, jamais de collision corpus ↔ bruts. NFC-normalisé.
+CREATE TABLE IF NOT EXISTS doc_simhash (
+    rel_path TEXT NOT NULL UNIQUE,
+    simhash TEXT,
+    size INTEGER,
+    mtime REAL,
+    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%S', 'now', 'localtime'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_doc_simhash ON doc_simhash(simhash);
 
 -- Cache des paquets de signaux Phase B (documents signals), keyé sur
 -- (rel_path, size, mtime) comme text_simhash. Évite de re-parser/relire un
@@ -593,19 +610,15 @@ class TrackingDB:
         self.register_hash(h, str(path), size=size, mtime=mtime)
         return h
 
-    def get_or_compute_simhash(self, abs_path, rel_path,
-                               compute_fn=None) -> str | None:
-        """SimHash texte d'une transcription, caché par ``(rel_path, size, mtime)``.
+    def _get_or_compute_simhash(self, abs_path, rel_path, *, table: str,
+                                compute_fn=None) -> str | None:
+        """Cœur JIT du cache SimHash, paramétré par ``table``.
 
-        - ``abs_path`` : chemin physique à lire/stat (dépend de l'environnement).
-        - ``rel_path`` : chemin LOGIQUE relatif à CONNAISSANCE_ROOT — la clé de
-          cache, stable entre Mac natif et cowork VM.
-
-        Même logique JIT que ``get_or_compute_hash`` : si la ligne existe avec
-        ``(size, mtime)`` identiques et un ``simhash`` non NULL, on le retourne
-        sans relire le fichier. Sinon on calcule (défaut : SimHash 64 bits du
-        texte) et on persiste. Retourne le SimHash en hex (16 car.) ou ``None``
-        si le fichier est vide/illisible.
+        Clé de cache = ``rel_path`` **normalisé NFC** (macOS écrit en NFD ;
+        sans normalisation, une relecture en NFC raterait le cache). Validé par
+        ``(size, mtime)``. ``table`` est une constante interne (``text_simhash``
+        pour le corpus transcrit, ``doc_simhash`` pour les bruts ~/Documents) —
+        jamais une entrée utilisateur.
         """
         try:
             st = Path(abs_path).stat()
@@ -613,10 +626,11 @@ class TrackingDB:
             return None
         size = int(st.st_size)
         mtime = float(st.st_mtime)
+        rkey = _nfc(rel_path)
 
         row = self._conn.execute(
-            "SELECT simhash, size, mtime FROM text_simhash WHERE rel_path = ?",
-            (str(rel_path),)).fetchone()
+            f"SELECT simhash, size, mtime FROM {table} WHERE rel_path = ?",
+            (rkey,)).fetchone()
         if row is not None:
             d = dict(row)
             if (d.get("simhash")
@@ -642,16 +656,44 @@ class TrackingDB:
         if h is None:
             return None
         self._conn.execute(
-            """INSERT INTO text_simhash (rel_path, simhash, size, mtime)
+            f"""INSERT INTO {table} (rel_path, simhash, size, mtime)
                VALUES (?, ?, ?, ?)
                ON CONFLICT(rel_path) DO UPDATE SET
                  simhash=excluded.simhash,
                  size=excluded.size,
                  mtime=excluded.mtime,
                  updated_at=strftime('%Y-%m-%dT%H:%M:%S', 'now', 'localtime')""",
-            (str(rel_path), h, size, mtime))
+            (rkey, h, size, mtime))
         self._conn.commit()
         return h
+
+    def get_or_compute_simhash(self, abs_path, rel_path,
+                               compute_fn=None) -> str | None:
+        """SimHash texte d'une **transcription** (corpus ~/Connaissance).
+
+        - ``abs_path`` : chemin physique à lire/stat (dépend de l'environnement).
+        - ``rel_path`` : chemin LOGIQUE relatif à CONNAISSANCE_ROOT — la clé de
+          cache, stable entre Mac natif et cowork VM.
+
+        Caché dans ``text_simhash``. Pour le SimHash des **fichiers bruts**
+        ~/Documents (Phase D), voir ``get_or_compute_doc_simhash`` (table et
+        référentiel distincts — ne JAMAIS mélanger les deux).
+        """
+        return self._get_or_compute_simhash(
+            abs_path, rel_path, table="text_simhash", compute_fn=compute_fn)
+
+    def get_or_compute_doc_simhash(self, abs_path, rel_path,
+                                   compute_fn=None) -> str | None:
+        """SimHash texte d'un **fichier brut** ~/Documents (Phase D — doublons).
+
+        Pendant de ``get_or_compute_simhash`` pour l'univers des sources brutes :
+        ``rel_path`` est relatif à ``DOCUMENTS_DIR`` (~/Documents), comme
+        ``doc_signals``/``doc_classification``, et le cache vit dans la table
+        **séparée** ``doc_simhash``. Séparer les tables garantit qu'un seul
+        référentiel coexiste par table (jamais de collision corpus ↔ bruts).
+        """
+        return self._get_or_compute_simhash(
+            abs_path, rel_path, table="doc_simhash", compute_fn=compute_fn)
 
     def get_or_compute_signals(self, abs_path, rel_path, compute_fn):
         """Paquet de signaux Phase B d'un document, caché par ``(rel_path, size,

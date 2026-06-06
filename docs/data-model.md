@@ -115,16 +115,22 @@ les bases existantes.
 |---|---|---|
 | `operations` | — | journal horodaté des opérations (plugin, operation, source/dest, status). |
 | `files` | `path` (absolu) | fichiers connus : type, entité, `message_id`, `hash` SHA256, `size`, `mtime`. Cœur du cache JIT de déduplication. |
-| `text_simhash` | `rel_path` (relatif à `CONNAISSANCE_ROOT`) | cache des SimHash texte des transcriptions (quasi-doublons). Voir [pipeline.md](pipeline.md). |
+| `text_simhash` | `rel_path` NFC (relatif à `CONNAISSANCE_ROOT`) | cache des SimHash texte des **transcriptions** (quasi-doublons du corpus). Voir [pipeline.md](pipeline.md). |
+| `doc_simhash` | `rel_path` NFC (relatif à `~/Documents`) | cache des SimHash texte des **fichiers bruts** (Phase D — doublons du pré-classement). Table séparée de `text_simhash` : un référentiel par table. |
 | `doc_signals` | `rel_path` (relatif à `~/Documents`) | **fiche d'identité, étage signaux** (Phase B) : paquet JSON nom/chemin/dates/métadonnées/texte born-digital/résumé extractif, caché par `(rel_path, size, mtime)`. |
 | `doc_classification` | `rel_path` (relatif à `~/Documents`) | **fiche d'identité, étage classement** (Phase C) : entité/catégorie/date/titre/sujet + `confidence` + `status` (`auto`/`attente`) + `model`. État mutable raffiné à chaque passe ; `hash` sert d'ancre quand le fichier bouge. |
 | `file_ledger` | `run_id` + `old_path`/`new_path` | journal réversible des déplacements (`safe_move`) : `sha256` + `(size, mtime)` permettent un `revert` vérifié par hash. 1 `run_id` = 1 lot révertible. |
 | `llm_usage` | — | tokens et coûts par appel (input/output, cache, `cost_usd`). |
 
-> ⚠️ Les deux colonnes nommées `rel_path` (`text_simhash` vs
-> `doc_signals`/`doc_classification`) n'ont **pas le même référentiel** :
-> `CONNAISSANCE_ROOT` pour la première, `~/Documents` pour les deux fiches.
-> Ne pas les joindre naïvement par `USING(rel_path)`.
+> ⚠️ Deux **univers de fichiers disjoints** partagent le nom de colonne
+> `rel_path` mais **pas le référentiel** : `text_simhash` indexe les
+> transcriptions markdown du corpus (relatif à `CONNAISSANCE_ROOT`) ;
+> `doc_simhash`/`doc_signals`/`doc_classification` indexent les fichiers bruts
+> du pré-classement (relatif à `~/Documents`). Ils ne décrivent jamais le même
+> fichier — ne pas les joindre par `USING(rel_path)`. **Convention figée** : un
+> seul référentiel par table ; le SimHash des bruts va dans `doc_simhash`,
+> jamais dans `text_simhash` (sinon collision de référentiels). Toutes les clés
+> sont normalisées **NFC** (macOS écrit en NFD).
 
 ### Le cache JIT
 
