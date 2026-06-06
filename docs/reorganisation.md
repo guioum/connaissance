@@ -9,6 +9,12 @@ réversible**.
 > optimiser → synthétiser), voir [pipeline.md](pipeline.md). Ce document couvre
 > le **pré-classement** des fichiers bruts *avant* qu'ils n'entrent dans la base.
 
+> **Accents conservés.** Les noms de fichiers et de dossiers produits par le
+> système **gardent les accents français** (pas de translittération `é→e`). Les
+> slugs restent en minuscules-tirets mais accentués (`banque-de-développement-du-canada`,
+> `2024-03-29 avis-de-cotisation-mélanie.pdf`) et normalisés **NFC** (clé stable
+> sur macOS qui écrit en NFD). Convention unique : `resolution.slugify`.
+
 ## Principes directeurs
 
 1. **Zéro OCR Mistral.** Le classement s'appuie uniquement sur des **signaux

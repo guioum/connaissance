@@ -10,7 +10,7 @@ from connaissance.core import classify as C
 
 def test_sujet_from_path_curated_rule():
     # une règle curatée l'emporte (sujet propre)
-    assert C.sujet_from_path("Classer/2026/Finance/Impôts 2023/Perso/avis.pdf") == "impots"
+    assert C.sujet_from_path("Classer/2026/Finance/Impôts 2023/Perso/avis.pdf") == "impôts"
 
 
 def test_sujet_from_path_slug_fallback():
@@ -18,7 +18,7 @@ def test_sujet_from_path_slug_fallback():
     # 'Preuves' sauté)
     s = C.sujet_from_path(
         "Classer/2026/Finance/BNC Contrat Marge de Crédit 2024/Preuves/x.pdf")
-    assert s == "bnc-contrat-marge-de-credit-2024"
+    assert s == "bnc-contrat-marge-de-crédit-2024"
 
 
 def test_sujet_from_path_none_when_all_generic():
@@ -76,14 +76,14 @@ def test_dedup_preserves_cross_filing_in_sujet_view(tmp_path, monkeypatch,
     assert out["trashed"] == 1
     assert out["sujets_captured"] >= 2             # bdc + impots capturés
 
-    # le fichier gardé porte les DEUX sujets
+    # le fichier gardé porte les DEUX sujets (impôts via règle curatée accentuée)
     sujets = {r["sujet"] for r in tracking_db.sujet_memberships()}
-    assert "bdc" in sujets and "impots" in sujets
+    assert "bdc" in sujets and "impôts" in sujets
 
-    # la vue éventaille : le fichier gardé apparaît sous bdc/ ET impots/
+    # la vue éventaille : le fichier gardé apparaît sous bdc/ ET impôts/
     S.view(apply=True, db=tracking_db)
     sv = docs / S.SUJETS_VIEW_NAME
     assert (sv / "bdc" / "avis.pdf").is_symlink()
-    assert (sv / "impots" / "avis.pdf").is_symlink()
+    assert (sv / "impôts" / "avis.pdf").is_symlink()
     # les deux pointent le même fichier physique (gardé)
-    assert (sv / "bdc" / "avis.pdf").resolve() == (sv / "impots" / "avis.pdf").resolve()
+    assert (sv / "bdc" / "avis.pdf").resolve() == (sv / "impôts" / "avis.pdf").resolve()

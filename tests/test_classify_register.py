@@ -33,7 +33,7 @@ def test_register_auto_and_attente(tmp_path, monkeypatch):
     assert res["total"] == 2 and res["auto"] == 1 and res["attente"] == 1
     a = next(e for e in res["entries"] if e["custom_id"] == "cls_a")
     assert a["status"] == "auto"
-    assert a["dest"] == "organismes/banque-nationale/2024-03-15 releve-de-compte.pdf"
+    assert a["dest"] == "organismes/banque-nationale/2024-03-15 relevé-de-compte.pdf"
     b = next(e for e in res["entries"] if e["custom_id"] == "cls_b")
     assert b["status"] == "attente" and b["dest"] is None
     assert "confiance_basse" in b["reasons"]

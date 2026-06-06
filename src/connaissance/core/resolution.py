@@ -15,45 +15,49 @@ import yaml
 from connaissance.core.paths import BASE_PATH
 
 
-def construire_slug(name: str) -> str:
-    """Construire un slug depuis un nom d'entité.
+# Caractères gardés dans un slug : chiffres, lettres ASCII et lettres accentuées
+# françaises (latin-1 minuscules + œ). Décision projet : on CONSERVE les accents
+# dans les noms de fichiers et de dossiers (pas de translittération é→e). Tout le
+# reste (espaces, ponctuation) devient un tiret.
+_SLUG_DROP = re.compile(r"[^0-9a-zà-ÿœ]+")
 
-    Règles :
-    - Tout en minuscules
-    - Accents supprimés (é→e, ç→c, etc.)
-    - Espaces et caractères spéciaux remplacés par des tirets
-    - Pas de tirets en début/fin ni de tirets doubles
+
+def slugify(text: str) -> str:
+    """Slug minuscule-tirets en **conservant les accents** (normalisé NFC).
+
+    NFC : macOS écrit les noms en NFD (accents décomposés) ; on canonicalise
+    pour que le slug soit une clé stable quelle que soit la source du nom.
+
+    >>> slugify("Banque de développement du Canada")
+    'banque-de-développement-du-canada'
+    >>> slugify("Hôpital Sainte-Justine")
+    'hôpital-sainte-justine'
+    """
+    s = unicodedata.normalize("NFC", text or "").lower()
+    s = _SLUG_DROP.sub("-", s).strip("-")
+    return re.sub(r"-{2,}", "-", s)
+
+
+def construire_slug(name: str) -> str:
+    """Slug d'un nom d'entité (minuscules + tirets, accents conservés).
 
     >>> construire_slug("Marie Lefebvre")
     'marie-lefebvre'
     >>> construire_slug("Banque Nationale")
     'banque-nationale'
-    >>> construire_slug("Orange")
-    'orange'
     """
-    slug = unicodedata.normalize("NFD", name.lower())
-    slug = slug.encode("ascii", "ignore").decode()
-    slug = re.sub(r"[^a-z0-9]+", "-", slug).strip("-")
-    # Supprimer les tirets doubles
-    slug = re.sub(r"-{2,}", "-", slug)
-    return slug
+    return slugify(name)
 
 
 def construire_nom_fichier(date: str, title: str) -> str:
     """Construire le nom de fichier après organisation.
 
-    Format : YYYY-MM-DD description-slug
+    Format : YYYY-MM-DD description-slug (accents conservés).
 
     >>> construire_nom_fichier("2025-09-01", "Avis de cotisation 2025")
     '2025-09-01 avis-de-cotisation-2025'
-    >>> construire_nom_fichier("2024-01-15", "Facture janvier Orange")
-    '2024-01-15 facture-janvier-orange'
     """
-    slug = unicodedata.normalize("NFD", title.lower())
-    slug = slug.encode("ascii", "ignore").decode()
-    slug = re.sub(r"[^a-z0-9]+", "-", slug).strip("-")
-    slug = re.sub(r"-{2,}", "-", slug)
-    slug = slug[:50].rstrip("-")
+    slug = slugify(title)[:50].rstrip("-")
     return f"{date} {slug}"
 
 

@@ -96,5 +96,5 @@ def test_category_from_content_keywords():
 
 def test_sujet_from_origin_folder():
     assert C.guess_sujet("Travaux et rénovations") == "maison"
-    assert C.guess_sujet("2024 Impôts") == "impots"
+    assert C.guess_sujet("2024 Impôts") == "impôts"
     assert C.guess_sujet(None) is None

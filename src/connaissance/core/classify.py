@@ -47,11 +47,11 @@ _ORG_MARKERS = re.compile(
 # Dossiers d'origine → sujet (normalisé). Sinon : forme normalisée du dossier.
 _SUJET_RULES = [
     (re.compile(r"\b(maison|logement|immeuble|hypoth|propri[eé]t|travaux|r[eé]novation|municipalit)", re.I), "maison"),
-    (re.compile(r"\b(imp[oô]t|fiscal|d[eé]claration)", re.I), "impots"),
+    (re.compile(r"\b(imp[oô]t|fiscal|d[eé]claration)", re.I), "impôts"),
     (re.compile(r"\b(paie|salaire|emploi|rh|ressources humaines)", re.I), "emploi"),
-    (re.compile(r"\b(sant[eé]|m[eé]dical|clinique|h[oô]pital|assurance)", re.I), "sante"),
+    (re.compile(r"\b(sant[eé]|m[eé]dical|clinique|h[oô]pital|assurance)", re.I), "santé"),
     (re.compile(r"\b(voyage|vacances|billet)", re.I), "voyage"),
-    (re.compile(r"\b(auto|voiture|v[eé]hicule|saaq)", re.I), "vehicule"),
+    (re.compile(r"\b(auto|voiture|v[eé]hicule|saaq)", re.I), "véhicule"),
     (re.compile(r"\b(formation|cours|certification|dipl[oô]me)", re.I), "formation"),
 ]
 
@@ -147,10 +147,9 @@ _GENERIC_FOLDERS = {
 
 
 def _slugify(text: str) -> str:
-    s = unicodedata.normalize("NFD", (text or "").lower())
-    s = s.encode("ascii", "ignore").decode()
-    s = re.sub(r"[^a-z0-9]+", "-", s).strip("-")
-    return re.sub(r"-{2,}", "-", s)
+    # Slug commun (accents conservés, NFC) — voir resolution.slugify.
+    from connaissance.core.resolution import slugify
+    return slugify(text)
 
 
 def sujet_from_path(rel: str) -> str | None:
