@@ -190,8 +190,11 @@ slugs (`ville-de-montreal` vs `ville-montreal`, `monteillet-conseil` vs
   humain tranche — jamais d'auto-fusion.
 - **`entities merge --from <type/slug> --into <type/slug>`** (`--apply`) :
   repointe `doc_classification` + `files` (atomique), ajoute le nom/aliases du
-  perdant aux `aliases` de la fiche gardée, déplace ses résumés **via le ledger**
-  et envoie sa fiche à la **corbeille**. Dry-run par défaut, réversible.
+  perdant aux `aliases` de la fiche gardée, déplace ses **résumés** ET ses
+  **documents bruts** (`~/Documents/<type>/<slug>/`) **via le ledger**, envoie sa
+  fiche à la **corbeille** et supprime ses dossiers vidés. Dry-run par défaut,
+  réversible. `entities candidates` scanne aussi les dossiers `~/Documents` pour
+  repérer les entités sans fiche (acronymes `bdc`/`bnc`…).
 
 ## Le socle réversible
 

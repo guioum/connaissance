@@ -54,11 +54,14 @@ def test_find_candidates_groups_same_type_only():
 def _setup(tmp_path, monkeypatch):
     syn = tmp_path / "Synthèse"
     res = tmp_path / "Résumés"
+    docs = tmp_path / "Documents"
+    docs.mkdir()
     monkeypatch.setattr(CE, "SYNTHESE", syn)
     monkeypatch.setattr(CE, "RESUMES", res)
+    monkeypatch.setattr(CE, "DOCUMENTS_DIR", docs)
     monkeypatch.setattr(CE, "require_connaissance_root", lambda: None)
     monkeypatch.setattr(Lmod, "CONNAISSANCE_ROOT", tmp_path)
-    return syn, res
+    return syn, res, docs
 
 
 def _fiche(syn, etype, slug, name, aliases=None):
@@ -72,7 +75,7 @@ def _fiche(syn, etype, slug, name, aliases=None):
 
 
 def test_merge_dry_run_reports(tmp_path, monkeypatch, tracking_db):
-    syn, res = _setup(tmp_path, monkeypatch)
+    syn, res, docs = _setup(tmp_path, monkeypatch)
     _fiche(syn, "organismes", "banque-nationale", "Banque Nationale")
     _fiche(syn, "organismes", "bnc", "BNC")
     tracking_db.upsert_classification("x.pdf", {
@@ -87,7 +90,7 @@ def test_merge_dry_run_reports(tmp_path, monkeypatch, tracking_db):
 
 
 def test_merge_apply_reassigns_and_aliases(tmp_path, monkeypatch, tracking_db):
-    syn, res = _setup(tmp_path, monkeypatch)
+    syn, res, docs = _setup(tmp_path, monkeypatch)
     _fiche(syn, "organismes", "banque-nationale", "Banque Nationale")
     _fiche(syn, "organismes", "bnc", "BNC", aliases=["B.N.C."])
     tracking_db.upsert_classification("x.pdf", {
@@ -112,3 +115,28 @@ def test_merge_apply_reassigns_and_aliases(tmp_path, monkeypatch, tracking_db):
     assert (res / "Documents" / "organismes" / "banque-nationale"
             / "2024-01-01 relevé.md").exists()
     assert out["from_fiche_trashed"]
+
+
+def test_merge_moves_raw_documents_and_cleans_dirs(tmp_path, monkeypatch,
+                                                   tracking_db):
+    # Le cas du bug : les documents bruts sous ~/Documents/<type>/<slug>/
+    # doivent suivre la fusion, et le dossier perdant vidé doit disparaître.
+    syn, res, docs = _setup(tmp_path, monkeypatch)
+    _fiche(syn, "organismes", "banque-de-developpement-du-canada", "BDC")
+    _fiche(syn, "organismes", "banque-developpement-canada", "Banque Dev Canada")
+    # docs bruts du perdant
+    loser = docs / "organismes" / "banque-developpement-canada"
+    loser.mkdir(parents=True)
+    (loser / "2024-09 paie.pdf").write_bytes(b"a")
+    (loser / "2024-10 paie.pdf").write_bytes(b"b")
+    (docs / "organismes" / "banque-de-developpement-du-canada").mkdir(parents=True)
+
+    out = CE.merge("organismes/banque-developpement-canada",
+                   "organismes/banque-de-developpement-du-canada",
+                   dry_run=False, db=tracking_db)
+    assert out["documents_moved"] == 2
+    keeper = docs / "organismes" / "banque-de-developpement-du-canada"
+    assert (keeper / "2024-09 paie.pdf").exists()
+    assert (keeper / "2024-10 paie.pdf").exists()
+    # dossier perdant vidé puis supprimé
+    assert not loser.exists()

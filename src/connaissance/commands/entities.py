@@ -16,12 +16,22 @@ import yaml
 
 from connaissance.core import entities as _ent
 from connaissance.core import ledger as _ledger
-from connaissance.core.paths import CONNAISSANCE_ROOT, require_connaissance_root
+from connaissance.core.paths import (CONNAISSANCE_ROOT, DOCUMENTS_DIR,
+                                      require_connaissance_root)
 from connaissance.core.tracking import TrackingDB
 
 RESUMES = CONNAISSANCE_ROOT / "Résumés"
 SYNTHESE = CONNAISSANCE_ROOT / "Synthèse"
 _SOURCE_LABELS = ("Documents", "Courriels", "Notes")
+
+
+def _rmdir_if_empty(d) -> None:
+    """Supprimer un dossier devenu vide après déplacement (silencieux sinon)."""
+    try:
+        if d.is_dir() and not any(d.iterdir()):
+            d.rmdir()
+    except OSError:
+        pass
 
 
 def _fiche_frontmatter(etype: str, slug: str) -> dict | None:
@@ -61,6 +71,19 @@ def _inventory(db: TrackingDB) -> list[dict]:
                 fm = _fiche_frontmatter(etype, d.name) or {}
                 inv[key] = {"entity_type": etype, "entity_slug": d.name,
                             "name": fm.get("name") or d.name, "count": 0}
+    # Dossiers physiques ~/Documents/<type>/<slug>/ — entités rangées sans fiche
+    # ni ligne de classement (ex. acronymes bdc/bnc). Sinon invisibles.
+    for etype in ("personnes", "organismes", "divers"):
+        tdir = DOCUMENTS_DIR / etype
+        if not tdir.is_dir():
+            continue
+        for d in tdir.iterdir():
+            if not d.is_dir() or d.name.startswith("-"):
+                continue
+            key = (etype, d.name)
+            if key not in inv:
+                inv[key] = {"entity_type": etype, "entity_slug": d.name,
+                            "name": d.name, "count": 0}
     return list(inv.values())
 
 
@@ -152,7 +175,7 @@ def merge(from_entity: str, into_entity: str, dry_run: bool = True,
     alias_payload = [from_name, f_slug] + [str(a) for a in
                                            (from_fm.get("aliases") or [])]
 
-    # Résumés du perdant à déplacer.
+    # Résumés du perdant à déplacer (~/Connaissance/Résumés/<label>/<type>/<slug>/).
     resume_moves: list[tuple] = []
     for label in _SOURCE_LABELS:
         d = RESUMES / label / f_type / f_slug
@@ -161,6 +184,16 @@ def merge(from_entity: str, into_entity: str, dry_run: bool = True,
                 if p.is_file():
                     dest = RESUMES / label / i_type / i_slug / p.relative_to(d)
                     resume_moves.append((p, dest))
+
+    # Documents BRUTS du perdant à déplacer (~/Documents/<type>/<slug>/) — le cas
+    # que la première version oubliait : l'utilisateur range ses docs ici.
+    doc_moves: list[tuple] = []
+    from_docs_dir = DOCUMENTS_DIR / f_type / f_slug
+    if from_docs_dir.is_dir():
+        for p in from_docs_dir.rglob("*"):
+            if p.is_file():
+                dest = DOCUMENTS_DIR / i_type / i_slug / p.relative_to(from_docs_dir)
+                doc_moves.append((p, dest))
 
     from_fiche_dir = SYNTHESE / f_type / f_slug
 
@@ -172,12 +205,14 @@ def merge(from_entity: str, into_entity: str, dry_run: bool = True,
             "from": from_entity, "into": into_entity,
             "docs_to_reassign": docs_n,
             "resumes_to_move": len(resume_moves),
+            "documents_to_move": len(doc_moves),
             "aliases_to_add": alias_payload,
             "from_fiche_exists": from_fiche_dir.is_dir(),
         }
 
     reassigned = 0
     moved = 0
+    docs_moved = 0
     try:
         with db.transaction():
             reassigned = db.reassign_entity(f_type, f_slug, i_type, i_slug,
@@ -189,12 +224,24 @@ def merge(from_entity: str, into_entity: str, dry_run: bool = True,
                 moved += 1
             except OSError:
                 pass
+        for src, dest in doc_moves:
+            try:
+                _ledger.safe_move(db, src, dest, "entities merge (document)",
+                                  run_id)
+                docs_moved += 1
+            except OSError:
+                pass
         trashed = False
         if from_fiche_dir.is_dir():
             for p in sorted(from_fiche_dir.rglob("*")):
                 if p.is_file():
                     _ledger.safe_trash(db, p, "entities merge (fiche)", run_id)
             trashed = True
+        # Nettoyer les dossiers vidés du perdant (Synthèse + Documents + Résumés).
+        _rmdir_if_empty(from_fiche_dir)
+        _rmdir_if_empty(from_docs_dir)
+        for label in _SOURCE_LABELS:
+            _rmdir_if_empty(RESUMES / label / f_type / f_slug)
     finally:
         if owns:
             db.close()
@@ -204,6 +251,7 @@ def merge(from_entity: str, into_entity: str, dry_run: bool = True,
         "from": from_entity, "into": into_entity,
         "reassigned": reassigned,
         "resumes_moved": moved,
+        "documents_moved": docs_moved,
         "aliases_added": added,
         "from_fiche_trashed": trashed,
         "ledger_run": run_id,

@@ -280,10 +280,12 @@ class EntitiesMerge(TypedDict, total=False):
     into: str
     docs_to_reassign: int
     resumes_to_move: int
+    documents_to_move: int
     aliases_to_add: list[str]
     from_fiche_exists: bool
     reassigned: int
     resumes_moved: int
+    documents_moved: int
     aliases_added: list[str]
     from_fiche_trashed: bool
     ledger_run: str
