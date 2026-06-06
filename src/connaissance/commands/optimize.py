@@ -12,6 +12,7 @@ import re
 import shutil
 from pathlib import Path
 
+from connaissance.core import ledger as _ledger
 from connaissance.core.paths import BASE_PATH
 from connaissance.core.tracking import TrackingDB
 
@@ -194,8 +195,13 @@ def _find_referencing_mds(att_path):
     return results
 
 
-def dedup(db, dry_run=False):
-    """Dédupliquer les fichiers identiques entre Attachments/ et documents."""
+def dedup(db, dry_run=False, run_id=None):
+    """Dédupliquer les fichiers identiques entre Attachments/ et documents.
+
+    Les doublons sont envoyés à la **corbeille ledger** (``safe_trash``), pas
+    supprimés : réversibles par ``ledger revert``, détruits par ``ledger purge``."""
+    if run_id is None:
+        run_id = _ledger.new_run_id("optimize")
     duplicates = scan_duplicates(db)
     if not duplicates:
         print("Aucun doublon détecté.", file=sys.stderr)
@@ -235,13 +241,15 @@ def dedup(db, dry_run=False):
             except OSError:
                 pass
 
-        # Supprimer le doublon
+        # Envoyer le doublon à la corbeille ledger (réversible).
         try:
-            dup_path.unlink()
+            _ledger.safe_trash(db, dup_path,
+                               f"dedup doublon de {Path(keeper).name}", run_id)
             removed += 1
             db.log("connaissance", "dedup_remove",
                    source_path=str(dup_path),
-                   details={"hash": dup["hash"], "keeper": keeper})
+                   details={"hash": dup["hash"], "keeper": keeper,
+                            "ledger_run": run_id})
         except OSError as e:
             print(f"    ⚠ Erreur suppression : {e}", file=sys.stderr)
 
@@ -306,11 +314,15 @@ def scan_orphan_attachments() -> list[dict]:
     return orphans
 
 
-def cleanup_orphans(db, dry_run=False) -> tuple[int, int]:
-    """Supprimer les attachements orphelins (sans .md référent frère).
+def cleanup_orphans(db, dry_run=False, run_id=None) -> tuple[int, int]:
+    """Envoyer les attachements orphelins (sans .md référent frère) à la corbeille.
 
-    Retourne ``(removed, freed_bytes)``.
+    Pas de copie survivante pour un orphelin : la **corbeille ledger**
+    (``safe_trash``) le rend réversible (``ledger revert``) au lieu d'un unlink
+    définitif. Retourne ``(removed, freed_bytes)``.
     """
+    if run_id is None:
+        run_id = _ledger.new_run_id("optimize")
     orphans = scan_orphan_attachments()
     if not orphans:
         print("Aucun attachement orphelin.", file=sys.stderr)
@@ -337,13 +349,13 @@ def cleanup_orphans(db, dry_run=False) -> tuple[int, int]:
     dirs_touched: set[Path] = set()
     for o in orphans:
         try:
-            o["path"].unlink()
+            _ledger.safe_trash(db, o["path"], "orphan attachment", run_id)
             removed += 1
             freed += o["size"]
             dirs_touched.add(o["dir"])
             db.log("connaissance", "orphan_attachment_remove",
                    source_path=str(o["path"]),
-                   details={"size": o["size"]})
+                   details={"size": o["size"], "ledger_run": run_id})
         except OSError as e:
             print(f"  ⚠ {o['path'].name}: {e}", file=sys.stderr)
 
@@ -463,6 +475,9 @@ def apply(dry_run: bool = True, promote_docs: bool = True,
     owns_db = db is None
     if db is None:
         db = TrackingDB()
+    # Un seul lot ledger pour dedup + orphans → `ledger revert <run>` annule
+    # tout l'optimize, `ledger purge <run>` le vide définitivement.
+    run_id = _ledger.new_run_id("optimize")
     try:
         promoted = 0
         deduped = 0
@@ -472,13 +487,14 @@ def apply(dry_run: bool = True, promote_docs: bool = True,
         if promote_docs:
             promoted = promote(db, dry_run=dry_run) or 0
         if dedup_attachments:
-            dedup_result = dedup(db, dry_run=dry_run)
+            dedup_result = dedup(db, dry_run=dry_run, run_id=run_id)
             if isinstance(dedup_result, tuple):
                 deduped, freed = dedup_result
             elif isinstance(dedup_result, int):
                 deduped = dedup_result
         if cleanup_orphans_flag:
-            orphans_removed, orphans_freed = cleanup_orphans(db, dry_run=dry_run)
+            orphans_removed, orphans_freed = cleanup_orphans(
+                db, dry_run=dry_run, run_id=run_id)
         # Passe finale : supprimer tous les dossiers vides restants sous
         # Transcriptions/ (effet cumulé de promote + dedup + cleanup_orphans,
         # qui peuvent laisser des hiérarchies vidées).
@@ -488,7 +504,7 @@ def apply(dry_run: bool = True, promote_docs: bool = True,
             if empty_dirs_removed:
                 print(f"  ✓ {empty_dirs_removed} dossier(s) vide(s) supprimé(s)",
                       file=sys.stderr)
-        return {
+        result = {
             "promoted": promoted,
             "deduped": deduped,
             "freed_bytes": freed + orphans_freed,
@@ -496,6 +512,12 @@ def apply(dry_run: bool = True, promote_docs: bool = True,
             "empty_dirs_removed": empty_dirs_removed,
             "dry_run": dry_run,
         }
+        # Espace « freed » = ce qui ira en corbeille (récupérable) ; libéré pour
+        # de vrai seulement à `ledger purge`. On expose le handle de revert/purge.
+        if not dry_run and (deduped or orphans_removed):
+            result["ledger_run"] = run_id
+            result["trashed_recoverable"] = deduped + orphans_removed
+        return result
     finally:
         if owns_db:
             db.close()

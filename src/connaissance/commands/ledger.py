@@ -30,3 +30,16 @@ def verify(run_id: str) -> dict:
     """Vérifier la cohérence ledger ↔ disque d'un run (schema LedgerVerify)."""
     with TrackingDB() as db:
         return _ledger.verify_run(db, run_id)
+
+
+def purge(run_id: str | None = None, older_than_days: int | None = None,
+          dry_run: bool = True) -> dict:
+    """Vider la corbeille ledger (schema LedgerPurge).
+
+    Suppression **définitive** des fichiers en corbeille (``op='trash'``),
+    filtrable par ``run_id`` et/ou ``older_than_days``. **Dry-run par défaut** :
+    passer ``dry_run=False`` (``--apply``) pour détruire réellement.
+    """
+    with TrackingDB() as db:
+        return _ledger.purge_run(db, run_id=run_id,
+                                 older_than_days=older_than_days, dry_run=dry_run)

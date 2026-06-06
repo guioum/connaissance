@@ -357,6 +357,10 @@ def _cmd_ledger(args) -> Any:
         return ledger.revert(args.run_id, dry_run=args.dry_run)
     if args.verb == "verify":
         return ledger.verify(args.run_id)
+    if args.verb == "purge":
+        return ledger.purge(run_id=args.run_id,
+                            older_than_days=args.older_than_days,
+                            dry_run=args.dry_run)
     raise SystemExit(f"verbe inconnu : ledger {args.verb}")
 
 
@@ -782,6 +786,13 @@ def build_parser() -> argparse.ArgumentParser:
     p_lg_rev.add_argument("--dry-run", dest="dry_run", action="store_true")
     p_lg_ver = p_lg_verbs.add_parser("verify")
     p_lg_ver.add_argument("run_id")
+    p_lg_purge = p_lg_verbs.add_parser("purge")
+    p_lg_purge.add_argument("--run", dest="run_id", type=str, default=None,
+                            help="Limiter à un run_id (défaut : toute la corbeille).")
+    p_lg_purge.add_argument("--older-than-days", dest="older_than_days",
+                            type=int, default=None,
+                            help="Ne purger que les entrées plus vieilles que N jours.")
+    add_apply_flag(p_lg_purge)   # destructif → dry-run par défaut, --apply pour exécuter
 
     return parser
 

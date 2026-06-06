@@ -154,10 +154,14 @@ CREATE TABLE IF NOT EXISTS doc_classification (
 -- après les ALTER TABLE : sur une base ancienne ces colonnes peuvent manquer
 -- au moment du SCHEMA, ce qui ferait échouer la création d'index.
 
--- Ledger journalisé des opérations de fichiers (move/rename), réversible.
--- Chaque ligne 'applied' enregistre l'ancien et le nouveau chemin + le SHA256,
--- ce qui permet un rollback vérifié (on ne restaure que si le fichier est
--- intact). Les opérations partagent un run_id (1 run = 1 lot révertible).
+-- Ledger journalisé des opérations de fichiers, réversible. Chaque ligne
+-- 'applied' enregistre l'ancien et le nouveau chemin + le SHA256, ce qui permet
+-- un rollback vérifié (on ne restaure que si le fichier est intact). Les
+-- opérations partagent un run_id (1 run = 1 lot révertible).
+--   op     : 'move' | 'rename' (organisation) | 'trash' (corbeille ledger :
+--            suppression différée, le fichier est sous ~/Connaissance/.trash/).
+--   status : 'applied' (en vigueur) | 'reverted' (annulé par revert) |
+--            'purged' (corbeille vidée définitivement par `ledger purge`).
 CREATE TABLE IF NOT EXISTS file_ledger (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     run_id TEXT NOT NULL,
@@ -835,6 +839,8 @@ class TrackingDB:
                       COUNT(*) AS total,
                       SUM(status = 'applied') AS applied,
                       SUM(status = 'reverted') AS reverted,
+                      SUM(status = 'purged') AS purged,
+                      SUM(op = 'trash') AS trashed,
                       MAX(reason) AS reason
                FROM file_ledger
                GROUP BY run_id
@@ -855,6 +861,29 @@ class TrackingDB:
     def ledger_mark_reverted(self, row_id: int) -> None:
         self._conn.execute(
             "UPDATE file_ledger SET status = 'reverted' WHERE id = ?", (int(row_id),))
+        self._conn.commit()
+
+    def ledger_trash_ops(self, *, run_id: str | None = None,
+                         older_than_days: int | None = None) -> list[dict]:
+        """Opérations de corbeille en attente de purge (``op='trash'``,
+        ``status='applied'``), filtrables par run et/ou ancienneté."""
+        q = ("SELECT * FROM file_ledger "
+             "WHERE op = 'trash' AND status = 'applied'")
+        params: list = []
+        if run_id:
+            q += " AND run_id = ?"
+            params.append(run_id)
+        if older_than_days is not None:
+            # timestamp est en heure locale ('localtime') à l'écriture.
+            q += (" AND timestamp < strftime('%Y-%m-%dT%H:%M:%S', 'now', "
+                  "'localtime', ?)")
+            params.append(f"-{int(older_than_days)} days")
+        q += " ORDER BY id"
+        return [dict(r) for r in self._conn.execute(q, params).fetchall()]
+
+    def ledger_mark_purged(self, row_id: int) -> None:
+        self._conn.execute(
+            "UPDATE file_ledger SET status = 'purged' WHERE id = ?", (int(row_id),))
         self._conn.commit()
 
     def purge_source_hashes(self) -> None:

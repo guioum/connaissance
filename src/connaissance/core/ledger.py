@@ -16,7 +16,7 @@ import shutil
 import uuid
 from pathlib import Path
 
-from connaissance.core.paths import documents_read_path
+from connaissance.core.paths import CONNAISSANCE_ROOT, documents_read_path
 
 
 def new_run_id(prefix: str = "run") -> str:
@@ -25,7 +25,8 @@ def new_run_id(prefix: str = "run") -> str:
 
 
 def safe_move(db, old_path, new_path, reason: str, run_id: str,
-              *, dry_run: bool = False, commit: bool = True) -> dict:
+              *, dry_run: bool = False, commit: bool = True,
+              op: str | None = None) -> dict:
     """Déplacer/renommer un fichier en le journalisant (réversible).
 
     - ``dry_run`` : retourne l'entrée ``status='planned'`` SANS rien écrire.
@@ -37,8 +38,9 @@ def safe_move(db, old_path, new_path, reason: str, run_id: str,
     l'appelant (ex. ``with db.transaction():`` pour grouper avec un relink de
     fiche). Le ``shutil.move`` lui-même n'est jamais transactionnel.
 
-    L'``op`` est ``rename`` si seul le nom change (même dossier parent), sinon
-    ``move``.
+    ``op`` : par défaut ``rename`` si seul le nom change (même dossier parent),
+    sinon ``move``. Un appelant peut forcer une autre étiquette (ex. ``trash``
+    pour la corbeille ledger) afin de distinguer le type d'opération.
     """
     old = Path(old_path)
     new = Path(new_path)
@@ -51,7 +53,7 @@ def safe_move(db, old_path, new_path, reason: str, run_id: str,
     sha = db.get_or_compute_hash(old, read_path=documents_read_path(old))
     entry = {
         "run_id": run_id,
-        "op": "rename" if old.parent == new.parent else "move",
+        "op": op or ("rename" if old.parent == new.parent else "move"),
         "old_path": str(old),
         "new_path": str(new),
         "sha256": sha,
@@ -69,6 +71,65 @@ def safe_move(db, old_path, new_path, reason: str, run_id: str,
     db.ledger_record(entry, commit=commit)
     entry["status"] = "applied"
     return entry
+
+
+def safe_trash(db, path, reason: str, run_id: str,
+               *, dry_run: bool = False, commit: bool = True) -> dict:
+    """Envoyer un fichier à la **corbeille ledger** au lieu de le supprimer.
+
+    Au lieu d'un ``unlink`` irréversible, déplace le fichier sous
+    ``~/Connaissance/.trash/<run_id>/<chemin d'origine>`` via ``safe_move`` avec
+    ``op='trash'`` : l'opération est journalisée, **réversible** par
+    ``ledger revert <run>`` (restauration vérifiée par hash), et n'est détruite
+    définitivement que par ``ledger purge``. La structure d'origine est
+    préservée sous le dossier de run (pas de collision de noms).
+    """
+    path = Path(path)
+    try:
+        rel = path.relative_to(CONNAISSANCE_ROOT)
+    except ValueError:
+        rel = Path(path.name)
+    dest = CONNAISSANCE_ROOT / ".trash" / run_id / rel
+    return safe_move(db, path, dest, reason, run_id,
+                     dry_run=dry_run, commit=commit, op="trash")
+
+
+def purge_run(db, *, run_id: str | None = None,
+              older_than_days: int | None = None, dry_run: bool = False) -> dict:
+    """Vider la corbeille ledger : suppression **définitive** des fichiers
+    déplacés en corbeille (``op='trash'``, ``status='applied'``).
+
+    Filtrable par ``run_id`` et/ou ``older_than_days`` (ancienneté de l'opération).
+    Marque les lignes purgées (``status='purged'``) pour qu'elles ne soient plus
+    proposées au revert. **Irréversible** (vrai ``unlink``). En ``dry_run``,
+    rapporte seulement ce qui serait purgé.
+    """
+    ops = db.ledger_trash_ops(run_id=run_id, older_than_days=older_than_days)
+    result = {
+        "dry_run": dry_run,
+        "purged": 0,
+        "freed_bytes": 0,
+        "skipped": [],  # [{path, reason}]
+    }
+    for row in ops:
+        p = Path(row["new_path"])
+        if not p.exists():
+            # Déjà parti (reverté hors ledger, ou purge interrompue) : on solde
+            # quand même la ligne pour ne pas la re-proposer indéfiniment.
+            if not dry_run:
+                db.ledger_mark_purged(row["id"])
+            result["skipped"].append({"path": str(p), "reason": "introuvable"})
+            continue
+        if not dry_run:
+            try:
+                p.unlink()
+            except OSError as exc:
+                result["skipped"].append({"path": str(p), "reason": str(exc)})
+                continue
+            db.ledger_mark_purged(row["id"])
+        result["purged"] += 1
+        result["freed_bytes"] += row["size"] or 0
+    return result
 
 
 def revert_run(db, run_id: str, *, dry_run: bool = False) -> dict:

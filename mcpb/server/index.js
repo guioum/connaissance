@@ -1,6 +1,6 @@
 // MCP server wrapper for the `connaissance` CLI.
 //
-// Exposes 61 tools (mcp__connaissance__*) that shell-out to the
+// Exposes 62 tools (mcp__connaissance__*) that shell-out to the
 // `connaissance` Python CLI installed via `uv tool install` or `pip`.
 // Each tool maps 1:1 to a CLI subcommand `connaissance <group> <verb>`.
 //
@@ -1388,6 +1388,26 @@ server.registerTool(
     const a = [args.run_id];
     if (args.dry_run) a.push("--dry-run");
     return runAndFormat("ledger", "revert", a);
+  }
+);
+
+server.registerTool(
+  "connaissance_ledger_purge",
+  {
+    description: "Empty the ledger trash : PERMANENTLY delete files that were sent to trash (op='trash', e.g. by optimize dedup/cleanup-orphans) instead of unlinked. Filterable by run and/or age. Irreversible. Dry-run by default — pass dry_run=false to actually delete.",
+    inputSchema: {
+      run_id: z.string().optional().describe("Limit to a single run_id (default: whole trash)."),
+      older_than_days: z.number().int().optional().describe("Only purge entries older than N days."),
+      dry_run: z.boolean().default(true).describe("Default dry-run ; pass false to actually delete."),
+    },
+  },
+  async (args) => {
+    const a = [];
+    if (args.run_id) { a.push("--run", args.run_id); }
+    if (args.older_than_days != null) { a.push("--older-than-days", String(args.older_than_days)); }
+    // dry_run=true est le défaut argparse du CLI. On pousse --apply pour le flipper.
+    if (args.dry_run === false) a.push("--apply");
+    return runAndFormat("ledger", "purge", a);
   }
 );
 

@@ -213,6 +213,13 @@ class LedgerVerify(TypedDict):
     issues: list[dict]      # [{path, reason}]
 
 
+class LedgerPurge(TypedDict):
+    dry_run: bool
+    purged: int             # fichiers détruits définitivement (corbeille)
+    freed_bytes: int
+    skipped: list[dict]     # [{path, reason}]
+
+
 class Triage(TypedDict, total=False):
     total_files: int        # vrac + groupés + conteneurs
     loose_files: int        # fichiers en vrac, à classer

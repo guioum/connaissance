@@ -21,9 +21,9 @@ grande réorg tant que ce n'est pas validé.
   déplacements de fichiers passent par `safe_move` → journalisés et révertibles :
   `organize` (résumé/transcription/document source/fils), `audit
   archive-non-documents`, `emails cleanup-obsolete`. Chacun retourne/expose un
-  `ledger_run`. Restent les **suppressions** d'`optimize` (dedup/orphelins) qui
-  attendent la « corbeille ledger » ci-dessous (un `unlink` n'est pas réversible
-  sans préserver le fichier).
+  `ledger_run`. Les **suppressions** d'`optimize` (dedup/orphelins) passent
+  désormais par la « corbeille ledger » (v2.34.0, ci-dessous) — plus aucune
+  mutation FS hors ledger.
 - [x] **Phase A — Triage A/B/C/D** (v2.20.0, affiné v2.20.1) : `documents triage`
   cartographie ~/Documents en 4 groupes (lecture seule). Les **conteneurs de
   code/projet** (marqueur fichier OU dossier `.git`/`.claude`, bundles `.app`)
@@ -114,8 +114,13 @@ grande réorg tant que ce n'est pas validé.
   référentiel `~/Connaissance`) pour éviter la collision de référentiels.
 - [ ] 🟢 Groupes B/C/D classés par logique propre (code regroupé, médias par
   date, exports tels quels).
-- [ ] 🟢 « Corbeille ledger » : transformer les suppressions (dedup) en
-  déplacement vers une zone réversible plutôt qu'un `unlink`.
+- [x] **« Corbeille ledger »** (v2.34.0) : `optimize` dedup ET cleanup_orphans
+  n'`unlink` plus — ils envoient le fichier à `~/Connaissance/.trash/<run_id>/`
+  via `ledger.safe_trash` (`op='trash'`), réversible par `ledger revert` et
+  détruit seulement par `ledger purge [--run | --older-than-days]` (dry-run par
+  défaut, `--apply` pour exécuter). `optimize apply` expose `ledger_run` +
+  `trashed_recoverable` ; l'espace n'est « libéré » qu'à la purge. Le pruning de
+  dossiers vides reste un `rmdir` direct (aucune donnée).
 
 ## Améliorations
 
@@ -180,7 +185,7 @@ grande réorg tant que ce n'est pas validé.
 
 ## Documentation (fait)
 
-- [x] **Décompte d'outils reconcilié** : README + `CLAUDE.md` à **61 outils /
+- [x] **Décompte d'outils reconcilié** : README + `CLAUDE.md` à **62 outils /
   15 groupes** (source de vérité : les `registerTool` de `index.js`). Le palier
   intermédiaire « 48 / 13 » a été dépassé par les phases triage/secrets/signals
   (+3), classify (+4), ledger (+4), manifest (+1) et les `backlog_count`.
