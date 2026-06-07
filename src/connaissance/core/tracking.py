@@ -748,6 +748,8 @@ class TrackingDB:
         mtime = float(st.st_mtime)
         rkey = _nfc(rel_path)
 
+        from connaissance.core.signals import SIGNALS_SCHEMA_VERSION
+
         row = self._conn.execute(
             "SELECT signals, size, mtime FROM doc_signals WHERE rel_path = ?",
             (rkey,)).fetchone()
@@ -755,7 +757,11 @@ class TrackingDB:
             d = dict(row)
             if d.get("signals") and d.get("size") == size and d.get("mtime") == mtime:
                 try:
-                    return _json.loads(d["signals"])
+                    packet = _json.loads(d["signals"])
+                    # Recalcule si le paquet caché est d'une version antérieure
+                    # du schéma (p. ex. sans le champ `excerpt`, schéma v1).
+                    if packet.get("_v") == SIGNALS_SCHEMA_VERSION:
+                        return packet
                 except (ValueError, TypeError):
                     pass  # cache corrompu → recalculer
 

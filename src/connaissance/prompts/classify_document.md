@@ -11,7 +11,7 @@ Tu classes des documents personnels à partir de SIGNAUX extraits (pas le docume
   - **Ne force PAS un sigle vers une entité connue qui n'a que le sigle en commun.** En particulier : **« BNC » = Banque Nationale (du Canada)**, à NE PAS confondre avec **« BDC » = Banque de développement du Canada** (organisme distinct). Dans le doute sur un sigle, garde le nom tel qu'il apparaît plutôt que de l'aligner à tort.
   - Un **document de travail** (livrable, présentation, note de projet, client de mission) n'est PAS émis par ta banque : ne lui attribue pas une entité bancaire au prétexte d'un sigle. Si l'émetteur réel est un client/employeur, c'est lui l'entité ; sinon `entity_type=divers`.
   - Un document **au sujet d'une personne mais émis par un organisme** (diplôme délivré par une université, relevé d'un assureur) prend l'**organisme** comme entité (ex. un diplôme McGill → entity=« McGill », entity_type=`organismes` — McGill est une université, pas une personne).
-  - **Si tu n'identifies pas d'émetteur/contrepartie CLAIR** (document de travail générique, matériel de formation, note interne, gabarit, fichier sans en-tête identifiable), mets **`entity_type=divers`** — ne **devine PAS** une entité connue par simple ressemblance ou au hasard. Mieux vaut `divers` (mise en attente) qu'un mauvais rattachement.
+  - **L'entité doit être NOMMÉE dans le document lui-même** (en-tête, logo, coordonnées, signature, ou clairement dans le texte de l'extrait). Si l'émetteur n'est PAS explicitement nommé — document de travail générique, matériel de formation, note interne, gabarit, exercice — tu DOIS mettre **`entity_type=divers`**, MÊME si le dossier d'origine, le sujet ou le « contexte professionnel » suggèrent une entreprise. **N'assigne JAMAIS une entité « par défaut », « par contexte » ou au hasard** : le contenu du dossier n'est pas une preuve d'émetteur. Si le mot « défaut » ou « contexte » te vient pour justifier l'entité, la bonne réponse est `divers`. Mieux vaut `divers` (mise en attente) qu'un faux rattachement.
 - **entity_type** : `organismes` (entreprise, banque, gouvernement, école, université…), `personnes` (un individu nommé), ou `divers` si non attribuable.
 - **category** : EXACTEMENT une valeur de cette liste (le DOMAINE, pas le type de document) :
   `achats`, `assurances`, `banque`, `emplois`, `impots`, `juridique`, `logement`, `sante`, `telecom`, `transport`, `abonnements`, `divers`.
@@ -30,9 +30,12 @@ Dossier d'origine : {{origin_folder}}
 Type détecté (indice) : {{type_hint}}
 Dates disponibles : nom={{date_name}} · métadonnée={{date_meta}} · fichier={{date_fs}}
 Titre (métadonnée) : {{title_meta}}
-Mots-clés : {{keywords}}
-Extraits : {{sentences}}
 Entités détectées : montants={{amounts}} · dates={{dates}} · références={{refs}}
+
+Extrait du document (début du texte brut, possiblement tronqué) :
+«««
+{{excerpt}}
+»»»
 
 Proposition heuristique (à confirmer/corriger) :
   entity={{hint_entity}} · entity_type={{hint_type}} · category={{hint_category}} · date={{hint_date}} · sujet={{hint_sujet}} · title="{{hint_title}}"

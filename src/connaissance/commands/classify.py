@@ -143,6 +143,8 @@ def _build_request(sig: dict, system: str, user_tpl: str, model: str,
         "amounts": ", ".join(ent.get("amounts") or []),
         "dates": ", ".join(ent.get("dates") or []),
         "refs": ", ".join(ent.get("refs") or []),
+        "excerpt": sig.get("excerpt")
+                   or "(aucun texte extrait — document scanné, image ou non lu)",
         "hint_entity": hint["entity"],
         "hint_type": hint["entity_type"],
         "hint_category": hint["category"],

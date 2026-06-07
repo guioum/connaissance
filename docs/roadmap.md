@@ -141,6 +141,21 @@ grande réorg tant que ce n'est pas validé.
   confiance basse ne bloque plus (réversible via ledger) ; `auto_low_confidence`
   exposé, `attente_reasons` restreint aux attente. Effet lot 200 : auto 83→97,
   zéro BDC, zéro hallucination en auto, `abonnements` maîtrisé.
+- [x] **Signal premier = extrait du texte brut, plus le résumé extractif**
+  (v2.45.0) : le résumé Luhn + mots-clés-par-fréquence était un proxy trop faible
+  (mots vides, phrases répétées) ET le texte extrait (PDF born-digital 4000 car.,
+  Office/plain 20000) était **jeté** après résumé. Désormais `extract_signals`
+  garde un champ **`excerpt`** (1500 car., espaces compactés) ; `classify prepare`
+  l'envoie dans le prompt à la place des mots-clés/Luhn (entités regex conservées).
+  Schéma de signaux **versionné** (`SIGNALS_SCHEMA_VERSION`) → le cache `doc_signals`
+  recalcule les entrées antérieures. Règle prompt **durcie** : l'entité doit être
+  NOMMÉE dans le document, jamais « par défaut/par contexte » (le dossier n'est pas
+  une preuve d'émetteur) — corrige la régression où l'extrait rendait Haiku
+  *confiant dans une entité devinée*. Effet lot 200 : auto 97→102, classements
+  ancrés dans le vrai texte (employeur lu sur la fiche de paie, etc.), confiance
+  basse 17→11. Coût corpus ≈ $10,5 (+~$1 vs v3, extrait ~+580 tok/doc). Reste :
+  YAKE pour les mots-clés *stockés* (qmd/metadata) et piste Ollama/OCR local —
+  non faits, cf. [[caching-inefficace-en-batch]] pour le contexte coût.
 - [x] **Sujets = vue virtuelle unique** (v2.35.0 — modèle sujets) :
   `sujet view` génère `~/Documents/- Sujets/<sujet>/` en symlinks depuis
   `doc_classification.sujet` (régénérable), **remplace `- Par catégorie/`** ;

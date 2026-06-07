@@ -45,6 +45,25 @@ _PDF_MAX_PAGES = 2
 _PDF_MAX_CHARS = 4000
 _PLAIN_MAX_CHARS = 20000
 _BORN_DIGITAL_MIN_CHARS = 20   # texte page 1 sous ce seuil ⇒ scanné
+_EXCERPT_MAX_CHARS = 1500      # extrait brut envoyé au classifieur (Phase C)
+
+# Version du schéma du paquet de signaux. À INCRÉMENTER quand la forme change
+# (nouveau champ, nouvelle extraction) : le cache `doc_signals` recalcule alors
+# les entrées d'une version antérieure (cf. tracking.get_or_compute_signals).
+# v2 : ajout du champ `excerpt` (texte brut tronqué) — le résumé extractif
+# (mots-clés par fréquence / Luhn) restait un proxy trop faible pour le classement.
+SIGNALS_SCHEMA_VERSION = 2
+
+
+def _excerpt(text: str, max_chars: int = _EXCERPT_MAX_CHARS) -> str:
+    """Début du texte brut, espaces compactés (lignes vides multiples → simple,
+    runs d'espaces → un seul). Bien plus informatif pour un LLM que les
+    mots-clés par fréquence ; tronqué pour borner le coût en tokens."""
+    if not text:
+        return ""
+    t = re.sub(r"[ \t]+", " ", text)
+    t = re.sub(r"\n[ \t]*\n+", "\n", t)
+    return t.strip()[:max_chars]
 
 _DATE_IN_NAME_RE = re.compile(
     r"\b(19[89]\d|20\d{2})[-_. ]?(0[1-9]|1[0-2])[-_. ]?(0[1-9]|[12]\d|3[01])\b")
@@ -246,6 +265,7 @@ def extract_signals(path, *, rel: str | None = None,
         {"keywords": [], "sentences": [], "entities": {}, "chars": 0}
 
     return {
+        "_v": SIGNALS_SCHEMA_VERSION,
         "rel": rel,
         "type": ext.lstrip("."),
         "origin_folder": origin_folder,
@@ -263,5 +283,8 @@ def extract_signals(path, *, rel: str | None = None,
         "born_digital": born_digital,
         "text_source": text_source,
         "pdf_available": pdf_available,
+        # Extrait brut (début du texte) : signal premier pour le classement.
+        # Le résumé extractif est conservé pour d'autres usages (metadata/qmd).
+        "excerpt": _excerpt(text),
         "summary": summary,
     }
