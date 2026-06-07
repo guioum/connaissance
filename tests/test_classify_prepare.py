@@ -62,7 +62,9 @@ def test_noise_tokens_include_household_and_boilerplate(tmp_path, monkeypatch):
     assert "date" in noise and "total" in noise              # boilerplate
 
 
-def test_prepare_filters_noise_from_prompt_keywords(tmp_path, monkeypatch):
+def test_prepare_injects_excerpt_in_prompt(tmp_path, monkeypatch):
+    # Depuis v2.45, le prompt envoie l'EXTRAIT DU TEXTE BRUT (et non plus des
+    # mots-clés par fréquence) comme signal premier au classifieur.
     docroot = tmp_path / "Documents"
     (docroot / "personnes" / "guillaume-monteillet").mkdir(parents=True)
     monkeypatch.setattr(CMD, "DOCUMENTS_DIR", docroot)
@@ -72,15 +74,35 @@ def test_prepare_filters_noise_from_prompt_keywords(tmp_path, monkeypatch):
         "dates": {"from_name": None, "metadata": None,
                   "filesystem_created": None, "filesystem_modified": None},
         "title_meta": None,
-        "summary": {"keywords": ["monteillet", "facture", "loyer", "date"],
-                    "sentences": [], "entities": {}}}]}
+        "excerpt": "Relevé de compte courant Banque Nationale solde 1 234,56 $",
+        "summary": {"keywords": [], "sentences": [], "entities": {}}}]}
     sf = tmp_path / "s.json"
     sf.write_text(json.dumps(sigs), encoding="utf-8")
     res = CMD.prepare(from_signals=str(sf))
     req = json.loads(Path(res["transit_file"]).read_text(encoding="utf-8"))["requests"][0]
-    kwline = next(l for l in req["user"].splitlines() if l.startswith("Mots-clés"))
-    assert "facture" in kwline and "loyer" in kwline
-    assert "monteillet" not in kwline and "date" not in kwline
+    assert "Extrait du document" in req["user"]
+    assert "Relevé de compte courant Banque Nationale" in req["user"]
+
+
+def test_prepare_system_carries_shared_entity_discipline(tmp_path, monkeypatch):
+    # Le bloc « Discipline d'entité » + entités connues est partagé pré/final ;
+    # il doit figurer dans le système du prompt de classement.
+    docroot = tmp_path / "Documents"
+    (docroot / "personnes" / "guillaume-monteillet").mkdir(parents=True)
+    monkeypatch.setattr(CMD, "DOCUMENTS_DIR", docroot)
+    sigs = {"documents": [{
+        "rel": "x/doc.pdf", "type": "pdf", "origin_folder": None,
+        "type_hint": None, "name_keywords": [],
+        "dates": {"from_name": None, "metadata": None,
+                  "filesystem_created": None, "filesystem_modified": None},
+        "title_meta": None, "excerpt": "",
+        "summary": {"keywords": [], "sentences": [], "entities": {}}}]}
+    sf = tmp_path / "s.json"
+    sf.write_text(json.dumps(sigs), encoding="utf-8")
+    res = CMD.prepare(from_signals=str(sf))
+    req = json.loads(Path(res["transit_file"]).read_text(encoding="utf-8"))["requests"][0]
+    assert "Discipline d'entité" in req["system"]
+    assert "BNC » = Banque Nationale" in req["system"]
 
 
 def test_known_entities_deslug(tmp_path, monkeypatch):

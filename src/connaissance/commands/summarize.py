@@ -253,6 +253,16 @@ def prepare(paths: list[str] | str = "all", mode: str = "batch",
     Avec `output_file` : `{output_file, total, estimated_input_tokens,
     mode, source_types, total_bytes}` (requests absents).
     """
+    owns_db = db is None
+    if db is None:
+        db = TrackingDB()
+
+    # Bloc système PARTAGÉ avec le pré-classement (discipline d'entité + entités
+    # connues) : même rigueur de résolution dans les deux passes. Calculé une
+    # fois (entités connues lues du disque), ajouté à chaque système.
+    from connaissance.commands.classify import entity_discipline_suffix
+    discipline_suffix = "\n\n" + entity_discipline_suffix()
+
     if paths == "all" or paths is None:
         plan_result = plan(db=db, source=source)
         target_paths = [m["path"] for m in plan_result["missing"]]
@@ -286,6 +296,27 @@ def prepare(paths: list[str] | str = "all", mode: str = "batch",
         # quoi le LLM ne reçoit pas l'objet du courriel quand le corps est court
         # ou vide (cas des invitations calendar, des HTML-only mal extraits).
         title_or_subject = fm.get("title") or fm.get("subject") or ""
+
+        # Amorçage (C) : si le document a déjà un pré-classement (doc_classification),
+        # on le passe comme HINT au résumé — à CONFIRMER/corriger avec le texte
+        # complet. Chaîne heuristique → pré (signaux) → final (OCR), ancrée :
+        # le doc tend à rester où le pré l'a mis sauf contradiction du texte.
+        # Jointure : `source` du frontmatter de transcription (« Documents/… »).
+        preclassement = ""
+        doc_src = str(fm.get("source") or "")
+        doc_rel = doc_src[len("Documents/"):] if doc_src.startswith("Documents/") else doc_src
+        cls = db.get_classification(doc_rel) if doc_rel else None
+        if cls and (cls.get("entity") or cls.get("category")):
+            preclassement = (
+                "Pré-classement déjà établi pour ce document (sur signaux, à "
+                "CONFIRMER ou corriger avec le texte complet ci-dessous) :\n"
+                f"  entity={cls.get('entity') or 'inconnu'} · "
+                f"entity_type={cls.get('entity_type') or 'inconnu'} · "
+                f"category={cls.get('category') or 'inconnu'} · "
+                f"date={cls.get('date') or 'inconnu'} · "
+                f"title=\"{cls.get('title') or ''}\""
+                + (f" · sujet={cls['sujet']}" if cls.get('sujet') else ""))
+
         variables = {
             "source": _rel_transcription(trans_path),
             "created": str(fm.get("created", "")),
@@ -297,6 +328,7 @@ def prepare(paths: list[str] | str = "all", mode: str = "batch",
             "content": body,
             "message_count": str(fm.get("message-count", "")),
             "message_ids_yaml": "",
+            "preclassement": preclassement,
         }
 
         user_text = _substitute(user_tmpl, variables)
@@ -314,7 +346,7 @@ def prepare(paths: list[str] | str = "all", mode: str = "batch",
 
         requests.append({
             "custom_id": _custom_id(_rel_transcription(trans_path)),
-            "system": system_tmpl,
+            "system": system_tmpl + discipline_suffix,
             "user": user_text,
             "model": choice["model"],
             "max_tokens": DEFAULT_MAX_TOKENS,
@@ -356,6 +388,9 @@ def prepare(paths: list[str] | str = "all", mode: str = "batch",
             "model_tiers": tiers,
             "preference": preference,
         }
+
+    if owns_db:
+        db.close()
 
     from connaissance.core.output_file import write_or_inline
     return write_or_inline(payload, output_file=output_file, summary_fn=_summary)

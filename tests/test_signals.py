@@ -94,13 +94,17 @@ def test_get_or_compute_signals_caches(tracking_db, tmp_path):
     p.write_text("contenu", encoding="utf-8")
     calls = []
 
+    from connaissance.core.signals import SIGNALS_SCHEMA_VERSION
+
     def compute(_p):
         calls.append(1)
-        return {"rel": "doc.txt", "ok": True}
+        # Le paquet DOIT porter `_v` à la version courante, sinon le cache le
+        # considère périmé et recalcule (invalidation par version du schéma).
+        return {"_v": SIGNALS_SCHEMA_VERSION, "rel": "doc.txt", "ok": True}
 
     a = tracking_db.get_or_compute_signals(p, "doc.txt", compute)
     b = tracking_db.get_or_compute_signals(p, "doc.txt", compute)
-    assert a == b == {"rel": "doc.txt", "ok": True}
+    assert a == b == {"_v": SIGNALS_SCHEMA_VERSION, "rel": "doc.txt", "ok": True}
     assert len(calls) == 1   # 2e appel servi par le cache
 
     # mtime change → recalcul

@@ -119,6 +119,21 @@ def known_entities() -> list[str]:
     return names[:_MAX_KNOWN_ENTITIES]
 
 
+def entity_discipline_suffix(known: list[str] | None = None) -> str:
+    """Bloc système PARTAGÉ par le pré-classement et le classement final
+    (résumé) : règles de discipline d'entité (``prompts/_entity_discipline.md``)
+    + liste des entités connues. Source unique de vérité — garantit qu'une même
+    pièce résout la même entité dans les deux passes. Importé par ``summarize``.
+    """
+    frag = (PROMPTS_DIR / "_entity_discipline.md").read_text(encoding="utf-8").strip()
+    if known is None:
+        known = known_entities()
+    known_str = ", ".join(known) if known else "(aucune encore)"
+    return (frag
+            + "\n\n## Entités connues (aligne-toi dessus si pertinent)\n"
+            + known_str)
+
+
 def _custom_id(rel: str) -> str:
     return "cls_" + hashlib.sha1(rel.encode("utf-8")).hexdigest()[:16]
 
@@ -185,13 +200,10 @@ def prepare(scope: str | None = None, from_signals: str | None = None,
 
     system_base, user_tpl = _load_template()
     known = known_entities()
-    known_str = ", ".join(known) if known else "(aucune encore)"
-    # La liste d'entités connues est IDENTIQUE pour tous les documents : on la
-    # met dans le bloc SYSTEM (mis en cache par submit_batch) plutôt que dans
-    # chaque user — l'input facturé par requête s'en trouve très réduit.
-    system = (system_base
-              + "\n\n## Entités connues (aligne-toi dessus si pertinent)\n"
-              + known_str)
+    # Discipline d'entité + entités connues = bloc PARTAGÉ avec le classement
+    # final (résumé), source unique de vérité. Identique pour tous les documents
+    # → reste dans le SYSTEM (caché par submit_batch), input par requête réduit.
+    system = system_base + "\n\n" + entity_discipline_suffix(known)
 
     noise = noise_keyword_tokens()
     requests = [_build_request(d, system, user_tpl, model, known, noise)

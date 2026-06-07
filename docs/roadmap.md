@@ -3,6 +3,36 @@
 Liste vivante de ce qu'il reste à faire. Cocher quand c'est livré, retirer
 quand c'est obsolète. Priorités indicatives : 🔴 haute · 🟡 moyenne · 🟢 basse.
 
+## Cohérence pré-classement ↔ classement final
+
+Les pièces passent par DEUX classements : le pré-classement (signaux gratuits,
+Phase C) qui range/renomme, puis le classement final (`organize`) à partir du
+résumé MD (post-OCR) qui re-range/renomme. Objectif : une même pièce résout la
+MÊME entité dans les deux passes (sinon double rangement + churn).
+
+- [x] **B — Slug toujours recalculé** (v2.46.0) : `organize` faisait confiance au
+  `entity_slug` du frontmatter (que le prompt résumé produisait *sans* accents →
+  `revenu-quebec`), alors que le pré utilise `construire_slug` (*avec* accents →
+  `revenu-québec`) → entité dédoublée + redéplacement au final. Désormais
+  `organize` recalcule `construire_slug(entity_name)` (source unique de vérité) ;
+  le prompt résumé est corrigé (accents conservés, slug dérivé du nom).
+- [x] **A — Bloc « discipline d'entité » partagé** (v2.46.0) :
+  `prompts/_entity_discipline.md` (normalisation vs entités connues, BNC≠BDC,
+  doc de travail ≠ banque, anti-devinette, accents) injecté dans LES DEUX prompts
+  (`classify` + `resume_document`) via `classify.entity_discipline_suffix()`, avec
+  la même liste d'entités connues. Le classement final applique enfin la rigueur
+  d'entité du pré (avant : aucune, il pouvait ré-introduire BNC→BDC / halluciner).
+- [x] **C — Amorçage du final par le pré** (v2.46.0) : `summarize prepare` joint
+  la transcription à sa fiche `doc_classification` (via le `source` du frontmatter)
+  et passe le pré-classement (entité/cat/date/titre) comme HINT au résumé — à
+  confirmer/corriger avec le texte complet. Chaîne heuristique → pré (signaux) →
+  final (OCR), ancrée : la pièce reste où le pré l'a mise sauf contradiction du
+  texte → churn minimale. Prouvé end-to-end (test synthétique) ; inactif tant que
+  les pièces pré-classées ne sont pas OCRisées (ensembles disjoints aujourd'hui).
+- [ ] 🟢 **Aligner les règles de catégorie** : le résumé a une table de priorité
+  (1→13), `classify` les règles ajustées (placement→banque, abonnements resserré).
+  Moins urgent (la catégorie est une métadonnée/vue, pas l'axe physique).
+
 ## Intégrité référentielle des déplacements
 
 - [x] **Primitive `core.relocate.relocate_document`** (v2.42.0) : déplace le

@@ -414,8 +414,13 @@ def generer_manifeste():
                 continue
 
             entity_type = fm.get("entity_type", "inconnus")
-            entity_slug = fm.get("entity_slug", "")
             entity_name = fm.get("entity_name", "")
+            # Le slug ne vient JAMAIS du LLM : on le recalcule depuis le nom
+            # d'entité via resolution.py (accents conservés, NFC) — source unique
+            # de vérité, identique au pré-classement. Évite le dédoublement
+            # revenu-quebec/revenu-québec et la churn au classement final.
+            # Repli sur le slug du frontmatter (re-normalisé) si pas de nom.
+            entity_slug = construire_slug(entity_name or fm.get("entity_slug", ""))
             confidence = fm.get("confidence", "low")
             date_val = str(fm.get("date", "")) if fm.get("date") else ""
             title = fm.get("title", "")

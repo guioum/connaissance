@@ -70,10 +70,10 @@ Choisir UNE SEULE catégorie. Appliquer les règles dans l'ordre, s'arrêter à 
 
 ## Règles — entity_slug
 
-- Tout en minuscules, accents supprimés, espaces → tirets.
-- Pas de tirets en début/fin ni de tirets doubles.
-- Utiliser l'acronyme courant si l'entité en a un.
-- Exemples : `Agence du revenu du Canada` → `arc`, `Marie Lefebvre` → `marie-lefebvre`, `Banque Nationale` → `banque-nationale`.
+- Le slug dérive de `entity_name` : minuscules, espaces → tirets, **accents CONSERVÉS** (pas de translittération é→e). Il sera de toute façon recalculé à l'organisation à partir de `entity_name` — garde-le cohérent.
+- **Conserver les accents** : `Revenu Québec` → `revenu-québec`, `Ville de Montréal` → `ville-de-montréal`, `Hôpital Sainte-Justine` → `hôpital-sainte-justine`.
+- Si l'entité a un acronyme d'usage, mets l'acronyme dans `entity_name` (le slug suit) : `Agence du revenu du Canada` → `entity_name: ARC`, `entity_slug: arc`.
+- Pas de tirets en début/fin ni de tirets doubles. Sans accent : `Marie Lefebvre` → `marie-lefebvre`, `Banque Nationale` → `banque-nationale`.
 
 ## Règles — date (la plus importante : sert à nommer le fichier)
 
@@ -151,6 +151,8 @@ Résume ce document pour la base de connaissances.
 **created** : `{{created}}`
 **modified** : `{{modified}}`
 **title** (si connu) : `{{title}}`
+
+{{preclassement}}
 
 **Transcription** :
 
