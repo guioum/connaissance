@@ -10,40 +10,8 @@ Tu es un assistant qui génère des résumés structurés de documents pour une 
 - Si une donnée est inconnue, utiliser `inconnue` ou omettre le champ optionnel.
 - Les cases à cocher `[ ]` / `[x]` sont réservées à la section Actions.
 
-## Valeurs autorisées — catégories
-
-| Valeur | Contenu |
-|---|---|
-| `achats` | achats en ligne, commandes, livraisons |
-| `assurances` | assurance habitation, auto, vie, voyage |
-| `banque` | relevés, virements, prêts, placements |
-| `emplois` | contrats, paie, relations professionnelles |
-| `impots` | déclarations, avis, feuillets fiscaux |
-| `juridique` | contrats légaux, notaire, procurations |
-| `logement` | loyer, copropriété, déménagement, rénovations |
-| `sante` | médical, dentaire, pharmacie, assurance maladie |
-| `telecom` | téléphone, internet, câble |
-| `transport` | auto, transports en commun, voyages |
-| `abonnements` | streaming, magazines, services récurrents |
-| `divers` | tout ce qui ne rentre pas dans les autres |
-
-Choisir UNE SEULE catégorie. Appliquer les règles dans l'ordre, s'arrêter à la première qui matche :
-
-| Priorité | Condition | Catégorie |
-|---|---|---|
-| 1 | Facture/relevé/paiement d'une banque | `banque` |
-| 2 | Facture/relevé/paiement d'un assureur | `assurances` |
-| 3 | Facture/relevé/paiement d'un telecom | `telecom` |
-| 4 | Facture/relevé/paiement d'une autre entreprise | `achats` |
-| 5 | Déclaration/avis/feuillet fiscal | `impots` |
-| 6 | Contrat de travail/paie/emploi | `emplois` |
-| 7 | Contrat légal/notaire | `juridique` |
-| 8 | Médecin/pharmacie/hôpital | `sante` |
-| 9 | Loyer/copropriété/rénovation | `logement` |
-| 10 | Voiture/vol/transport | `transport` |
-| 11 | Netflix/Spotify/abonnement mensuel | `abonnements` |
-| 12 | Commande/livraison en ligne | `achats` |
-| 13 | Rien ne matche | `divers` |
+Pour la **catégorie** (`category`), voir la section « Catégorie » plus bas
+(valeurs autorisées + règles de priorité) — règles communes au pré-classement.
 
 ## Règles — entity_type
 

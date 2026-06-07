@@ -257,11 +257,11 @@ def prepare(paths: list[str] | str = "all", mode: str = "batch",
     if db is None:
         db = TrackingDB()
 
-    # Bloc système PARTAGÉ avec le pré-classement (discipline d'entité + entités
-    # connues) : même rigueur de résolution dans les deux passes. Calculé une
-    # fois (entités connues lues du disque), ajouté à chaque système.
-    from connaissance.commands.classify import entity_discipline_suffix
-    discipline_suffix = "\n\n" + entity_discipline_suffix()
+    # Bloc système PARTAGÉ avec le pré-classement (discipline d'entité + règles
+    # de catégorie + entités connues) : même rigueur de résolution ET même
+    # taxonomie dans les deux passes. Calculé une fois, ajouté à chaque système.
+    from connaissance.commands.classify import shared_classification_suffix
+    discipline_suffix = "\n\n" + shared_classification_suffix()
 
     if paths == "all" or paths is None:
         plan_result = plan(db=db, source=source)

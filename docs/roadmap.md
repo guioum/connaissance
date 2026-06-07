@@ -29,9 +29,14 @@ MÊME entité dans les deux passes (sinon double rangement + churn).
   final (OCR), ancrée : la pièce reste où le pré l'a mise sauf contradiction du
   texte → churn minimale. Prouvé end-to-end (test synthétique) ; inactif tant que
   les pièces pré-classées ne sont pas OCRisées (ensembles disjoints aujourd'hui).
-- [ ] 🟢 **Aligner les règles de catégorie** : le résumé a une table de priorité
-  (1→13), `classify` les règles ajustées (placement→banque, abonnements resserré).
-  Moins urgent (la catégorie est une métadonnée/vue, pas l'axe physique).
+- [x] **Aligner les règles de catégorie** (v2.47.0) : fragment partagé
+  `prompts/_category_rules.md` (table de valeurs + priorité 1→13 + précisions
+  abonnements/placement/bourse/inscription), injecté dans `classify` ET les
+  templates de résumé via `shared_classification_suffix()` (ex-`entity_discipline_suffix`,
+  qui combine désormais entité + catégorie + entités connues). Les tables inline
+  sont retirées de `classify_document.md`, `resume_document.md`,
+  `resume_courriel.md` → une seule source de vérité, même taxonomie/priorité
+  dans les deux passes.
 - [x] **Nettoyage du résumé extractif** (v2.46.1) : les variables `keywords`/
   `sentences` du prompt `classify` (mortes depuis que l'extrait brut les remplace,
   v2.45) sont retirées, avec `noise_keyword_tokens`/`_GENERIC_KW_NOISE`. **Décision

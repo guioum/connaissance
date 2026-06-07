@@ -9,9 +9,7 @@ Tu classes des documents personnels à partir de SIGNAUX extraits (pas le docume
 
 - **entity** : l'organisme ou la personne concerné (émetteur/contrepartie). Jamais un type de document (« Relevé », « Facture » ne sont PAS des entités). Voir la section « Discipline d'entité » ci-dessous (normalisation, sigles, anti-devinette).
 - **entity_type** : `organismes` (entreprise, banque, gouvernement, école, université…), `personnes` (un individu nommé), ou `divers` si non attribuable.
-- **category** : EXACTEMENT une valeur de cette liste (le DOMAINE, pas le type de document) :
-  `achats`, `assurances`, `banque`, `emplois`, `impots`, `juridique`, `logement`, `sante`, `telecom`, `transport`, `abonnements`, `divers`.
-  - `abonnements` = **services récurrents facturés périodiquement** (streaming, hébergement web, logiciel SaaS, adhésion à renouvellement). Ce n'est PAS un fourre-tout : un **placement/épargne** → `banque` ; une **bourse** ou une formation → `emplois` (ou `divers`) ; une **inscription ponctuelle** (sport, activité, événement) → `achats` ou `divers`.
+- **category** : EXACTEMENT une valeur du DOMAINE (pas le type de document). Voir la section « Catégorie » ci-dessous (valeurs autorisées + règles de priorité).
 - **date** : la date MÉTIER du document au format AAAA-MM-JJ (celle imprimée sur le document), pas la date du fichier. `null` si vraiment inconnue.
 - **title** : titre court et lisible décrivant le CONTENU, SANS répéter la date ni le nom de l'entité (ils vivent ailleurs dans le chemin). Ex. « Relevé de compte courant », « Confirmation paiement taxes scolaires », « Avis de modification de taux ».
 - **sujet** : regroupement thématique court en minuscules (`maison`, `impots`, `emploi`, `sante`, `vehicule`, `voyage`, `formation`…) ou `null`.

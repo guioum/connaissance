@@ -75,9 +75,9 @@ def test_prepare_injects_excerpt_in_prompt(tmp_path, monkeypatch):
     assert "Relevé de compte courant Banque Nationale" in req["user"]
 
 
-def test_prepare_system_carries_shared_entity_discipline(tmp_path, monkeypatch):
-    # Le bloc « Discipline d'entité » + entités connues est partagé pré/final ;
-    # il doit figurer dans le système du prompt de classement.
+def test_prepare_system_carries_shared_rules(tmp_path, monkeypatch):
+    # Le bloc partagé pré/final (discipline d'entité + règles de catégorie +
+    # entités connues) doit figurer dans le système du prompt de classement.
     docroot = tmp_path / "Documents"
     (docroot / "personnes" / "guillaume-monteillet").mkdir(parents=True)
     monkeypatch.setattr(CMD, "DOCUMENTS_DIR", docroot)
@@ -94,6 +94,9 @@ def test_prepare_system_carries_shared_entity_discipline(tmp_path, monkeypatch):
     req = json.loads(Path(res["transit_file"]).read_text(encoding="utf-8"))["requests"][0]
     assert "Discipline d'entité" in req["system"]
     assert "BNC » = Banque Nationale" in req["system"]
+    # Règles de catégorie communes (mêmes valeurs + priorité dans les 2 passes).
+    assert "Catégorie — valeurs autorisées" in req["system"]
+    assert "Priorité" in req["system"]
 
 
 def test_known_entities_deslug(tmp_path, monkeypatch):
