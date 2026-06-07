@@ -115,11 +115,14 @@ plus cher** (n'ouvre `pypdfium2` qu'en dernier recours) :
 5. **couche texte des PDF born-digital**, page 1 (`pypdfium2`, extra optionnel
    `connaissance[pdf]`).
 
-Détecte **born-digital vs scanné**, produit un **résumé extractif maison** (Luhn
-+ mots-clés + entités montants/dates/refs, `core/summarize_extractif.py`). Cache
-dans `doc_signals` (clé `rel_path` NFC relative à `~/Documents`, validée par
-`(size, mtime)`). Secrets et conteneurs exclus. Validé sur 1 804 docs réels :
-86 % born-digital (texte gratuit).
+Détecte **born-digital vs scanné** et conserve un **extrait du texte brut**
+(`excerpt`, ~1500 car., espaces compactés) — c'est le **signal premier** envoyé
+au classement (un LLM lit le texte réel bien mieux que des mots-clés). Garde
+aussi un **résumé extractif** (Luhn + mots-clés + entités montants/dates/refs,
+`core/summarize_extractif.py`) pour d'autres usages (fingerprint de quasi-doublon,
+*haystack* du hint). Cache dans `doc_signals` (clé `rel_path` NFC relative à
+`~/Documents`, validée par `(size, mtime)` + **version de schéma** `_v`). Secrets
+et conteneurs exclus. Validé sur 1 804 docs réels : 86 % born-digital.
 
 ### C. Pré-classement — `classify` (plan → apply)
 
@@ -127,14 +130,22 @@ Pipeline hybride heuristique + LLM bon marché :
 
 1. **hint heuristique** (`core/classify.py`) : devine date/entité/catégorie/
    sujet/titre + confiance, gratuitement.
-2. **`classify prepare`** : signaux + hint + entités connues → requêtes Batch
-   (entités connues en *system prompt* cacheable).
-3. **submit_batch** (Haiku 4.5 ; A/B vs Sonnet = match nul → Haiku par défaut,
-   quelques dollars pour tout le corpus).
-4. **`classify register`** : valide les résultats (catégorie canonique, date),
-   réconcilie l'entité (`resolution.py`), écrit la **fiche d'identité**
-   `doc_classification` et un **manifeste** plan→apply ; la basse confiance part
-   en **zone d'attente**.
+2. **`classify prepare`** : **extrait du texte brut** + signaux + hint → requêtes
+   Batch. Le *system prompt* (cacheable) porte le **bloc partagé** avec le
+   classement final — discipline d'entité + règles de catégorie + entités connues
+   (`shared_classification_suffix`, fragments `prompts/_entity_discipline.md` et
+   `_category_rules.md`).
+3. **submit_batch** (Haiku 4.5 ; A/B vs Sonnet = match nul → Haiku par défaut).
+   ⚠️ Le **prompt caching ne fire pas en Batch** (workers parallèles froids) :
+   compter ~$10 pour tout le corpus en 1 doc/requête, pas le tarif caché.
+4. **`classify register`** : valide les résultats (catégorie via
+   `canonicalize_category`, date), réconcilie l'entité (`resolution.py`), écrit la
+   **fiche d'identité** `doc_classification` + sujet (`doc_sujets`) et un
+   **manifeste** plan→apply. **Porte auto = fiche structurellement complète**
+   (type exploitable + entité + catégorie + date) — la **confiance basse ne bloque
+   plus** (déplacement réversible via le ledger) ; il ne reste en **zone
+   d'attente** que ce qui manque une donnée (entité `divers`/`inconnus`, sans
+   catégorie/date) ou dont le parse a échoué.
 5. **`classify apply`** : déplace chaque entrée `auto` vers
    `organismes|personnes|divers/<slug>/AAAA-MM-JJ titre.ext` **via le ledger**
    (l'enregistrement ledger et le repointage de la fiche sont **atomiques**).
@@ -158,6 +169,16 @@ arborescence physique mais une **vue de symlinks** régénérable :
   demande (copie/zip réel, ex. envoi au comptable). Ne touche jamais les
   sources — pas de dossier physique permanent.
 - **`sujet list`** : sujets + compteurs.
+
+**Précédence par maturité (pas une union plate).** Un sujet a deux sources
+possibles : `classify` (provisoire, deviné du dossier d'origine — souvent du
+bruit : `archive-*`, `2018-02`) et `resume` (issu du **contenu** du résumé,
+propre), synchronisé dans `doc_sujets` au `summarize register`. `sujet_memberships`
+applique : si un sujet `resume` existe pour un document → il **supersède** le
+`classify` ; sinon repli sur `classify` **filtré du bruit** (`_is_junk_sujet`) ;
+`dedup` (cross-filing) reste additif. Les sujets sont normalisés via `slugify`
+(**accents conservés**, comme les slugs d'entité). Même principe que entité et
+catégorie : *pré = brouillon, résumé = autorité.*
 
 ### D. Doublons — `duplicates` (plan → apply)
 

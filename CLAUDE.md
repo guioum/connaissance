@@ -18,7 +18,9 @@ src/connaissance/        → package Python, CLI avec 14 groupes de commandes
   ├── cli.py             → entry point, fonction main()
   ├── core/              → paths, tracking (SQLite), filtres, résolution, schemas
   ├── commands/          → un module par groupe de sous-commandes
-  ├── prompts/           → templates markdown des résumés (package_data)
+  ├── prompts/           → templates markdown (résumés + pré-classement) et
+  │                        fragments partagés `_entity_discipline`/`_category_rules`
+  │                        (discipline d'entité + taxonomie, source unique pré/final)
   └── config/            → templates YAML de filtres et scoring (package_data)
 
 mcpb/                    → MCPB Node.js, installé dans Claude Desktop
