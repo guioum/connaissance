@@ -135,9 +135,13 @@ Pipeline hybride heuristique + LLM bon marché :
    classement final — discipline d'entité + règles de catégorie + entités connues
    (`shared_classification_suffix`, fragments `prompts/_entity_discipline.md` et
    `_category_rules.md`).
-3. **submit_batch** (Haiku 4.5 ; A/B vs Sonnet = match nul → Haiku par défaut).
-   ⚠️ Le **prompt caching ne fire pas en Batch** (workers parallèles froids) :
-   compter ~$10 pour tout le corpus en 1 doc/requête, pas le tarif caché.
+3. **submit_batch** (Haiku 4.5 ; A/B vs Sonnet = 100 % d'accord → Haiku par défaut).
+   ⚠️ **Le prompt caching n'aide pas ici** (≈ $20 pour le corpus, 1 doc/requête —
+   pas de tarif caché). DEUX raisons (le caching n'est PAS cassé, il marche en
+   direct séquentiel) : (a) le **système du pré-classement (~2800 tok) est sous le
+   seuil minimum cachable** de Haiku 4.5 (≈ 4096 tok) → no-op ; (b) même au-dessus
+   du seuil, le **Batch parallèle écrit le cache mais ne le relit jamais** (workers
+   froids). Levier de coût = trimmer le système / grouper, pas le caching.
 4. **`classify register`** : valide les résultats (catégorie via
    `canonicalize_category`, date), réconcilie l'entité (`resolution.py`), écrit la
    **fiche d'identité** `doc_classification` + sujet (`doc_sujets`) et un

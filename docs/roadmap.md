@@ -212,11 +212,13 @@ grande réorg tant que ce n'est pas validé.
   source-de-vérité dans `doc_classification.sujet` (v2.35.0 — pas de frontmatter
   sur un PDF brut ; la vue `- Sujets` lit la colonne).
 - [x] **Calibrage Phase C sur lot test réel** (v2.44.0) : 3 batches test de 200
-  docs (Haiku 4.5, ~$0,60) ont réglé prompt + porte auto. **Constat clé : le
-  prompt caching ne fire PAS en Batch** (workers parallèles froids — vérifié,
-  `cache_read=0`) ⇒ corpus complet ≈ $9,6 en 1 doc/requête ; le seul levier
-  déterministe d'amortissement du system serait de **grouper N docs/requête**
-  (K=10 ≈ $5,7, mais réécriture prepare/register + retest). Réglages livrés :
+  docs (Haiku 4.5, ~$0,60) ont réglé prompt + porte auto. **Constat (affiné le
+  07-06) : le prompt caching n'aide pas notre pipeline Batch** — PAS un bug (il
+  marche en direct séquentiel), deux causes : système du pré sous le **seuil
+  cachable** de Haiku 4.5 (≈ 4096 tok) → no-op ; et le **Batch parallèle écrit
+  mais ne relit pas** le cache (workers froids). Corpus en 1 doc/requête ≈ $20 ;
+  leviers = **trimmer le système** / **grouper N docs/requête** (amortit le
+  système). Réglages livrés :
   (a) prompt — désambiguïsation entités (BNC=Banque Nationale ≠ BDC ; doc de
   travail ≠ banque ; diplôme→organisme), `abonnements` resserré (services
   récurrents only), règle **anti-devinette** (pas d'émetteur clair →
