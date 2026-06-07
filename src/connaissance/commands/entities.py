@@ -351,3 +351,149 @@ def merge(from_entity: str, into_entity: str, dry_run: bool = True,
         "from_fiche_trashed": trashed,
         "ledger_run": run_id,
     }
+
+
+# --- Registre `entities` en BD : seed + liste -------------------------------
+
+import re as _re
+import collections as _coll
+from connaissance.core.resolution import construire_slug as _cslug
+
+# Consolidations curées HAUTE CONFIANCE (canonique → variantes/aliases) — seed
+# du registre. Évite la fragmentation des entités récurrentes vue dans l'ancien
+# run (BNC ×3, Manuvie ×2…). BNC ≠ BDC. Éditable ; complété par `entities merge`.
+_SEED_CURATED = {
+    "organismes": [
+        ("Banque Nationale", ["BNC", "Banque Nationale du Canada",
+                               "Banque Nationale Épargne et Placements"]),
+        ("Banque de développement du Canada", ["BDC",
+                                               "Business Development Bank of Canada"]),
+        ("Manuvie", ["Manulife", "La Compagnie d'Assurance-Vie Manufacturers",
+                     "Manufacturers Life Insurance Co."]),
+        ("Financière Sun Life", ["Sun Life"]),
+        ("FMRQ", ["Fédération des Médecins Résidents du Québec"]),
+        ("SAAQ", ["Société de l'assurance automobile du Québec"]),
+        ("Agence du revenu du Canada", ["ARC"]),
+        ("Ordre des ingénieurs du Québec", ["OIQ"]),
+        ("Amazon Web Services", ["AWS", "Amazon Web Services Canada"]),
+        ("Google", ["Google LLC"]),
+    ],
+    "personnes": [
+        ("Guillaume Monteillet", ["Guillaume"]),
+        ("Mélanie Bazin", ["Melanie Bazin"]),
+        ("Arthur Monteillet", ["Arthur"]),
+    ],
+}
+
+
+def _fm_field(txt: str, key: str):
+    m = _re.search(rf"^{key}:\s*(.+?)\s*$", txt, _re.M)
+    return m.group(1).strip().strip('"').strip("'") if m else None
+
+
+import unicodedata as _ud
+_LEGAL = _re.compile(r"\b(inc|pbc|llc|sas|sa|ltee|ltée|ltd|co|corp|pllc|enr)\b")
+
+
+def _group_key(name: str) -> str:
+    """Clé de regroupement tolérante : minuscules, sans accents, sans
+    parenthèses ni suffixes légaux (Inc./PBC/LLC…) ni ponctuation. Rapproche
+    « Anthropic, PBC »/« Anthropic » et « …(BDC) »/« BDC ». Ne touche pas au
+    nom canonique stocké."""
+    s = "".join(c for c in _ud.normalize("NFD", name.lower())
+                if _ud.category(c) != "Mn")
+    s = _re.sub(r"\([^)]*\)", " ", s)
+    s = _re.sub(r"[,.\-—]", " ", s)
+    s = _LEGAL.sub(" ", s)
+    return _re.sub(r"\s+", " ", s).strip()
+
+
+def seed(from_backup: str | None = None, db: TrackingDB | None = None) -> dict:
+    """Peupler le registre `entities` (idempotent). Base : dossiers rangés +
+    consolidations curées. Avec ``--from-backup <dir>`` : enrichit depuis les
+    `entity_name` des résumés du backup (regroupés par slug, canonique = le plus
+    fréquent), sans sur-fusionner. À réviser ensuite via `entities list`/`merge`."""
+    owns = db is None
+    if db is None:
+        db = TrackingDB()
+    n = 0
+    try:
+        # 1. Consolidations curées (haute confiance).
+        for etype, items in _SEED_CURATED.items():
+            for name, aliases in items:
+                db.upsert_entity(etype, _cslug(name), name, aliases,
+                                 status="seed", commit=False)
+                n += 1
+        # 2. Dossiers rangés (canoniques propres), si absents.
+        for etype in ("organismes", "personnes"):
+            d = DOCUMENTS_DIR / etype
+            if not d.is_dir():
+                continue
+            for c in sorted(d.iterdir()):
+                if c.is_dir() and not c.name.startswith("."):
+                    name = c.name.replace("-", " ").replace("_", " ").strip()
+                    db.upsert_entity(etype, c.name, name.title(),
+                                     status="seed", commit=False)
+                    n += 1
+        # 3. Enrichissement depuis un backup de résumés (optionnel).
+        enriched = 0
+        if from_backup:
+            from pathlib import Path
+            rdir = Path(from_backup).expanduser()
+            if rdir.name != "Résumés" and (rdir / "Résumés").is_dir():
+                rdir = rdir / "Résumés"
+            # Radicaux de TOUTES les entités déjà seedées (curées + dossiers) :
+            # une variante du backup qui matche est ajoutée en alias, pas créée.
+            curated_keys = {}
+            for e in db.all_entities():
+                for v in [e["name"]] + (e["aliases"] or []):
+                    curated_keys[(e["type"], _group_key(v))] = (
+                        e["type"], e["slug"], e["name"])
+            # Regrouper le backup par clé tolérante (rapproche les variantes).
+            groups: dict = {}
+            for f in rdir.rglob("*.md"):
+                t = f.read_text(encoding="utf-8", errors="replace")[:800]
+                nm = _fm_field(t, "entity_name"); et = _fm_field(t, "entity_type")
+                if nm and et in ("organismes", "personnes"):
+                    groups.setdefault((et, _group_key(nm)), _coll.Counter())[nm] += 1
+            for (et, gkey), names in groups.items():
+                if not gkey:
+                    continue
+                cur = curated_keys.get((et, gkey))
+                if cur:   # variante d'une entité curée → ajouter en alias
+                    db.upsert_entity(cur[0], cur[1], cur[2], list(names),
+                                     status="seed", commit=False)
+                    continue
+                # Canonique = le nom le plus PROPRE du groupe (sans parenthèse ni
+                # virgule = sans suffixe légal/qualificatif), puis le plus court,
+                # puis le plus fréquent → slug stable, variantes en alias.
+                canon = min(names, key=lambda nm: (
+                    1 if ("(" in nm or "," in nm) else 0, len(nm), -names[nm]))
+                aliases = [nm for nm in names if nm != canon]
+                db.upsert_entity(et, _cslug(canon), canon, aliases,
+                                 status="seed", commit=False)
+                enriched += 1
+        db._conn.commit()
+    finally:
+        if owns:
+            db.close()
+    return {"seeded": n, "enriched_from_backup": enriched if from_backup else 0}
+
+
+def list_registry(db: TrackingDB | None = None) -> dict:
+    """Lister le registre `entities` (canonique + aliases + compteur)."""
+    owns = db is None
+    if db is None:
+        db = TrackingDB()
+    try:
+        ents = db.all_entities()
+    finally:
+        if owns:
+            db.close()
+    return {
+        "total": len(ents),
+        "by_type": dict(_coll.Counter(e["type"] for e in ents)),
+        "entities": [{"type": e["type"], "slug": e["slug"], "name": e["name"],
+                      "aliases": e["aliases"], "doc_count": e["doc_count"]}
+                     for e in ents],
+    }

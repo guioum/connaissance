@@ -262,7 +262,7 @@ def prepare(paths: list[str] | str = "all", mode: str = "batch",
     # de catégorie + entités connues) : même rigueur de résolution ET même
     # taxonomie dans les deux passes. Calculé une fois, ajouté à chaque système.
     from connaissance.commands.classify import shared_classification_suffix
-    discipline_suffix = "\n\n" + shared_classification_suffix()
+    discipline_suffix = "\n\n" + shared_classification_suffix(db)
 
     if paths == "all" or paths is None:
         plan_result = plan(db=db, source=source)
@@ -553,6 +553,12 @@ def register(custom_id: str, content: str,
     doc_src = str(trans_fm.get("source") or "")
     if resume_sujet and doc_src.startswith("Documents/"):
         db.add_doc_sujets(doc_src[len("Documents/"):], [resume_sujet], "resume")
+
+    # Registre VIVANT : le résumé (texte complet) enrichit `entities`.
+    r_ename = str(resume_fm_after_merge.get("entity_name") or "").strip()
+    r_etype = str(resume_fm_after_merge.get("entity_type") or "").strip()
+    if r_ename and r_etype in ("organismes", "personnes"):
+        db.upsert_entity(r_etype, slugify(r_ename), r_ename, inc_count=1)
 
     resume_date = resume_fm_after_merge.get("date")
     if resume_date is not None and trans_abs.exists():

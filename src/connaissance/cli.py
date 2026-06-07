@@ -379,6 +379,10 @@ def _cmd_entities(args) -> Any:
     if args.verb == "rename":
         return entities.rename(args.from_entity, args.new_slug,
                                dry_run=args.dry_run)
+    if args.verb == "seed":
+        return entities.seed(from_backup=args.from_backup)
+    if args.verb == "list":
+        return entities.list_registry()
     raise SystemExit(f"verbe inconnu : entities {args.verb}")
 
 
@@ -923,6 +927,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_ent_ren.add_argument("--to-slug", dest="new_slug", required=True,
                            help="Nouveau slug (même type), accents permis.")
     add_apply_flag(p_ent_ren)     # mutation (DB + ledger) → dry-run par défaut
+    p_ent_seed = p_ent_verbs.add_parser("seed")
+    p_ent_seed.add_argument("--from-backup", dest="from_backup", default=None,
+                            help="Dossier backup (Résumés/+Synthèse/) pour "
+                                 "enrichir noms/aliases. Sinon : dossiers rangés.")
+    p_ent_verbs.add_parser("list")
 
     return parser
 

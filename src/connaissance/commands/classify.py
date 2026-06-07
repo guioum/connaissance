@@ -108,9 +108,9 @@ _JUNK_ENTITY_NAMES = {
 }
 
 
-def known_entities() -> list[str]:
-    """Entités déjà classées sur disque (organismes/ + personnes/), dé-sluggées,
-    junk générique exclu."""
+def _known_entities_from_folders() -> list[str]:
+    """Repli : entités déduites des dossiers rangés (organismes/ + personnes/),
+    dé-sluggées, junk exclu. Utilisé si le registre `entities` est vide."""
     names: list[str] = []
     for sub in ("organismes", "personnes"):
         d = DOCUMENTS_DIR / sub
@@ -125,18 +125,41 @@ def known_entities() -> list[str]:
     return names[:_MAX_KNOWN_ENTITIES]
 
 
-def shared_classification_suffix(known: list[str] | None = None) -> str:
+def known_entities(db: TrackingDB | None = None) -> list[str]:
+    """Liste d'entités connues pour le prompt — depuis le **registre `entities`**
+    (canonique + aliases, enrichi de batch en batch). Chaque entrée : « Nom »
+    ou « Nom (aussi : alias1, alias2) » pour que le modèle rabatte les variantes.
+    Repli sur les dossiers rangés si le registre est vide (premier run)."""
+    owns = db is None
+    if db is None:
+        db = TrackingDB()
+    try:
+        ents = db.all_entities(limit=_MAX_KNOWN_ENTITIES)
+    finally:
+        if owns:
+            db.close()
+    if not ents:
+        return _known_entities_from_folders()
+    out: list[str] = []
+    for e in ents:
+        al = e.get("aliases") or []
+        out.append(f"{e['name']} (aussi : {', '.join(al)})" if al else e["name"])
+    return out
+
+
+def shared_classification_suffix(db: TrackingDB | None = None,
+                                 known: list[str] | None = None) -> str:
     """Bloc système PARTAGÉ par le pré-classement et le classement final (résumé)
     : discipline d'entité (``prompts/_entity_discipline.md``) + règles de catégorie
-    (``prompts/_category_rules.md``) + liste des entités connues. Source unique de
-    vérité — garantit qu'une même pièce résout la même entité ET la même catégorie
-    dans les deux passes. Importé par ``summarize``.
+    (``prompts/_category_rules.md``) + registre d'entités connues (canonique +
+    aliases). Source unique de vérité — même entité ET même catégorie dans les
+    deux passes. Importé par ``summarize``.
     """
     ent = (PROMPTS_DIR / "_entity_discipline.md").read_text(encoding="utf-8").strip()
     cat = (PROMPTS_DIR / "_category_rules.md").read_text(encoding="utf-8").strip()
     if known is None:
-        known = known_entities()
-    known_str = ", ".join(known) if known else "(aucune encore)"
+        known = known_entities(db)
+    known_str = "\n".join(f"- {k}" for k in known) if known else "(aucune encore)"
     return (ent + "\n\n" + cat
             + "\n\n## Entités connues (aligne-toi dessus si pertinent)\n"
             + known_str)
@@ -206,11 +229,11 @@ def prepare(scope: str | None = None, from_signals: str | None = None,
         docs = docs[:limit]
 
     system_base, user_tpl = _load_template()
-    known = known_entities()
+    known = known_entities(db)
     # Discipline d'entité + règles de catégorie + entités connues = bloc PARTAGÉ
     # avec le classement final (résumé), source unique de vérité. Identique pour
     # tous les documents → reste dans le SYSTEM (caché par submit_batch).
-    system = system_base + "\n\n" + shared_classification_suffix(known)
+    system = system_base + "\n\n" + shared_classification_suffix(known=known)
 
     requests = [_build_request(d, system, user_tpl, model, known)
                 for d in docs]
@@ -466,7 +489,14 @@ def register(results_file: str, from_prepare: str,
         if not date:
             reasons.append("date_absente")
 
-        etype, slug = _reconcile_entity(entity, etype_raw)
+        # Aligner sur le registre `entities` : si le nom (ou son slug) matche une
+        # entité connue / un alias, réutiliser SON canonique (anti-fragmentation
+        # forte) ; sinon réconcilier normalement (nouvelle entité).
+        reg = db.resolve_entity(entity) if entity else None
+        if reg:
+            etype, slug, entity = reg["type"], reg["slug"], reg["name"]
+        else:
+            etype, slug = _reconcile_entity(entity, etype_raw)
         namefile = construire_nom_fichier(date or "0000-00-00", title or "sans-titre")
 
         # Statut : auto dès que la fiche est structurellement COMPLÈTE — type
@@ -508,6 +538,10 @@ def register(results_file: str, from_prepare: str,
             size = mtime = None
         db.upsert_classification(source, {
             **entry, "model": req.get("model"), "size": size, "mtime": mtime})
+        # Registre VIVANT : enrichir `entities` avec l'entité retenue (nouvelle ou
+        # +1 compteur). Les batches/tranches suivants s'aligneront dessus.
+        if entity and etype in ("organismes", "personnes") and slug:
+            db.upsert_entity(etype, slug, entity, inc_count=1)
         # Sujet primaire → table multi-sujet (source 'classify'), pour que la
         # vue « - Sujets » lise une source unique (cf. dédup consciente).
         if sujet:

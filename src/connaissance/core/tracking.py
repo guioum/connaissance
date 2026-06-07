@@ -198,6 +198,26 @@ CREATE TABLE IF NOT EXISTS doc_sujets (
 CREATE INDEX IF NOT EXISTS idx_doc_sujets_sujet ON doc_sujets(sujet);
 CREATE INDEX IF NOT EXISTS idx_doc_sujets_rel ON doc_sujets(rel_path);
 
+-- Registre canonique d'entités (personnes/organismes), VIVANT : seedé depuis les
+-- dossiers rangés + le backup, puis enrichi de batch en batch par `register`
+-- (ajout d'une entité découverte si nouvelle, sinon rattachement par alias).
+-- C'est la source de `known_entities()` injectée dans les prompts (canonique +
+-- aliases → le modèle rabat les variantes, anti-fragmentation). Clé = (type, slug)
+-- avec slug = construire_slug(name) (accents conservés). aliases = JSON list.
+CREATE TABLE IF NOT EXISTS entities (
+    type TEXT NOT NULL,            -- 'organismes' | 'personnes'
+    slug TEXT NOT NULL,            -- construire_slug(name), accents conservés
+    name TEXT NOT NULL,            -- nom canonique d'affichage
+    aliases TEXT,                  -- JSON: variantes que le modèle doit rabattre
+    doc_count INTEGER NOT NULL DEFAULT 0,
+    status TEXT,                   -- 'seed' | 'active'
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%S', 'now', 'localtime')),
+    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%S', 'now', 'localtime')),
+    UNIQUE(type, slug)
+);
+
+CREATE INDEX IF NOT EXISTS idx_entities_type ON entities(type);
+
 -- Ledger journalisé des opérations de fichiers, réversible. Chaque ligne
 -- 'applied' enregistre l'ancien et le nouveau chemin + le SHA256, ce qui permet
 -- un rollback vérifié (on ne restaure que si le fichier est intact). Les
@@ -1020,6 +1040,81 @@ class TrackingDB:
                 out.append({"rel_path": rel, "sujet": s})
         out.sort(key=lambda d: (d["sujet"], d["rel_path"]))
         return out
+
+    # --- Registre canonique d'entités (table entities) ---
+
+    def upsert_entity(self, etype: str, slug: str, name: str,
+                      aliases=None, *, inc_count: int = 0,
+                      status: str = "active", commit: bool = True) -> None:
+        """Insérer ou mettre à jour une entité du registre. Fusionne les aliases
+        (dédup casse-insensible, jamais le nom canonique lui-même), incrémente
+        ``doc_count`` de ``inc_count``. Clé = (type, slug)."""
+        import json as _json
+        slug = _nfc(slug)
+        aliases = [a for a in (aliases or []) if a and a.strip()]
+        row = self._conn.execute(
+            "SELECT name, aliases FROM entities WHERE type=? AND slug=?",
+            (etype, slug)).fetchone()
+        if row:
+            merged = list(_json.loads(row["aliases"] or "[]"))
+            seen = {a.lower() for a in merged} | {(row["name"] or "").lower()}
+            for a in aliases:
+                if a.lower() not in seen:
+                    merged.append(a); seen.add(a.lower())
+            self._conn.execute(
+                "UPDATE entities SET aliases=?, doc_count=doc_count+?, "
+                "updated_at=strftime('%Y-%m-%dT%H:%M:%S','now','localtime') "
+                "WHERE type=? AND slug=?",
+                (_json.dumps(merged, ensure_ascii=False), inc_count, etype, slug))
+        else:
+            al, seen = [], {(name or "").lower()}
+            for a in aliases:
+                if a.lower() not in seen:
+                    al.append(a); seen.add(a.lower())
+            self._conn.execute(
+                "INSERT INTO entities (type, slug, name, aliases, doc_count, status) "
+                "VALUES (?,?,?,?,?,?)",
+                (etype, slug, name, _json.dumps(al, ensure_ascii=False),
+                 inc_count, status))
+        if commit:
+            self._conn.commit()
+
+    def all_entities(self, types=("organismes", "personnes"),
+                     limit: int | None = None) -> list[dict]:
+        """Entités du registre (canonique + aliases), triées par usage décroissant.
+        Source de ``known_entities()`` pour les prompts."""
+        import json as _json
+        ph = ",".join("?" * len(types))
+        rows = self._conn.execute(
+            f"SELECT type, slug, name, aliases, doc_count FROM entities "
+            f"WHERE type IN ({ph}) ORDER BY doc_count DESC, name", tuple(types)
+        ).fetchall()
+        out = []
+        for r in rows:
+            d = dict(r)
+            d["aliases"] = _json.loads(d.get("aliases") or "[]")
+            out.append(d)
+        return out[:limit] if limit else out
+
+    def resolve_entity(self, name: str):
+        """Rattacher un nom brut à une entité canonique existante par **slug du
+        nom OU slug d'un alias** (accents conservés). Retourne {type, slug, name}
+        ou None. Sert au `register` pour détecter une variante d'entité connue."""
+        if not name or not name.strip():
+            return None
+        from connaissance.core.resolution import slugify
+        target = slugify(name)
+        if not target:
+            return None
+        import json as _json
+        for r in self._conn.execute(
+                "SELECT type, slug, name, aliases FROM entities").fetchall():
+            if r["slug"] == target:
+                return {"type": r["type"], "slug": r["slug"], "name": r["name"]}
+            for a in _json.loads(r["aliases"] or "[]"):
+                if slugify(a) == target:
+                    return {"type": r["type"], "slug": r["slug"], "name": r["name"]}
+        return None
 
     def relink_document(self, old_rel, new_rel, *, commit: bool = True) -> None:
         """Suivre un fichier déplacé : repointer sa fiche (signals + classement

@@ -24,13 +24,15 @@ def _signals_file(tmp_path):
     return p
 
 
-def test_prepare_builds_batch_requests(tmp_path, monkeypatch):
+def test_prepare_builds_batch_requests(tmp_path, monkeypatch, tracking_db):
     docroot = tmp_path / "Documents"
     (docroot / "organismes" / "banque-nationale").mkdir(parents=True)
     (docroot / "personnes" / "melanie-bazin").mkdir(parents=True)
     monkeypatch.setattr(CMD, "DOCUMENTS_DIR", docroot)
 
-    res = CMD.prepare(from_signals=str(_signals_file(tmp_path)))
+    # db de test (registre `entities` vide → known_entities retombe sur les
+    # dossiers ci-dessus, isolé de la vraie base).
+    res = CMD.prepare(from_signals=str(_signals_file(tmp_path)), db=tracking_db)
     assert res["total"] == 1
     assert res["known_entities_count"] == 2
 
@@ -113,10 +115,32 @@ def test_prepare_system_carries_shared_rules(tmp_path, monkeypatch):
     assert "Priorité" in req["system"]
 
 
-def test_known_entities_deslug(tmp_path, monkeypatch):
+def test_known_entities_deslug(tmp_path, monkeypatch, tracking_db):
+    # Registre vide → repli sur les dossiers rangés (dé-sluggés).
     docroot = tmp_path / "Documents"
     (docroot / "organismes" / "air-transat").mkdir(parents=True)
     (docroot / "organismes" / "banque-nationale").mkdir(parents=True)
     monkeypatch.setattr(CMD, "DOCUMENTS_DIR", docroot)
-    names = CMD.known_entities()
+    names = CMD.known_entities(tracking_db)
     assert "Air Transat" in names and "Banque Nationale" in names
+
+
+def test_known_entities_reads_registry(tracking_db):
+    # Avec un registre peuplé : known_entities renvoie canonique + aliases.
+    tracking_db.upsert_entity("organismes", "banque-nationale", "Banque Nationale",
+                              ["BNC", "Banque Nationale du Canada"])
+    tracking_db.upsert_entity("personnes", "guillaume-monteillet", "Guillaume Monteillet")
+    names = CMD.known_entities(tracking_db)
+    assert any("Banque Nationale (aussi : BNC" in n for n in names)
+    assert "Guillaume Monteillet" in names
+
+
+def test_resolve_entity_by_alias(tracking_db):
+    tracking_db.upsert_entity("organismes", "banque-nationale", "Banque Nationale",
+                              ["BNC", "Banque Nationale du Canada"])
+    # match par alias (slug) → canonique
+    r = tracking_db.resolve_entity("bnc")
+    assert r and r["name"] == "Banque Nationale"
+    r2 = tracking_db.resolve_entity("Banque Nationale du Canada")
+    assert r2 and r2["slug"] == "banque-nationale"
+    assert tracking_db.resolve_entity("Inconnu SARL") is None

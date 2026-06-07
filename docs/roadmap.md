@@ -3,6 +3,24 @@
 Liste vivante de ce qu'il reste à faire. Cocher quand c'est livré, retirer
 quand c'est obsolète. Priorités indicatives : 🔴 haute · 🟡 moyenne · 🟢 basse.
 
+## Registre d'entités vivant (table `entities`)
+
+- [x] **Registre canonique d'entités en BD** (v2.50.0) : avant, la liste
+  d'« entités connues » du prompt venait des ~23 dossiers rangés (petit
+  échantillon) → risque de fragmentation au run (une entité absente reçoit des
+  noms variants selon les docs, traités en parallèle sans apprentissage). Désormais
+  une **table `entities`** (`type, slug, name, aliases, doc_count`) : (1) seedée
+  par `entities seed [--from-backup]` (dossiers + consolidations curées BNC/BDC/
+  Manuvie… + regroupement tolérant du backup par radical : suffixes légaux/
+  parenthèses ignorés) ; (2) lue par `known_entities()` → le prompt montre
+  « Canonique (aussi : alias1, alias2) » pour que le modèle rabatte les variantes ;
+  (3) **enrichie de batch en batch** par `register` (`upsert_entity` ; `resolve_entity`
+  aligne un nom/alias sur le canonique existant avant d'en créer un nouveau).
+  `entities list` pour réviser. Seedé : 50 entités, 0 résidu de variante. Traiter
+  le corpus **en tranches** fait grandir le registre entre les batches.
+  Reste 🟢 : `entities merge`/`rename` opèrent encore sur les fiches Synthèse —
+  les unifier sur la table `entities`.
+
 ## Sujets : précédence par maturité (résumé > pré-classement)
 
 - [x] **Le sujet de contenu supersède le sujet provisoire** (v2.49.0) : avant,
