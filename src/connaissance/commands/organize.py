@@ -386,6 +386,7 @@ def generer_manifeste():
     # Trouver les résumés non organisés
     entity_dirs = {"personnes", "organismes", "divers", "inconnus"}
     manifeste = []
+    _db = TrackingDB()   # lecture seule : aligner les entités sur le registre
 
     for source_label in ("Documents", "Courriels", "Notes"):
         source_dir = RESUMES / source_label
@@ -415,12 +416,16 @@ def generer_manifeste():
 
             entity_type = fm.get("entity_type", "inconnus")
             entity_name = fm.get("entity_name", "")
-            # Le slug ne vient JAMAIS du LLM : on le recalcule depuis le nom
-            # d'entité via resolution.py (accents conservés, NFC) — source unique
-            # de vérité, identique au pré-classement. Évite le dédoublement
-            # revenu-quebec/revenu-québec et la churn au classement final.
-            # Repli sur le slug du frontmatter (re-normalisé) si pas de nom.
-            entity_slug = construire_slug(entity_name or fm.get("entity_slug", ""))
+            # Aligner sur le REGISTRE `entities` : si le nom (ou un alias) matche
+            # une entité connue, réutiliser SON canonique (type/slug) → placement
+            # cohérent avec le pré-classement, anti-fragmentation.
+            _reg = _db.resolve_entity(entity_name) if entity_name else None
+            if _reg:
+                entity_type, entity_slug = _reg["type"], _reg["slug"]
+            else:
+                # Sinon le slug ne vient JAMAIS du LLM : recalcul depuis le nom
+                # via resolution.py (accents conservés). Repli sur le frontmatter.
+                entity_slug = construire_slug(entity_name or fm.get("entity_slug", ""))
             confidence = fm.get("confidence", "low")
             date_val = str(fm.get("date", "")) if fm.get("date") else ""
             title = fm.get("title", "")
@@ -471,6 +476,7 @@ def generer_manifeste():
                 "status": status,
             })
 
+    _db.close()
     return manifeste
 
 

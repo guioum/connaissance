@@ -329,6 +329,9 @@ def merge(from_entity: str, into_entity: str, dry_run: bool = True,
         with db.transaction():
             reassigned = db.reassign_entity(f_type, f_slug, i_type, i_slug,
                                             into_name, commit=False)
+            # Registre `entities` : fusionner les lignes (nom+aliases du perdant
+            # → gardé, doc_count additionné, perdant supprimé).
+            db.merge_entity_rows(f_type, f_slug, i_slug, commit=False)
         added = _add_aliases(i_type, i_slug, alias_payload)
         # Documents → relocate_document vers l'entité gardée (graphe + refs).
         docs_moved = _relocate_entity_docs(db, f_type, f_slug, i_type, i_slug, run_id)

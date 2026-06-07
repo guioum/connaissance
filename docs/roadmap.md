@@ -18,8 +18,15 @@ quand c'est obsolète. Priorités indicatives : 🔴 haute · 🟡 moyenne · �
   aligne un nom/alias sur le canonique existant avant d'en créer un nouveau).
   `entities list` pour réviser. Seedé : 50 entités, 0 résidu de variante. Traiter
   le corpus **en tranches** fait grandir le registre entre les batches.
-  Reste 🟢 : `entities merge`/`rename` opèrent encore sur les fiches Synthèse —
-  les unifier sur la table `entities`.
+- [x] **Registre lu ET enrichi par TOUTES les phases + merge/rename unifiés**
+  (v2.51.0) : `entities merge` fusionne aussi les lignes de la table
+  (`merge_entity_rows` : nom+aliases du perdant → gardé, doc_count additionné) ;
+  `entities rename` met aussi à jour le slug dans la table (via `rename_slug`).
+  `organize` **bénéficie** du registre (`resolve_entity` aligne l'entité d'un
+  résumé sur le canonique avant de placer → folders cohérents). `synthesis`
+  (fiche) **enrichit** le registre avec les aliases accumulés (source la plus
+  riche). Bilan : classify + résumé + organize + synthesis + merge/rename
+  lisent ET/OU enrichissent la table — un seul registre vivant, cohérent.
 
 ## Sujets : précédence par maturité (résumé > pré-classement)
 

@@ -809,6 +809,17 @@ def register(content: str | None = None,
     db.register_file(str(dest_rel), kind,
                      source_type=source_type,
                      source_path=source_path)
+    # Registre VIVANT : une fiche d'entité est la source la plus RICHE d'aliases
+    # (accumulés sur tous ses docs) → enrichir `entities` (nom canonique + alias).
+    if kind == "fiche" and entity and "/" in entity:
+        et, eslug = entity.split("/", 1)
+        if et in ("organismes", "personnes"):
+            ffm = _parse_frontmatter(content) or {}
+            ename = str(ffm.get("entity_name") or "").strip()
+            fal = [str(a) for a in (ffm.get("aliases") or []) if a]
+            if ename or fal:
+                db.upsert_entity(et, eslug,
+                                 ename or eslug.replace("-", " ").title(), fal)
     db.log("connaissance", "synthese",
            source_type=source_type or kind,
            source_path=source_path,

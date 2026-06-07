@@ -966,6 +966,11 @@ class TrackingDB:
         c["sujet_doc_classification"] = self._conn.execute(
             "UPDATE doc_classification SET sujet=? WHERE sujet=?",
             (new_slug, old_slug)).rowcount
+        # Registre `entities` : suivre le renommage de slug (re-accentuation…).
+        c["entities"] = self._conn.execute(
+            "UPDATE OR IGNORE entities SET slug=?, "
+            "updated_at=strftime('%Y-%m-%dT%H:%M:%S','now','localtime') "
+            "WHERE type=? AND slug=?", (new_slug, old_type, old_slug)).rowcount
         if commit:
             self._conn.commit()
         return c
@@ -1115,6 +1120,37 @@ class TrackingDB:
                 if slugify(a) == target:
                     return {"type": r["type"], "slug": r["slug"], "name": r["name"]}
         return None
+
+    def merge_entity_rows(self, etype: str, from_slug: str, into_slug: str,
+                          *, commit: bool = True) -> bool:
+        """Fusionner deux lignes du registre `entities` : nom + aliases du perdant
+        → aliases du gardé, ``doc_count`` additionné, ligne perdante supprimée.
+        Pour `entities merge`. Retourne True si la fusion a eu lieu."""
+        import json as _json
+        fr = self._conn.execute(
+            "SELECT name, aliases, doc_count FROM entities WHERE type=? AND slug=?",
+            (etype, _nfc(from_slug))).fetchone()
+        to = self._conn.execute(
+            "SELECT name, aliases, doc_count FROM entities WHERE type=? AND slug=?",
+            (etype, _nfc(into_slug))).fetchone()
+        if fr is None or to is None:
+            return False
+        merged = list(_json.loads(to["aliases"] or "[]"))
+        seen = {a.lower() for a in merged} | {(to["name"] or "").lower()}
+        for a in [fr["name"]] + list(_json.loads(fr["aliases"] or "[]")):
+            if a and a.lower() not in seen:
+                merged.append(a); seen.add(a.lower())
+        self._conn.execute(
+            "UPDATE entities SET aliases=?, doc_count=doc_count+?, "
+            "updated_at=strftime('%Y-%m-%dT%H:%M:%S','now','localtime') "
+            "WHERE type=? AND slug=?",
+            (_json.dumps(merged, ensure_ascii=False), fr["doc_count"],
+             etype, _nfc(into_slug)))
+        self._conn.execute("DELETE FROM entities WHERE type=? AND slug=?",
+                           (etype, _nfc(from_slug)))
+        if commit:
+            self._conn.commit()
+        return True
 
     def relink_document(self, old_rel, new_rel, *, commit: bool = True) -> None:
         """Suivre un fichier déplacé : repointer sa fiche (signals + classement
