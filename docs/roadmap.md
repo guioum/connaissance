@@ -3,6 +3,25 @@
 Liste vivante de ce qu'il reste à faire. Cocher quand c'est livré, retirer
 quand c'est obsolète. Priorités indicatives : 🔴 haute · 🟡 moyenne · 🟢 basse.
 
+## Sujets : précédence par maturité (résumé > pré-classement)
+
+- [x] **Le sujet de contenu supersède le sujet provisoire** (v2.49.0) : avant,
+  la vue `- Sujets` faisait une **union plate** de `doc_sujets` (source `classify`,
+  deviné du dossier d'origine — bruit : `archive-*`, `2018-02`, `non-organisées`)
+  et de `doc_classification.sujet`, et les sujets « propres » des résumés
+  **n'étaient même pas branchés**. Désormais : (1) `summarize register` synchronise
+  le `sujet:` du résumé vers `doc_sujets` avec **`source='resume'`** (clé = le
+  document, via le `source` de la transcription) ; (2) `sujet_memberships()`
+  applique une **précédence** : si un sujet `resume` existe pour un doc, il est
+  seul affiché (supersède `classify`) ; sinon repli sur `classify` **filtré du
+  bruit** (`_is_junk_sujet` : dates nues, archive/triage, génériques) ; `dedup`
+  (cross-filing) toujours additif. (3) Les sujets sont **normalisés via `slugify`
+  (accents conservés**, comme les slugs d'entité) à l'écriture (classify + resume)
+  → fin des variantes `cafes`/`cafés` pour les nouveaux. Validé : vue passée de
+  sujets pollués à 81 sujets propres, 0 bruit. Même principe que entité/catégorie
+  (pré = brouillon, résumé = autorité). Les sujets `classify` existants restent
+  provisoires (régénérables) et se font superséder au fil des résumés.
+
 ## Taxonomie de catégories (data-driven)
 
 - [x] **Catégorie `professionnel` + réconciliation des fuites** (v2.48.0) :

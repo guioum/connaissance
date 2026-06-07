@@ -23,6 +23,7 @@ from pathlib import Path
 import yaml
 
 from connaissance.core.paths import BASE_PATH, CONNAISSANCE_ROOT
+from connaissance.core.resolution import slugify
 from connaissance.core.tracking import TrackingDB
 
 TRANSCRIPTIONS = CONNAISSANCE_ROOT / "Transcriptions"
@@ -543,6 +544,15 @@ def register(custom_id: str, content: str,
                     resume_fm_after_merge = {}
     except yaml.YAMLError:
         resume_fm_after_merge = {}
+
+    # Sujet du résumé → doc_sujets (source='resume'), clé = le DOCUMENT (via le
+    # `source` de la transcription). Le sujet de CONTENU fait autorité et
+    # supersède le sujet provisoire du pré-classement dans la vue « - Sujets »
+    # (cf. sujet_memberships). Documents seulement (la vue est Documents-only).
+    resume_sujet = slugify(str(resume_fm_after_merge.get("sujet") or ""))
+    doc_src = str(trans_fm.get("source") or "")
+    if resume_sujet and doc_src.startswith("Documents/"):
+        db.add_doc_sujets(doc_src[len("Documents/"):], [resume_sujet], "resume")
 
     resume_date = resume_fm_after_merge.get("date")
     if resume_date is not None and trans_abs.exists():

@@ -43,6 +43,34 @@ def _nfc(rel_path) -> str:
     que soit la source du chemin (walk filesystem NFD vs littéral/CLI NFC)."""
     return unicodedata.normalize("NFC", str(rel_path))
 
+
+# Bruit de dossier d'origine : sujets `classify` provisoires dérivés de noms de
+# dossiers du ~/Documents chaotique (pas de vrais thèmes). Filtrés de la vue
+# « - Sujets » (jamais des sujets `resume`, propres par construction).
+_JUNK_SUJET_SUBSTR = (
+    "archive", "triage", "takeout", "non-organis", "sans-tag", "sans-titre",
+    "boite-de-reception", "boîte-de-réception", "vrac", "telechargement",
+    "téléchargement", "download", "scanner", "doxie", "untitled", "_mois_",
+)
+_JUNK_SUJET_EXACT = {
+    "divers", "document", "documents", "fichier", "fichiers", "scan", "scans",
+    "material", "materiel", "matériel", "note", "notes", "autre", "autres",
+    "mois", "tmp", "temp",
+}
+
+
+def _is_junk_sujet(s: str) -> bool:
+    """Vrai si un sujet provisoire (`classify`) est du bruit de dossier : date
+    nue (``2018``, ``2018-02``), artefact de triage/archive, ou terme générique
+    non thématique."""
+    s = unicodedata.normalize("NFC", (s or "")).strip().lower()
+    if len(s) < 2 or s in _JUNK_SUJET_EXACT:
+        return True
+    if s.replace("-", "").isdigit():        # 2018, 2018-02, 20180101…
+        return True
+    return any(tok in s for tok in _JUNK_SUJET_SUBSTR)
+
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS operations (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -958,19 +986,40 @@ class TrackingDB:
         return added
 
     def sujet_memberships(self) -> list[dict]:
-        """Toutes les appartenances ``(rel_path, sujet)`` pour la vue ``- Sujets``.
+        """Appartenances ``(rel_path, sujet)`` pour la vue ``- Sujets``, avec
+        **précédence par maturité de source** (pas une union plate) :
 
-        Union de ``doc_sujets`` (multi-sujet : classify + dedup) et du sujet
-        primaire de ``doc_classification`` (compat des fiches d'avant doc_sujets).
+        - ``resume`` (sujet de CONTENU, issu du résumé) fait autorité : s'il
+          existe pour un document, il **supersède** le sujet ``classify``
+          provisoire (deviné du dossier d'origine) — on n'affiche que lui.
+        - sinon, repli sur ``classify`` **filtré du bruit de dossier** (dates,
+          ``archive-*``, ``non-organisées``…).
+        - ``dedup`` (cross-filing) est toujours ajouté (contexte multi-sujet).
+
+        Le sujet primaire de ``doc_classification`` est traité comme ``classify``
+        (compat des fiches d'avant ``doc_sujets``).
         """
+        by_rel: dict[str, dict[str, set]] = {}
         rows = self._conn.execute(
-            """SELECT rel_path, sujet FROM doc_sujets
-               WHERE TRIM(sujet) != ''
-               UNION
-               SELECT rel_path, sujet FROM doc_classification
-               WHERE sujet IS NOT NULL AND TRIM(sujet) != ''
-               ORDER BY sujet, rel_path""").fetchall()
-        return [dict(r) for r in rows]
+            "SELECT rel_path, sujet, COALESCE(source,'classify') src "
+            "FROM doc_sujets WHERE TRIM(sujet) != ''").fetchall()
+        for r in rows:
+            by_rel.setdefault(r["rel_path"], {}).setdefault(r["src"], set()).add(r["sujet"])
+        # Sujet primaire des fiches (compat) = niveau classify.
+        for r in self._conn.execute(
+                "SELECT rel_path, sujet FROM doc_classification "
+                "WHERE sujet IS NOT NULL AND TRIM(sujet) != ''").fetchall():
+            by_rel.setdefault(r["rel_path"], {}).setdefault("classify", set()).add(r["sujet"])
+
+        out: list[dict] = []
+        for rel, src_map in by_rel.items():
+            primary = (src_map.get("resume")
+                       or {s for s in src_map.get("classify", set())
+                           if not _is_junk_sujet(s)})
+            for s in primary | src_map.get("dedup", set()):
+                out.append({"rel_path": rel, "sujet": s})
+        out.sort(key=lambda d: (d["sujet"], d["rel_path"]))
+        return out
 
     def relink_document(self, old_rel, new_rel, *, commit: bool = True) -> None:
         """Suivre un fichier déplacé : repointer sa fiche (signals + classement

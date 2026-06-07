@@ -15,6 +15,28 @@ def _add(db, rel, sujet, etype="organismes", eslug="x"):
                                    "entity_type": etype, "entity_slug": eslug})
 
 
+def test_is_junk_sujet():
+    from connaissance.core.tracking import _is_junk_sujet
+    for junk in ("2018", "2018-02", "20180101", "archive-2024-03-03-triage",
+                 "non-organisées", "sans-tag", "material", "divers", "x"):
+        assert _is_junk_sujet(junk), junk
+    for ok in ("impots", "cuisine", "café-crème", "voyage-cancún"):
+        assert not _is_junk_sujet(ok), ok
+
+
+def test_sujet_memberships_resume_supersedes_classify(tmp_path, monkeypatch, tracking_db):
+    # Un doc avec sujet classify (provisoire) ET resume (contenu) → seul resume.
+    tracking_db.add_doc_sujets("a.pdf", ["archive-2024-triage", "impots-2024"], "classify")
+    tracking_db.add_doc_sujets("a.pdf", ["impots"], "resume")
+    # Un doc avec seulement classify, dont un bruit → seul le propre survit.
+    tracking_db.add_doc_sujets("b.pdf", ["2018-02", "assurance"], "classify")
+    by_rel = {}
+    for m in tracking_db.sujet_memberships():
+        by_rel.setdefault(m["rel_path"], set()).add(m["sujet"])
+    assert by_rel["a.pdf"] == {"impots"}              # resume supersède classify
+    assert by_rel["b.pdf"] == {"assurance"}           # bruit "2018-02" filtré
+
+
 def test_view_dry_run_lists_without_writing(tmp_path, monkeypatch, tracking_db):
     docs = _setup(tmp_path, monkeypatch, tracking_db)
     (docs / "a.pdf").write_bytes(b"a")

@@ -25,7 +25,7 @@ from connaissance.core.manifest_io import load_entries, unique_dest, unwrap
 from connaissance.core.output_file import write_or_inline
 from connaissance.core.paths import DOCUMENTS_DIR, require_paths, transit_file
 from connaissance.core.resolution import (chercher_alias, construire_nom_fichier,
-                                          construire_slug)
+                                          construire_slug, slugify)
 from connaissance.core.tracking import TrackingDB
 
 # Taxonomie canonique des catégories — SOURCE UNIQUE, alignée sur
@@ -451,7 +451,9 @@ def register(results_file: str, from_prepare: str,
         category = canonicalize_category(j.get("category"))
         date = j.get("date") if isinstance(j.get("date"), str) and _DATE_OK.match(j.get("date") or "") else None
         title = (j.get("title") or "").strip()
-        sujet = (j.get("sujet") or "").strip() or None
+        # Sujet normalisé en slug (minuscules-tirets, ACCENTS CONSERVÉS — même
+        # règle que les slugs d'entité) pour éviter les variantes café/cafes.
+        sujet = slugify(j.get("sujet") or "") or None
         confidence = j.get("confidence") if j.get("confidence") in ("high", "low") else "low"
 
         reasons = []
