@@ -16,7 +16,14 @@ quand c'est obsolète. Priorités indicatives : 🔴 haute · 🟡 moyenne · �
   cuisine/voyages/projets → `divers` + champ `sujet` »). Validé sur lot test 200 :
   `divers` 95→56 (−41 %), `professionnel` = 60 (30 %), `emplois` 28→17. Source
   unique : `prompts/_category_rules.md` + `CANONICAL_CATEGORIES`.
-  Reste 🟢 : remapper les ~17 anciens résumés à catégorie hors-liste (cosmétique).
+- [x] **Remap des anciens résumés hors-liste** (v2.48.1) : 14 résumés à catégorie
+  non canonique normalisés (backup `~/Connaissance/.trash/category-remap-20260607`).
+  Content-aware : les 6 `finances` étaient en fait des **impôts** (chemins
+  `impôts-*`, appel comptable TPS/TVQ) → `impots` (pas `banque`) ; `projets` d'un
+  client FMRQ → `professionnel` ; `cuisine`/`organisation` → `divers` + thème
+  préservé dans un nouveau champ `sujet:`. Leçon : **`finances` retiré du mapping
+  auto** (ambigu banque vs impots → `None` → mis en revue plutôt que deviné).
+  Vérif : 0 catégorie hors-liste restante dans les 278 résumés.
 
 ## Cohérence pré-classement ↔ classement final
 

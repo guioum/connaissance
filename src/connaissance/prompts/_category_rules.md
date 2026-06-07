@@ -49,6 +49,7 @@ Précisions importantes :
   adhésion). Un **placement/épargne** → `banque` ; une **inscription ponctuelle**
   (sport, activité) → `achats`/`divers`.
 - **N'invente JAMAIS une catégorie hors de cette liste.** En particulier :
-  `finances` → `banque` ; `voyages` → `transport` ; `cuisine`, `organisation`,
-  `projets`, `recettes`, `maison`, `jardin` → utilise `divers` (le DOMAINE) **et
-  place le thème dans le champ `sujet`** (ex. `category=divers`, `sujet=cuisine`).
+  n'utilise PAS `finances` (ambigu → choisis `banque` OU `impots` selon le
+  contenu) ; `voyages` → `transport` ; `cuisine`, `organisation`, `projets`,
+  `recettes`, `maison`, `jardin` → utilise `divers` (le DOMAINE) **et place le
+  thème dans le champ `sujet`** (ex. `category=divers`, `sujet=cuisine`).

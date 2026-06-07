@@ -55,7 +55,8 @@ def test_prepare_limit(tmp_path, monkeypatch):
 
 def test_canonicalize_category_maps_leaks():
     # Synonymes / fuites → canonique ; thèmes fins → divers ; inconnu → None.
-    assert CMD.canonicalize_category("finances") == "banque"
+    # `finances` est ambigu (banque vs impots) → non mappé → None (mis en revue).
+    assert CMD.canonicalize_category("finances") is None
     assert CMD.canonicalize_category("santé") == "sante"      # accent NFC
     assert CMD.canonicalize_category("voyages") == "transport"
     assert CMD.canonicalize_category("cuisine") == "divers"

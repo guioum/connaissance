@@ -39,8 +39,10 @@ CANONICAL_CATEGORIES = {
 # Synonymes / fuites (anciens résumés, sorties LLM hors liste) → canonique.
 # Les thèmes fins (cuisine, voyages…) retombent sur `divers` : ils vivent dans
 # le champ `sujet`, pas dans la catégorie (domaine).
+# `finances` est volontairement ABSENT : ambigu (banque vs impots selon le
+# contenu — vérifié sur le corpus, les « finances » étaient en fait des impôts).
+# Non mappé ⇒ None ⇒ mis en revue plutôt que deviné à tort.
 _CATEGORY_SYNONYMS = {
-    "finances": "banque", "finance": "banque",
     "santé": "sante", "sante": "sante",
     "voyages": "transport", "voyage": "transport",
     "travail": "professionnel", "professionnelle": "professionnel",
