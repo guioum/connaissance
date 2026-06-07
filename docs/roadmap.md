@@ -3,6 +3,21 @@
 Liste vivante de ce qu'il reste à faire. Cocher quand c'est livré, retirer
 quand c'est obsolète. Priorités indicatives : 🔴 haute · 🟡 moyenne · 🟢 basse.
 
+## Taxonomie de catégories (data-driven)
+
+- [x] **Catégorie `professionnel` + réconciliation des fuites** (v2.48.0) :
+  profilage du corpus classé (doc_classification + résumés) → `divers` = 40 % et
+  `emplois` mélangeait RH et livrables ; ~24 % du corpus = **produit du travail**
+  éparpillé (Guillaume = consultant, taxonomie pensée pour l'admin perso). Ajout
+  de la catégorie **`professionnel`** (livrables/réunions/projets/formation/suivi
+  de temps), bornée vs `emplois` (relation d'emploi : contrat/paie/CV/RH). Fuites
+  des anciens résumés réconciliées via `canonicalize_category()` (finances→banque,
+  santé→sante, voyages→transport) + prompt durci (« n'invente pas de catégorie ;
+  cuisine/voyages/projets → `divers` + champ `sujet` »). Validé sur lot test 200 :
+  `divers` 95→56 (−41 %), `professionnel` = 60 (30 %), `emplois` 28→17. Source
+  unique : `prompts/_category_rules.md` + `CANONICAL_CATEGORIES`.
+  Reste 🟢 : remapper les ~17 anciens résumés à catégorie hors-liste (cosmétique).
+
 ## Cohérence pré-classement ↔ classement final
 
 Les pièces passent par DEUX classements : le pré-classement (signaux gratuits,

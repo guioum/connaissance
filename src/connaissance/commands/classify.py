@@ -28,11 +28,39 @@ from connaissance.core.resolution import (chercher_alias, construire_nom_fichier
                                           construire_slug)
 from connaissance.core.tracking import TrackingDB
 
-# Taxonomie canonique des catégories (alignée sur prompts/resume_document.md).
+# Taxonomie canonique des catégories — SOURCE UNIQUE, alignée sur
+# prompts/_category_rules.md (partagé pré-classement / résumé).
 CANONICAL_CATEGORIES = {
-    "achats", "assurances", "banque", "emplois", "impots", "juridique",
-    "logement", "sante", "telecom", "transport", "abonnements", "divers",
+    "achats", "assurances", "banque", "emplois", "professionnel", "impots",
+    "juridique", "logement", "sante", "telecom", "transport", "abonnements",
+    "divers",
 }
+
+# Synonymes / fuites (anciens résumés, sorties LLM hors liste) → canonique.
+# Les thèmes fins (cuisine, voyages…) retombent sur `divers` : ils vivent dans
+# le champ `sujet`, pas dans la catégorie (domaine).
+_CATEGORY_SYNONYMS = {
+    "finances": "banque", "finance": "banque",
+    "santé": "sante", "sante": "sante",
+    "voyages": "transport", "voyage": "transport",
+    "travail": "professionnel", "professionnelle": "professionnel",
+    "emploi": "emplois",
+    "cuisine": "divers", "recettes": "divers", "recette": "divers",
+    "organisation": "divers", "projets": "divers", "projet": "divers",
+    "maison": "divers", "jardin": "divers",
+}
+
+
+def canonicalize_category(cat: str | None) -> str | None:
+    """Normaliser une catégorie vers la liste canonique (mappe les synonymes/
+    fuites), ou None si vide/inconnue. NFC + minuscules pour matcher « santé »."""
+    if not cat:
+        return None
+    c = unicodedata.normalize("NFC", cat).strip().lower()
+    c = _CATEGORY_SYNONYMS.get(c, c)
+    return c if c in CANONICAL_CATEGORIES else None
+
+
 _DATE_OK = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 PROMPTS_DIR = Path(__file__).resolve().parent.parent / "prompts"
@@ -418,7 +446,7 @@ def register(results_file: str, from_prepare: str,
 
         entity = (j.get("entity") or "").strip()
         etype_raw = j.get("entity_type") or "divers"
-        category = j.get("category") if j.get("category") in CANONICAL_CATEGORIES else None
+        category = canonicalize_category(j.get("category"))
         date = j.get("date") if isinstance(j.get("date"), str) and _DATE_OK.match(j.get("date") or "") else None
         title = (j.get("title") or "").strip()
         sujet = (j.get("sujet") or "").strip() or None

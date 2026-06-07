@@ -53,6 +53,19 @@ def test_prepare_limit(tmp_path, monkeypatch):
     assert res["total"] == 0
 
 
+def test_canonicalize_category_maps_leaks():
+    # Synonymes / fuites → canonique ; thèmes fins → divers ; inconnu → None.
+    assert CMD.canonicalize_category("finances") == "banque"
+    assert CMD.canonicalize_category("santé") == "sante"      # accent NFC
+    assert CMD.canonicalize_category("voyages") == "transport"
+    assert CMD.canonicalize_category("cuisine") == "divers"
+    assert CMD.canonicalize_category("travail") == "professionnel"
+    assert CMD.canonicalize_category("professionnel") == "professionnel"
+    assert CMD.canonicalize_category("Banque") == "banque"    # casse
+    assert CMD.canonicalize_category("inexistant") is None
+    assert CMD.canonicalize_category(None) is None
+
+
 def test_prepare_injects_excerpt_in_prompt(tmp_path, monkeypatch):
     # Depuis v2.45, le prompt envoie l'EXTRAIT DU TEXTE BRUT (et non plus des
     # mots-clés par fréquence) comme signal premier au classifieur.
