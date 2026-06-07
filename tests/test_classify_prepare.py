@@ -53,15 +53,6 @@ def test_prepare_limit(tmp_path, monkeypatch):
     assert res["total"] == 0
 
 
-def test_noise_tokens_include_household_and_boilerplate(tmp_path, monkeypatch):
-    docroot = tmp_path / "Documents"
-    (docroot / "personnes" / "guillaume-monteillet").mkdir(parents=True)
-    monkeypatch.setattr(CMD, "DOCUMENTS_DIR", docroot)
-    noise = CMD.noise_keyword_tokens()
-    assert "monteillet" in noise and "guillaume" in noise   # foyer
-    assert "date" in noise and "total" in noise              # boilerplate
-
-
 def test_prepare_injects_excerpt_in_prompt(tmp_path, monkeypatch):
     # Depuis v2.45, le prompt envoie l'EXTRAIT DU TEXTE BRUT (et non plus des
     # mots-clés par fréquence) comme signal premier au classifieur.

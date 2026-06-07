@@ -69,30 +69,6 @@ def _norm(s: str) -> str:
                    if unicodedata.category(c) != "Mn")
 
 
-# Boilerplate documentaire générique (jamais discriminant) — retiré des
-# mots-clés ENVOYÉS à Claude pour les rendre plus précis. (N'affecte pas le
-# matching de catégorie du heuristique, qui garde son haystack complet.)
-_GENERIC_KW_NOISE = {
-    "date", "total", "montant", "somme", "numero", "nom", "prenom", "page",
-    "reference", "ref", "adresse", "client", "telephone", "tel", "courriel",
-    "email", "www", "com", "http", "https", "inc", "ltee", "ltd",
-}
-
-
-def noise_keyword_tokens() -> set[str]:
-    """Tokens à filtrer des mots-clés : boilerplate + noms du FOYER (dérivés de
-    ``personnes/`` — ton propre nom sature les documents sans rien discriminer)."""
-    toks = set(_GENERIC_KW_NOISE)
-    d = DOCUMENTS_DIR / "personnes"
-    if d.is_dir():
-        for child in d.iterdir():
-            if child.is_dir() and not child.name.startswith("."):
-                for t in re.split(r"[-_\s]+", child.name):
-                    if len(t) >= 3:
-                        toks.add(_norm(t))
-    return toks
-
-
 # Noms de dossiers génériques qui ne sont PAS des entités : les exclure de la
 # liste connue évite que le LLM y rattache un doc à tort (cf. A/B : « Document »).
 _JUNK_ENTITY_NAMES = {
@@ -139,12 +115,13 @@ def _custom_id(rel: str) -> str:
 
 
 def _build_request(sig: dict, system: str, user_tpl: str, model: str,
-                   known: list[str], noise: set[str]) -> dict:
+                   known: list[str]) -> dict:
     hint = _heur.classify(sig, known_entities=known)
     summ = sig.get("summary") or {}
     ent = summ.get("entities") or {}
     dates = sig.get("dates") or {}
-    kws = [k for k in (summ.get("keywords") or []) if _norm(k) not in noise]
+    # Le prompt envoie l'extrait du texte brut (`excerpt`) comme signal premier ;
+    # les mots-clés/Luhn du résumé extractif ne sont plus injectés (proxy faible).
     variables = {
         "rel": sig.get("rel", ""),
         "origin_folder": sig.get("origin_folder"),
@@ -153,8 +130,6 @@ def _build_request(sig: dict, system: str, user_tpl: str, model: str,
         "date_meta": dates.get("metadata"),
         "date_fs": dates.get("filesystem_created"),
         "title_meta": sig.get("title_meta"),
-        "keywords": ", ".join(kws),
-        "sentences": " | ".join((summ.get("sentences") or [])[:3]),
         "amounts": ", ".join(ent.get("amounts") or []),
         "dates": ", ".join(ent.get("dates") or []),
         "refs": ", ".join(ent.get("refs") or []),
@@ -205,8 +180,7 @@ def prepare(scope: str | None = None, from_signals: str | None = None,
     # → reste dans le SYSTEM (caché par submit_batch), input par requête réduit.
     system = system_base + "\n\n" + entity_discipline_suffix(known)
 
-    noise = noise_keyword_tokens()
-    requests = [_build_request(d, system, user_tpl, model, known, noise)
+    requests = [_build_request(d, system, user_tpl, model, known)
                 for d in docs]
 
     # Fichier de transit (persistant) consommé par submit_batch puis register.

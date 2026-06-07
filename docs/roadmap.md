@@ -32,6 +32,15 @@ MÊME entité dans les deux passes (sinon double rangement + churn).
 - [ ] 🟢 **Aligner les règles de catégorie** : le résumé a une table de priorité
   (1→13), `classify` les règles ajustées (placement→banque, abonnements resserré).
   Moins urgent (la catégorie est une métadonnée/vue, pas l'axe physique).
+- [x] **Nettoyage du résumé extractif** (v2.46.1) : les variables `keywords`/
+  `sentences` du prompt `classify` (mortes depuis que l'extrait brut les remplace,
+  v2.45) sont retirées, avec `noise_keyword_tokens`/`_GENERIC_KW_NOISE`. **Décision
+  actée — NE PAS pointer la dédup sur `excerpt`** : le fingerprint quasi-doublon
+  (`duplicates._summary_text`) reste sur le résumé extractif (phrases Luhn +
+  mots-clés), qui échantillonne TOUT le texte (≤ 4000/20000 car.) ; l'`excerpt`
+  (1500 car. = surtout l'en-tête commun) fusionnerait à tort deux relevés mensuels.
+  `summary` n'est donc PAS mort : consommateurs vivants = dédup + haystack du hint
+  heuristique. (YAKE resterait marginal pour ces deux usages — non retenu.)
 
 ## Intégrité référentielle des déplacements
 
