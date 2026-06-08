@@ -15,11 +15,17 @@ quand c'est obsolète. Priorités indicatives : 🔴 haute · 🟡 moyenne · �
   xlsx 384, doc 214, pptx 76). Reste sans texte = **1091 PDF scannés** (→ OCR
   natif Vision, à faire), iWork (.key, format propriétaire) et ebooks (faible
   valeur). Tout reste « gratuit, sans Mistral ».
-- [ ] 🔴 **OCR local natif (macOS Vision)** : les 1091 PDF scannés (+ images,
-  + iWork via rendu QuickLook) — `VNRecognizeTextRequest` (moteur Live Text :
-  gratuit, Neural Engine, qualité élevée), via un petit helper Swift / `ocrit` /
-  pyobjc. Remplace/complète Mistral OCR pour les scannés, en local. À prototyper
-  sur ~10 PDF réels vs Mistral.
+- [x] **OCR local natif (macOS Vision)** (v2.53.0) : helper Swift
+  `helpers/ocr_vision.swift` (Vision `VNRecognizeTextRequest`, rendu PDF via
+  PDFKit) compilé à la volée (`core/ocr_local.py`) ; commande **`documents
+  ocr-local`** OCRise les PDF scannés (born-digital absent) → transcription sous
+  `Transcriptions/Documents/`, marquée **`ocr_engine: vision-local` +
+  `ocr_confidence`**. Lit le miroir SSD (aucun download iCloud). Gratuit, ~1 s/page
+  (Neural Engine). Prototype validé : excellent sur l'imprimé (T4/T5/SAAQ/OEQ…),
+  correct sur le manuscrit. **Repasse Mistral gardée** : `--repass-candidates`
+  liste les transcriptions à faible confiance (≤ seuil) ; `--repass [--apply]` les
+  remet « à transcrire » (corbeille ledger) → le flux Mistral les reprend. Moteur
+  OCR local pour TOUT le pipeline (alternative gratuite à Mistral, repasse ciblée).
 
 ## Registre d'entités vivant (table `entities`)
 

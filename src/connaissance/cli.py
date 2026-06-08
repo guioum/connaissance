@@ -69,6 +69,13 @@ def _cmd_documents(args) -> Any:
         return documents.suspects()
     if args.verb == "verify-preserve":
         return documents.verify_preserve(args.before, args.after)
+    if args.verb == "ocr-local":
+        from connaissance.commands import ocr
+        if getattr(args, "repass_candidates", False):
+            return ocr.repass_candidates(max_confidence=args.max_confidence)
+        if getattr(args, "repass", False):
+            return ocr.repass(max_confidence=args.max_confidence, apply=args.apply)
+        return ocr.ocr_local(limit=args.limit, force=args.force, scope=args.scope)
     raise SystemExit(f"verbe inconnu : documents {args.verb}")
 
 
@@ -531,6 +538,25 @@ def build_parser() -> argparse.ArgumentParser:
     p_doc_vp = p_doc_verbs.add_parser("verify-preserve")
     p_doc_vp.add_argument("before")
     p_doc_vp.add_argument("after")
+    p_doc_ocr = p_doc_verbs.add_parser("ocr-local")
+    p_doc_ocr.add_argument("--limit", type=int, default=None,
+                           help="Limiter le nombre de docs OCRisés (lot/test).")
+    p_doc_ocr.add_argument("--scope", type=str, default=None,
+                           help="Restreindre à un sous-dossier (rel ~/Documents).")
+    p_doc_ocr.add_argument("--force", action="store_true",
+                           help="Ré-OCRiser même si une transcription existe.")
+    p_doc_ocr.add_argument("--repass-candidates", dest="repass_candidates",
+                           action="store_true",
+                           help="Lister les transcriptions OCR local à faible "
+                                "confiance (candidates repasse Mistral).")
+    p_doc_ocr.add_argument("--repass", action="store_true",
+                           help="Remettre les transcriptions faibles « à "
+                                "retranscrire » (corbeille ledger). Dry-run sauf --apply.")
+    p_doc_ocr.add_argument("--max-confidence", dest="max_confidence", type=float,
+                           default=0.6,
+                           help="Seuil de confiance pour --repass[-candidates] (défaut 0.6).")
+    p_doc_ocr.add_argument("--apply", action="store_true",
+                           help="Avec --repass : exécuter (défaut : dry-run).")
 
     # emails
     p_em = sub.add_parser("emails")
