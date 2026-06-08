@@ -136,3 +136,34 @@ def test_signals_command_walks_group_a(tmp_path, monkeypatch, tracking_db):
     assert doc["type_hint"] == "facture"
     assert doc["origin_folder"] == "Impôts 2024"
     assert doc["summary"]["entities"]["amounts"]
+
+
+def _make_xlsx(path, strings):
+    import zipfile
+    sst = '<?xml version="1.0"?><sst>' + "".join(f"<si><t>{s}</t></si>" for s in strings) + "</sst>"
+    with zipfile.ZipFile(path, "w") as z:
+        z.writestr("xl/sharedStrings.xml", sst)
+        z.writestr("[Content_Types].xml", "<Types/>")
+
+
+def _make_pptx(path, runs):
+    import zipfile
+    slide = '<?xml version="1.0"?><p:sld><p:cSld>' + "".join(f"<a:t>{r}</a:t>" for r in runs) + "</p:cSld></p:sld>"
+    with zipfile.ZipFile(path, "w") as z:
+        z.writestr("ppt/slides/slide1.xml", slide)
+
+
+def test_xlsx_text_stdlib(tmp_path):
+    from connaissance.core.signals import _xlsx_text
+    p = tmp_path / "b.xlsx"
+    _make_xlsx(p, ["Facture", "Banque Nationale", "Total 1 234,56 $"])
+    t = _xlsx_text(p)
+    assert "Facture" in t and "Banque Nationale" in t and "1 234,56" in t
+
+
+def test_pptx_text_stdlib(tmp_path):
+    from connaissance.core.signals import _pptx_text
+    p = tmp_path / "d.pptx"
+    _make_pptx(p, ["Stratégie données", "Jemena", "Plan 2024"])
+    t = _pptx_text(p)
+    assert "Stratégie données" in t and "Jemena" in t

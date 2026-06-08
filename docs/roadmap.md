@@ -3,6 +3,24 @@
 Liste vivante de ce qu'il reste à faire. Cocher quand c'est livré, retirer
 quand c'est obsolète. Priorités indicatives : 🔴 haute · 🟡 moyenne · 🟢 basse.
 
+## Extraction de texte born-digital élargie (Phase B)
+
+- [x] **xlsx/pptx (stdlib) + rtf/doc (textutil natif macOS)** (v2.52.0) : la Phase B
+  n'extrayait le contenu que des PDF born-digital, .docx et plain. Beaucoup de docs
+  restaient sans texte (mesuré : 3256/10846). Ajout dans `extract_signals` :
+  `_xlsx_text`/`_pptx_text` (zipfile stdlib : sharedStrings / runs `<a:t>`),
+  `_textutil_text` (shell-out `textutil -convert txt`, lit le miroir SSD → aucun
+  download iCloud) pour `.rtf/.doc/.dotx/.docm/.odt`. Schéma signaux → v3
+  (recalcul auto). **Gain : sans-texte 3256 → 1441** (+1815 docs : rtf 1173,
+  xlsx 384, doc 214, pptx 76). Reste sans texte = **1091 PDF scannés** (→ OCR
+  natif Vision, à faire), iWork (.key, format propriétaire) et ebooks (faible
+  valeur). Tout reste « gratuit, sans Mistral ».
+- [ ] 🔴 **OCR local natif (macOS Vision)** : les 1091 PDF scannés (+ images,
+  + iWork via rendu QuickLook) — `VNRecognizeTextRequest` (moteur Live Text :
+  gratuit, Neural Engine, qualité élevée), via un petit helper Swift / `ocrit` /
+  pyobjc. Remplace/complète Mistral OCR pour les scannés, en local. À prototyper
+  sur ~10 PDF réels vs Mistral.
+
 ## Registre d'entités vivant (table `entities`)
 
 - [x] **Registre canonique d'entités en BD** (v2.50.0) : avant, la liste

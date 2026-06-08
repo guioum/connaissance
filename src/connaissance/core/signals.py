@@ -52,7 +52,8 @@ _EXCERPT_MAX_CHARS = 1500      # extrait brut envoyé au classifieur (Phase C)
 # les entrées d'une version antérieure (cf. tracking.get_or_compute_signals).
 # v2 : ajout du champ `excerpt` (texte brut tronqué) — le résumé extractif
 # (mots-clés par fréquence / Luhn) restait un proxy trop faible pour le classement.
-SIGNALS_SCHEMA_VERSION = 2
+# v3 : extraction born-digital élargie (xlsx/pptx stdlib + rtf/doc via textutil).
+SIGNALS_SCHEMA_VERSION = 3
 
 
 def _excerpt(text: str, max_chars: int = _EXCERPT_MAX_CHARS) -> str:
@@ -156,6 +157,73 @@ def _docx_text(path: Path, max_chars: int = _PLAIN_MAX_CHARS) -> str:
     return text[:max_chars]
 
 
+def _unescape_xml(s: str) -> str:
+    for a, b in (("&amp;", "&"), ("&lt;", "<"), ("&gt;", ">"),
+                 ("&quot;", '"'), ("&apos;", "'")):
+        s = s.replace(a, b)
+    return s
+
+
+# Office born-digital supplémentaires (stdlib zipfile) + iWork/vieux Word via
+# `textutil` (commande native macOS, sans dépendance).
+_XLSX_EXTS = {".xlsx", ".xlsm", ".xltx"}
+_PPTX_EXTS = {".pptx", ".potx"}
+_TEXTUTIL_EXTS = {".rtf", ".doc", ".dotx", ".docm", ".odt"}
+
+
+def _xlsx_text(path: Path, max_chars: int = _PLAIN_MAX_CHARS) -> str:
+    """Texte d'un classeur .xlsx (stdlib) : chaînes partagées (xl/sharedStrings)
+    + chaînes inline des feuilles. Suffisant comme SIGNAL de classement."""
+    out: list[str] = []
+    try:
+        with zipfile.ZipFile(path) as z:
+            names = z.namelist()
+            if "xl/sharedStrings.xml" in names:
+                xml = z.read("xl/sharedStrings.xml").decode("utf-8", errors="replace")
+                out += re.findall(r"<t[^>]*>(.*?)</t>", xml, flags=re.S)
+            for n in names:
+                if n.startswith("xl/worksheets/") and n.endswith(".xml"):
+                    xml = z.read(n).decode("utf-8", errors="replace")
+                    out += re.findall(r'<is><t[^>]*>(.*?)</t></is>', xml, flags=re.S)
+                if sum(len(p) for p in out) > max_chars:
+                    break
+    except (OSError, KeyError, zipfile.BadZipFile):
+        return ""
+    return _unescape_xml(" ".join(out))[:max_chars]
+
+
+def _pptx_text(path: Path, max_chars: int = _PLAIN_MAX_CHARS) -> str:
+    """Texte d'une présentation .pptx (stdlib) : runs <a:t> des slides."""
+    out: list[str] = []
+    try:
+        with zipfile.ZipFile(path) as z:
+            slides = sorted(n for n in z.namelist()
+                            if n.startswith("ppt/slides/slide") and n.endswith(".xml"))
+            for n in slides:
+                xml = z.read(n).decode("utf-8", errors="replace")
+                out += re.findall(r"<a:t>(.*?)</a:t>", xml, flags=re.S)
+                if sum(len(p) for p in out) > max_chars:
+                    break
+    except (OSError, KeyError, zipfile.BadZipFile):
+        return ""
+    return _unescape_xml(" ".join(out))[:max_chars]
+
+
+def _textutil_text(path: Path, max_chars: int = _PLAIN_MAX_CHARS) -> str:
+    """Texte via `textutil` (natif macOS) : .rtf, .doc, .dotx, .odt… Aucun
+    téléchargement (lit le ``path`` fourni = miroir SSD). Vide si indisponible."""
+    import shutil
+    import subprocess
+    if shutil.which("textutil") is None:
+        return ""
+    try:
+        r = subprocess.run(["textutil", "-convert", "txt", "-stdout", str(path)],
+                           capture_output=True, timeout=30)
+        return r.stdout.decode("utf-8", errors="replace")[:max_chars]
+    except (OSError, subprocess.SubprocessError):
+        return ""
+
+
 def _plain_text(read_path: Path, max_chars: int = _PLAIN_MAX_CHARS) -> str:
     try:
         return read_path.read_text(encoding="utf-8", errors="replace")[:max_chars]
@@ -250,6 +318,15 @@ def extract_signals(path, *, rel: str | None = None,
             elif ext == ".docx":
                 text = _docx_text(read)
                 text_source = "office" if text.strip() else "none"
+            elif ext in _XLSX_EXTS:
+                text = _xlsx_text(read)
+                text_source = "office" if text.strip() else "none"
+            elif ext in _PPTX_EXTS:
+                text = _pptx_text(read)
+                text_source = "office" if text.strip() else "none"
+            elif ext in _TEXTUTIL_EXTS:
+                text = _textutil_text(read)
+                text_source = "textutil" if text.strip() else "none"
             elif ext == ".pdf":
                 pdf_text, pdf_meta, pdf_available = _pdf_text_and_meta(read)
                 meta = {**pdf_meta, **meta}
