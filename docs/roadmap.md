@@ -36,7 +36,9 @@ quand c'est obsolète. Priorités indicatives : 🔴 haute · 🟡 moyenne · �
 - [x] **Câblage repasse Mistral dans le flux transcrire** (v2.55.0) : Vision =
   pré-traitement ; Mistral (markdown, tableaux) en repasse bornée par pages.
   Trois pièces : (1) **`pages`** capturé dans les signaux (pypdfium2, schéma
-  **v4**) pour le filtre de coût ; (2) **`documents register --ocr-engine`** (et
+  **v5** ; v5 invalide aussi un cache v4 produit sans pypdfium2 — born-digital
+  dégradés ; note `signals` rendue véridique : `pdf_text_layer` + avertissement)
+  pour le filtre de coût ; (2) **`documents register --ocr-engine`** (et
   l'outil MCP) estampille la provenance (`mistral` écrase `vision-local`) ;
   (3) **`documents transcribe-plan --max-pages N`** (CLI + MCP) produit la
   worklist : transcriptions `vision-local` à *upgrader* + scannés sans
@@ -44,7 +46,7 @@ quand c'est obsolète. Priorités indicatives : 🔴 haute · 🟡 moyenne · �
   reste en `deferred`. Renvoie `estimated_pages`/`estimated_cost_usd`
   ($1/1000 p). Le skill `transcrire` consomme `worklist[].source`, OCRise via
   `mistral-ocr`, ré-enregistre avec `ocr_engine="mistral"`.
-- [ ] 🟡 **Exécuter la repasse Mistral** : après un re-signal en v4 (peuple
+- [ ] 🟡 **Exécuter la repasse Mistral** : après un re-signal en v5 (peuple
   `pages` + capte les transcriptions Vision en `text_source=ocr_cache`), lancer
   `transcribe-plan --max-pages 10` (~$18 estimé ; les longues gardent Vision ;
   le coût « tout » serait ~$124, dominé par ~378 gros PDF manuels/dumps exclus).

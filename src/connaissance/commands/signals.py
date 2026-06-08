@@ -128,8 +128,14 @@ def scan(scope: str | None = None, output_file: str | None = None,
         "scanned": seen,
         "documents": packets,
         "skipped": skipped,
+        "pdf_text_layer": _signals._pdfium is not None,
         "note": ("Lecture seule, zéro OCR. Signaux destinés au pré-classement "
-                 "(Phase C). pypdfium2 absent ⇒ PDF born-digital non lus."),
+                 "(Phase C). " + (
+                     "pypdfium2 actif ⇒ PDF born-digital lus + nb de pages capturé."
+                     if _signals._pdfium is not None else
+                     "⚠️ pypdfium2 ABSENT ⇒ PDF born-digital NON lus, pages NON "
+                     "capturées (installer l'extra `pdf` avant de re-signaler, "
+                     "sinon le cache born-digital se dégrade).")),
     }
 
     def _summary(p: dict) -> dict:

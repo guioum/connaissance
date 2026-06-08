@@ -53,7 +53,14 @@ _EXCERPT_MAX_CHARS = 1500      # extrait brut envoyé au classifieur (Phase C)
 # v2 : ajout du champ `excerpt` (texte brut tronqué) — le résumé extractif
 # (mots-clés par fréquence / Luhn) restait un proxy trop faible pour le classement.
 # v3 : extraction born-digital élargie (xlsx/pptx stdlib + rtf/doc via textutil).
-SIGNALS_SCHEMA_VERSION = 4
+# v5 : invalide le cache v4 produit par un run sans pypdfium2 (PDF born-digital
+# dégradés en `none`, `pages` jamais capturé). Un re-signal AVEC l'extra `pdf`
+# restaure le texte born-digital + le nb de pages. Mécanisme non destructif :
+# get_or_compute_signals recalcule tout paquet dont `_v` diffère (UPDATE in-place).
+# v6 : `pages` capturé aussi pour les PDF dont le texte vient du cache OCR
+# (court-circuit) — sinon les scannés OCRisés (cible de la repasse) n'avaient pas
+# de nb de pages → coût sous-estimé.
+SIGNALS_SCHEMA_VERSION = 6
 
 
 def _excerpt(text: str, max_chars: int = _EXCERPT_MAX_CHARS) -> str:
@@ -279,6 +286,29 @@ def _pdf_text_and_meta(read_path: Path) -> tuple[str | None, dict, bool]:
             pass
 
 
+def _pdf_page_count(read_path: Path) -> int | None:
+    """Nombre de pages d'un PDF (ouverture légère, sans extraction de texte).
+
+    Sert quand le texte vient du cache OCR (court-circuit) mais qu'on veut quand
+    même `pages` (filtre de coût de la repasse Mistral). None si pypdfium2 absent
+    ou PDF illisible."""
+    if _pdfium is None:
+        return None
+    try:
+        doc = _pdfium.PdfDocument(str(read_path))
+    except Exception:
+        return None
+    try:
+        return len(doc)
+    except Exception:
+        return None
+    finally:
+        try:
+            doc.close()
+        except Exception:
+            pass
+
+
 def extract_signals(path, *, rel: str | None = None,
                     read_path=None, ocr_cache_text: str | None = None) -> dict:
     """Paquet de signaux d'un document (schema DocumentSignals).
@@ -341,6 +371,14 @@ def extract_signals(path, *, rel: str | None = None,
                     born_digital = True
                 else:
                     born_digital = False         # page 1 sans texte ⇒ scanné
+
+    # `pages` est une propriété du PDF indépendante de la source du texte : si le
+    # texte vient du cache OCR (court-circuit, PDF jamais ouvert), le compter
+    # quand même (ouverture légère) pour le filtre de coût de la repasse Mistral.
+    if ext == ".pdf" and read is not None and meta.get("pages") is None:
+        pc = _pdf_page_count(read)
+        if pc is not None:
+            meta["pages"] = pc
 
     summary = _sum.summarize(text) if text.strip() else \
         {"keywords": [], "sentences": [], "entities": {}, "chars": 0}
