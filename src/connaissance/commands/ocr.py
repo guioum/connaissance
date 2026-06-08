@@ -9,6 +9,7 @@ Mistral existant les reprend alors, en écrasant la version locale).
 """
 from __future__ import annotations
 
+import os
 import statistics
 from pathlib import Path
 
@@ -18,9 +19,15 @@ from connaissance.core import ledger as _ledger
 from connaissance.core import ocr_local as _ocr
 from connaissance.commands.documents import (TRANSCRIPTIONS_DIR,
                                              _merge_frontmatter, register_document)
+from connaissance.commands.triage import (BUNDLE_SUFFIXES, CODE_MARKERS,
+                                          MARKER_DIRS)
 from connaissance.core.paths import (DOCUMENTS_DIR, documents_read_path,
                                      require_paths)
 from connaissance.core.tracking import TrackingDB
+
+_IMG_EXTS = {".jpg", ".jpeg", ".png", ".heic", ".heif", ".tiff", ".tif",
+             ".webp", ".gif", ".bmp"}
+_VIEW_TOP = {"- Sujets", "- Par catégorie", "- Historique", "- Médias"}
 
 
 def _read_frontmatter(content: str) -> dict:
@@ -67,8 +74,8 @@ def ocr_local(limit: int | None = None, force: bool = False,
             if not rp or not Path(rp).is_file():
                 skipped["sans_miroir"] += 1
                 continue
-            res = _ocr.ocr_file(rp)
-            text = (res or {}).get("text", "").strip() if res else ""
+            res = _ocr.ocr_file(rp) or {}
+            text = res.get("text", "").strip()
             if not text:
                 skipped["echec_ou_vide"] += 1
                 continue
@@ -149,3 +156,79 @@ def repass(max_confidence: float = 0.6, apply: bool = False,
     finally:
         if owns:
             db.close()
+
+
+def ocr_images(limit: int | None = None, min_chars: int = 100, min_lines: int = 3,
+               scope: str | None = None, force: bool = False,
+               db: TrackingDB | None = None) -> dict:
+    """Détecter + OCRiser les IMAGES qui sont des DOCUMENTS (reçus, captures,
+    scans, **photos de documents prises à l'appareil**). La passe Vision sert de
+    détecteur : densité de texte (``chars`` ≥ ``min_chars`` ET ≥ ``min_lines``
+    lignes) → document (transcription écrite, marquée ``ocr_kind: image``) ;
+    sinon → photo/déco (ignorée, comptée). **Aucune exclusion par EXIF** : une
+    photo d'appareil peut être un document scanné. Conteneurs code/bundles élagués
+    (pas où vivent les scans perso). ``--limit`` borne les documents écrits."""
+    require_paths(DOCUMENTS_DIR, context="documents ocr-images")
+    if not _ocr.available():
+        return {"error": "OCR local indisponible (swiftc absent ou hors macOS)."}
+    owns = db is None
+    if db is None:
+        db = TrackingDB()
+    docs: list[dict] = []
+    non_doc = 0
+    borderline: list[dict] = []
+    skipped = {"transcription_existe": 0, "sans_miroir": 0}
+    base = (DOCUMENTS_DIR / scope) if scope else DOCUMENTS_DIR
+    stop = False
+    try:
+        for dp, dirs, fs in os.walk(base):
+            if stop:
+                break
+            d = Path(dp)
+            if d == DOCUMENTS_DIR:
+                dirs[:] = [n for n in dirs if n not in _VIEW_TOP]
+            if (d.suffix.lower() in BUNDLE_SUFFIXES
+                    or (set(fs) & CODE_MARKERS) or (set(dirs) & MARKER_DIRS)):
+                dirs[:] = []
+                continue
+            for fn in fs:
+                if fn.startswith(".") or Path(fn).suffix.lower() not in _IMG_EXTS:
+                    continue
+                rel = str((d / fn).relative_to(DOCUMENTS_DIR))
+                trans = TRANSCRIPTIONS_DIR / Path(rel).with_suffix(".md")
+                if trans.exists() and not force:
+                    skipped["transcription_existe"] += 1
+                    continue
+                ab = DOCUMENTS_DIR / rel
+                rp = documents_read_path(ab)
+                if not rp or not Path(rp).is_file():
+                    skipped["sans_miroir"] += 1
+                    continue
+                res = _ocr.ocr_file(rp, max_pages=1)
+                text = (res or {}).get("text", "").strip() if res else ""
+                lines = text.count("\n") + 1 if text else 0
+                conf = round(float((res or {}).get("confidence") or 0), 3)
+                if len(text) >= min_chars and lines >= min_lines:
+                    trans.parent.mkdir(parents=True, exist_ok=True)
+                    trans.write_text(text + "\n", encoding="utf-8")
+                    register_document(db, ab, trans)
+                    trans.write_text(_merge_frontmatter(
+                        trans.read_text(encoding="utf-8"),
+                        {"ocr_engine": _ocr.OCR_ENGINE, "ocr_confidence": conf,
+                         "ocr_kind": "image"}), encoding="utf-8")
+                    docs.append({"rel": rel, "chars": len(text), "confidence": conf})
+                    if limit and len(docs) >= limit:
+                        stop = True
+                        break
+                else:
+                    non_doc += 1
+                    if 0 < len(text) < min_chars * 2:   # proche du seuil → à revoir
+                        borderline.append({"rel": rel, "chars": len(text), "conf": conf})
+    finally:
+        if owns:
+            db.close()
+    confs = [d["confidence"] for d in docs]
+    return {"documents_images": len(docs), "non_documents": non_doc,
+            "skipped": skipped, "min_chars": min_chars, "min_lines": min_lines,
+            "avg_confidence": round(statistics.mean(confs), 3) if confs else None,
+            "sample_documents": docs[:12], "sample_borderline": borderline[:12]}

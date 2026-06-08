@@ -26,6 +26,18 @@ quand c'est obsolète. Priorités indicatives : 🔴 haute · 🟡 moyenne · �
   liste les transcriptions à faible confiance (≤ seuil) ; `--repass [--apply]` les
   remet « à transcrire » (corbeille ledger) → le flux Mistral les reprend. Moteur
   OCR local pour TOUT le pipeline (alternative gratuite à Mistral, repasse ciblée).
+- [x] **Détection + OCR des IMAGES-documents** (v2.54.0) : `documents ocr-images`
+  — une passe Vision sert de **détecteur de type** : densité de texte (`chars` ≥
+  seuil ET ≥ N lignes) → document/reçu (transcription écrite, `ocr_kind: image`) ;
+  sinon → photo/déco (ignorée, comptée). **Aucune exclusion par EXIF** : un
+  document **photographié à l'appareil** (EXIF caméra + beaucoup de texte) est bien
+  détecté. Conteneurs code/bundles élagués. Seuils `--min-chars`/`--min-lines`
+  tunables. Prototype : 0 char = photo/icône, 100+ = document (même photo-de-doc).
+- [ ] 🟡 **Repasse Mistral du corpus** : Vision = pré-traitement ; Mistral
+  (markdown, tableaux) en repasse sur les transcriptions **< ~10 pages**
+  (~$18 estimé ; les longues gardent Vision). Seuil de pages + ciblage à câbler
+  dans le flux transcrire (le coût total « tout » serait ~$124, dominé par ~378
+  gros PDF manuels/dumps à exclure).
 
 ## Registre d'entités vivant (table `entities`)
 

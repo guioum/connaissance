@@ -76,6 +76,11 @@ def _cmd_documents(args) -> Any:
         if getattr(args, "repass", False):
             return ocr.repass(max_confidence=args.max_confidence, apply=args.apply)
         return ocr.ocr_local(limit=args.limit, force=args.force, scope=args.scope)
+    if args.verb == "ocr-images":
+        from connaissance.commands import ocr
+        return ocr.ocr_images(limit=args.limit, min_chars=args.min_chars,
+                              min_lines=args.min_lines, scope=args.scope,
+                              force=args.force)
     raise SystemExit(f"verbe inconnu : documents {args.verb}")
 
 
@@ -557,6 +562,17 @@ def build_parser() -> argparse.ArgumentParser:
                            help="Seuil de confiance pour --repass[-candidates] (défaut 0.6).")
     p_doc_ocr.add_argument("--apply", action="store_true",
                            help="Avec --repass : exécuter (défaut : dry-run).")
+    p_doc_oi = p_doc_verbs.add_parser("ocr-images")
+    p_doc_oi.add_argument("--limit", type=int, default=None,
+                          help="Limiter le nombre de documents-images écrits.")
+    p_doc_oi.add_argument("--scope", type=str, default=None,
+                          help="Restreindre à un sous-dossier (rel ~/Documents).")
+    p_doc_oi.add_argument("--force", action="store_true",
+                          help="Ré-OCRiser même si une transcription existe.")
+    p_doc_oi.add_argument("--min-chars", dest="min_chars", type=int, default=100,
+                          help="Seuil de densité texte → document (défaut 100).")
+    p_doc_oi.add_argument("--min-lines", dest="min_lines", type=int, default=3,
+                          help="Nb min de lignes de texte → document (défaut 3).")
 
     # emails
     p_em = sub.add_parser("emails")
