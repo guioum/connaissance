@@ -44,7 +44,8 @@ def _cmd_documents(args) -> Any:
         since, until = _parse_date_range(args)
         return documents.backlog_count(since=since, until=until)
     if args.verb == "register":
-        return documents.register(args.source_file, args.transcription)
+        return documents.register(args.source_file, args.transcription,
+                                  ocr_engine=getattr(args, "ocr_engine", None))
     if args.verb == "register-existing":
         return documents.register_existing_all()
     if args.verb == "register-batch":
@@ -81,6 +82,11 @@ def _cmd_documents(args) -> Any:
         return ocr.ocr_images(limit=args.limit, min_chars=args.min_chars,
                               min_lines=args.min_lines, scope=args.scope,
                               force=args.force)
+    if args.verb == "transcribe-plan":
+        from connaissance.commands import ocr
+        return ocr.transcribe_plan(max_pages=args.max_pages,
+                                   include_missing=not args.upgrade_only,
+                                   scope=args.scope)
     raise SystemExit(f"verbe inconnu : documents {args.verb}")
 
 
@@ -493,6 +499,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_doc_reg = p_doc_verbs.add_parser("register")
     p_doc_reg.add_argument("source_file")
     p_doc_reg.add_argument("transcription")
+    p_doc_reg.add_argument("--ocr-engine", dest="ocr_engine", default=None,
+                           help="Provenance OCR (mistral / vision-local) → frontmatter.")
     p_doc_verbs.add_parser("register-existing")
     p_doc_rb = p_doc_verbs.add_parser("register-batch")
     p_doc_rb.add_argument("--from-scan", dest="from_scan", required=True,
@@ -573,6 +581,15 @@ def build_parser() -> argparse.ArgumentParser:
                           help="Seuil de densité texte → document (défaut 100).")
     p_doc_oi.add_argument("--min-lines", dest="min_lines", type=int, default=3,
                           help="Nb min de lignes de texte → document (défaut 3).")
+    p_doc_tp = p_doc_verbs.add_parser("transcribe-plan")
+    p_doc_tp.add_argument("--max-pages", dest="max_pages", type=int, default=10,
+                          help="Borne de pages pour la repasse Mistral (défaut 10).")
+    p_doc_tp.add_argument("--scope", type=str, default=None,
+                          help="Restreindre à un sous-dossier (rel ~/Documents).")
+    p_doc_tp.add_argument("--upgrade-only", dest="upgrade_only",
+                          action="store_true",
+                          help="Seulement upgrader les transcriptions vision-local "
+                               "(exclure les scannés sans transcription).")
 
     # emails
     p_em = sub.add_parser("emails")

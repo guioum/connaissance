@@ -53,7 +53,7 @@ _EXCERPT_MAX_CHARS = 1500      # extrait brut envoyé au classifieur (Phase C)
 # v2 : ajout du champ `excerpt` (texte brut tronqué) — le résumé extractif
 # (mots-clés par fréquence / Luhn) restait un proxy trop faible pour le classement.
 # v3 : extraction born-digital élargie (xlsx/pptx stdlib + rtf/doc via textutil).
-SIGNALS_SCHEMA_VERSION = 3
+SIGNALS_SCHEMA_VERSION = 4
 
 
 def _excerpt(text: str, max_chars: int = _EXCERPT_MAX_CHARS) -> str:
@@ -246,6 +246,10 @@ def _pdf_text_and_meta(read_path: Path) -> tuple[str | None, dict, bool]:
     try:
         meta: dict = {}
         try:
+            meta["pages"] = len(doc)
+        except Exception:
+            pass
+        try:
             md = doc.get_metadata_dict() or {}
             for src, dst in (("Title", "title"), ("Author", "author"),
                              ("CreationDate", "created")):
@@ -360,6 +364,9 @@ def extract_signals(path, *, rel: str | None = None,
         "born_digital": born_digital,
         "text_source": text_source,
         "pdf_available": pdf_available,
+        # Nombre de pages (PDF via pypdfium2). None hors PDF / si indécidable.
+        # Sert au filtre de coût de la repasse Mistral (≤ N pages).
+        "pages": meta.get("pages"),
         # Extrait brut (début du texte) : signal premier pour le classement.
         # Le résumé extractif est conservé pour d'autres usages (metadata/qmd).
         "excerpt": _excerpt(text),

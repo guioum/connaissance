@@ -42,3 +42,72 @@ def test_ocr_images_classifies_by_text_density(tmp_path, monkeypatch, tracking_d
     t = trans / "recu.md"
     assert t.exists() and "ocr_kind: image" in t.read_text(encoding="utf-8")
     assert not (trans / "souvenir.md").exists()
+
+
+def _put_signals(db, rel, **fields):
+    import json
+    pkt = {"_v": 99, "rel": rel, **fields}      # _v non vérifié par all_doc_signals
+    db._conn.execute(
+        "INSERT INTO doc_signals (rel_path, signals, size, mtime) VALUES (?,?,?,?)",
+        (rel, json.dumps(pkt), 0, 0))
+    db._conn.commit()
+
+
+def test_transcribe_plan_worklist(tmp_path, monkeypatch, tracking_db):
+    """Worklist Mistral : upgrade vision-local + scanné manquant ≤ N pages ;
+    born-digital exclu ; >N pages déféré ; mistral déjà fait ignoré."""
+    docs = tmp_path / "Documents"
+    trans = tmp_path / "Transcriptions" / "Documents"
+    docs.mkdir(parents=True)
+    trans.mkdir(parents=True)
+    monkeypatch.setattr(O, "DOCUMENTS_DIR", docs)
+    monkeypatch.setattr(O, "TRANSCRIPTIONS_DIR", trans)
+
+    def _trans(rel, engine):
+        p = trans / (rel[:-4] + ".md")
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(f"---\nocr_engine: {engine}\n---\nTexte.", encoding="utf-8")
+
+    # vision-local, 3 pages → upgrade
+    _put_signals(tracking_db, "upg.pdf", type="pdf", text_source="ocr_cache",
+                 born_digital=False, pages=3)
+    _trans("upg.pdf", "vision-local")
+    # scanné sans transcription, 5 pages → missing
+    _put_signals(tracking_db, "miss.pdf", type="pdf", text_source="none",
+                 born_digital=False, pages=5)
+    # born-digital → exclu
+    _put_signals(tracking_db, "born.pdf", type="pdf", text_source="pdf_embedded",
+                 born_digital=True, pages=2)
+    # vision-local 40 pages → déféré (> max_pages)
+    _put_signals(tracking_db, "big.pdf", type="pdf", text_source="ocr_cache",
+                 born_digital=False, pages=40)
+    _trans("big.pdf", "vision-local")
+    # déjà Mistral → ignoré
+    _put_signals(tracking_db, "done.pdf", type="pdf", text_source="ocr_cache",
+                 born_digital=False, pages=1)
+    _trans("done.pdf", "mistral")
+
+    res = O.transcribe_plan(max_pages=10, db=tracking_db)
+    rels = {e["rel"]: e for e in res["worklist"]}
+    assert set(rels) == {"upg.pdf", "miss.pdf"}
+    assert rels["upg.pdf"]["reason"] == "upgrade_vision"
+    assert rels["miss.pdf"]["reason"] == "missing"
+    assert res["counts"]["born_digital_skip"] == 1
+    assert res["counts"]["already_mistral"] == 1
+    assert res["deferred_count"] == 1
+    assert res["estimated_pages"] == 8        # 3 + 5
+    assert res["estimated_cost_usd"] == round(8 * 0.001, 2)
+
+
+def test_transcribe_plan_upgrade_only(tmp_path, monkeypatch, tracking_db):
+    """--upgrade-only exclut les scannés sans transcription."""
+    docs = tmp_path / "Documents"
+    trans = tmp_path / "Transcriptions" / "Documents"
+    docs.mkdir(parents=True)
+    trans.mkdir(parents=True)
+    monkeypatch.setattr(O, "DOCUMENTS_DIR", docs)
+    monkeypatch.setattr(O, "TRANSCRIPTIONS_DIR", trans)
+    _put_signals(tracking_db, "miss.pdf", type="pdf", text_source="none",
+                 born_digital=False, pages=2)
+    res = O.transcribe_plan(max_pages=10, include_missing=False, db=tracking_db)
+    assert res["worklist_count"] == 0

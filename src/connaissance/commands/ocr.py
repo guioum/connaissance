@@ -158,6 +158,89 @@ def repass(max_confidence: float = 0.6, apply: bool = False,
             db.close()
 
 
+_MISTRAL_PAGE_COST = 0.001   # $1 / 1000 pages (Mistral OCR, batch).
+
+
+def transcribe_plan(max_pages: int = 10, include_missing: bool = True,
+                    scope: str | None = None, db: TrackingDB | None = None) -> dict:
+    """Worklist de la **repasse Mistral**, bornée par le nombre de pages (coût).
+
+    Cible : documents qui ont besoin d'OCR (PDF scannés, images-documents) et qui
+    n'ont PAS encore de transcription Mistral — soit une transcription
+    ``vision-local`` à *upgrader* vers le markdown structuré de Mistral, soit
+    (``include_missing``) un scanné sans aucune transcription. Les PDF
+    **born-digital** (couche texte propre) sont exclus et comptés
+    (``born_digital_skip``) : pas de coût OCR inutile. Borne ``--max-pages`` : un
+    document de plus de N pages part dans ``deferred`` (au-dessus du budget).
+
+    N'écrit/ne déplace rien. Le skill ``transcrire`` consomme ``worklist`` (champs
+    ``source``), OCRise via Mistral, puis ré-enregistre avec
+    ``register_document(..., ocr_engine="mistral")`` (écrase la version locale).
+
+    Prérequis : signaux à jour (``documents signals`` en v≥4) pour que les
+    transcriptions Vision existantes apparaissent en ``text_source=ocr_cache``."""
+    require_paths(DOCUMENTS_DIR, context="documents transcribe-plan")
+    owns = db is None
+    if db is None:
+        db = TrackingDB()
+    worklist: list[dict] = []
+    deferred: list[dict] = []
+    counts = {"upgrade_vision": 0, "missing": 0, "already_mistral": 0,
+              "born_digital_skip": 0, "deferred_pages": 0}
+    try:
+        for rel, pkt in db.all_doc_signals():
+            if scope and not rel.startswith(scope):
+                continue
+            typ = pkt.get("type")
+            ts = pkt.get("text_source")
+            born = pkt.get("born_digital")
+            is_pdf = typ == "pdf"
+            # Cible OCR : transcription Vision déjà là (ocr_cache, couvre PDF
+            # scannés ET images-documents) OU PDF scanné encore sans transcription.
+            ocr_target = (ts == "ocr_cache") or (is_pdf and born is False)
+            if not ocr_target:
+                if is_pdf and born is True:
+                    counts["born_digital_skip"] += 1
+                continue
+            trans = TRANSCRIPTIONS_DIR / Path(rel).with_suffix(".md")
+            engine = None
+            if trans.exists():
+                try:
+                    engine = _read_frontmatter(
+                        trans.read_text(encoding="utf-8")).get("ocr_engine")
+                except OSError:
+                    engine = None
+            if engine == "mistral":
+                counts["already_mistral"] += 1
+                continue
+            if not trans.exists() and not include_missing:
+                continue
+            pages = pkt.get("pages")
+            n = pages if isinstance(pages, int) and pages > 0 else 1
+            reason = "upgrade_vision" if engine == _ocr.OCR_ENGINE else "missing"
+            entry = {"rel": rel, "source": str(DOCUMENTS_DIR / rel),
+                     "pages": n, "reason": reason, "current_engine": engine}
+            if n > max_pages:
+                counts["deferred_pages"] += 1
+                deferred.append(entry)
+                continue
+            counts[reason] += 1
+            worklist.append(entry)
+    finally:
+        if owns:
+            db.close()
+    worklist.sort(key=lambda e: e["pages"])
+    est_pages = sum(e["pages"] for e in worklist)
+    return {"max_pages": max_pages,
+            "worklist_count": len(worklist),
+            "deferred_count": len(deferred),
+            "estimated_pages": est_pages,
+            "estimated_cost_usd": round(est_pages * _MISTRAL_PAGE_COST, 2),
+            "counts": counts,
+            "worklist": worklist,
+            "deferred_sample": deferred[:20]}
+
+
 def ocr_images(limit: int | None = None, min_chars: int = 100, min_lines: int = 3,
                scope: str | None = None, force: bool = False,
                db: TrackingDB | None = None) -> dict:

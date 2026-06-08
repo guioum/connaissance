@@ -325,13 +325,37 @@ server.registerTool(
 server.registerTool(
   "connaissance_documents_register",
   {
-    description: "Register a document transcription in tracking.db and inject canonical frontmatter (source, source_hash, transcribed_at).",
+    description: "Register a document transcription in tracking.db and inject canonical frontmatter (source, source_hash, transcribed_at). Pass ocr_engine='mistral' when registering a Mistral re-pass that replaces a vision-local transcription (provenance stamp).",
     inputSchema: {
       source_file: z.string().describe("Absolute path to the original document file (PDF, image, etc.)."),
       transcription: z.string().describe("Absolute path to the generated transcription markdown."),
+      ocr_engine: z.string().optional().describe("OCR engine provenance ('mistral' / 'vision-local'). Stamped into frontmatter; omit to preserve the existing value."),
     },
   },
-  async (args) => runAndFormat("documents", "register", [args.source_file, args.transcription])
+  async (args) => {
+    const a = [args.source_file, args.transcription];
+    if (args.ocr_engine) a.push("--ocr-engine", args.ocr_engine);
+    return runAndFormat("documents", "register", a);
+  }
+);
+
+server.registerTool(
+  "connaissance_documents_transcribe_plan",
+  {
+    description: "Mistral re-pass WORKLIST, page-bounded for cost. Lists documents that need OCR (scanned PDFs, image-documents) and do NOT yet have a Mistral transcription — either a vision-local transcription to UPGRADE to Mistral's structured markdown, or (by default) a scanned doc with no transcription at all. Born-digital PDFs (clean text layer) are excluded and counted (born_digital_skip). Documents over max_pages go to 'deferred' (above budget). Returns worklist[] (each with source path + pages + reason), estimated_pages and estimated_cost_usd ($1/1000 pages). Read-only. The transcrire skill consumes worklist[].source, OCRs via mistral-ocr, then re-registers each with documents_register(ocr_engine='mistral'). Requires up-to-date signals (documents signals, schema v>=4) so existing vision transcriptions show as text_source=ocr_cache.",
+    inputSchema: {
+      max_pages: z.number().optional().describe("Page ceiling for the re-pass (default 10). Docs above go to deferred."),
+      scope: z.string().optional().describe("Restrict to a subfolder (relative to ~/Documents)."),
+      upgrade_only: z.boolean().optional().describe("Only upgrade existing vision-local transcriptions; exclude scanned docs with no transcription."),
+    },
+  },
+  async (args) => {
+    const a = [];
+    if (args.max_pages != null) a.push("--max-pages", String(args.max_pages));
+    if (args.scope) a.push("--scope", args.scope);
+    if (args.upgrade_only) a.push("--upgrade-only");
+    return runAndFormat("documents", "transcribe-plan", a);
+  }
 );
 
 server.registerTool(

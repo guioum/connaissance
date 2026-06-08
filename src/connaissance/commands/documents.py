@@ -150,7 +150,8 @@ def _merge_frontmatter(content: str, new_fields: dict) -> str:
 def _upsert_transcription_frontmatter(trans_path: Path, source_path: Path,
                                       file_hash: str | None,
                                       source_size: int | None,
-                                      source_mtime: float | None = None) -> None:
+                                      source_mtime: float | None = None,
+                                      ocr_engine: str | None = None) -> None:
     """Injecter ou mettre à jour le frontmatter canonique d'une transcription.
 
     Idempotent : ré-exécutable sans effet secondaire. Les champs non standards
@@ -218,6 +219,11 @@ def _upsert_transcription_frontmatter(trans_path: Path, source_path: Path,
         "created": created,
         "modified": modified,
     }
+    # Provenance du moteur OCR (vision-local / mistral). Ne jamais effacer une
+    # valeur existante : si l'appelant ne précise pas, on conserve celle du
+    # frontmatter (utile quand un reindex re-synchronise sans re-OCR).
+    if ocr_engine:
+        new_fields["ocr_engine"] = ocr_engine
 
     new_content = _merge_frontmatter(content, new_fields)
     if new_content != content:
@@ -442,8 +448,14 @@ def scan_documents(since=None, until=None, db=None):
     return to_process, skipped
 
 
-def register_document(db, source_path, transcription_path, file_hash=None):
-    """Enregistrer un document transcrit dans la DB + frontmatter canonique."""
+def register_document(db, source_path, transcription_path, file_hash=None,
+                      ocr_engine=None):
+    """Enregistrer un document transcrit dans la DB + frontmatter canonique.
+
+    ``ocr_engine`` (optionnel) : provenance du moteur OCR estampillée dans le
+    frontmatter (``mistral`` pour la repasse Mistral, ``vision-local`` pour la
+    passe locale). Omis ⇒ la valeur existante est préservée.
+    """
     source_path = Path(source_path)
     transcription_path = Path(transcription_path)
 
@@ -480,7 +492,8 @@ def register_document(db, source_path, transcription_path, file_hash=None):
     # Injecter le frontmatter canonique dans le fichier transcription.
     # Source de vérité pour source/hash/size/mtime ; la DB est un index dérivé.
     _upsert_transcription_frontmatter(transcription_path, source_path,
-                                      file_hash, source_size, source_mtime)
+                                      file_hash, source_size, source_mtime,
+                                      ocr_engine=ocr_engine)
 
     if file_hash:
         db.register_hash(file_hash, str(source_path),
@@ -764,15 +777,21 @@ def scan(since=None, until=None, output_file: str | None = None, db=None) -> dic
 
 
 def register(source_file: str, transcription: str, file_hash: str | None = None,
-             db: TrackingDB | None = None) -> dict:
-    """Enregistrer un document transcrit (frontmatter + DB)."""
+             ocr_engine: str | None = None, db: TrackingDB | None = None) -> dict:
+    """Enregistrer un document transcrit (frontmatter + DB).
+
+    ``ocr_engine`` (optionnel, ``mistral`` / ``vision-local``) estampille la
+    provenance du moteur OCR dans le frontmatter — utilisé par la repasse Mistral
+    pour marquer qu'une transcription Vision a été remplacée."""
     if db is None:
         db = TrackingDB()
-    register_document(db, source_file, transcription, file_hash)
+    register_document(db, source_file, transcription, file_hash,
+                      ocr_engine=ocr_engine)
     return {
         "registered": 1,
         "source": str(source_file),
         "transcription": str(transcription),
+        "ocr_engine": ocr_engine,
         "frontmatter_injected": True,
     }
 
