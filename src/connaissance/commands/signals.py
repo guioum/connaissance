@@ -33,6 +33,13 @@ _SKIP_TOP = {"- Par catégorie", "- Sujets", "organismes", "personnes",
              "divers", "promus"}
 _NOISE_DIRS = {"bower_components", "Pods", "site-packages", ".tox", ".venv",
                "venv", "dist", "build", ".next", ".nuxt", "__pycache__"}
+# Extensions image (sans le point). Les images ne sont PAS scannées en masse
+# (sinon 13k+ photos souvenir polluent doc_signals) : une image n'entre dans les
+# signaux que si elle a déjà une transcription, c.-à-d. qu'elle a été reconnue
+# comme DOCUMENT par `documents ocr-images` (densité de texte). Les photos
+# souvenir, sans transcription, restent hors pipeline.
+_IMG_EXTS = {"jpg", "jpeg", "png", "heic", "heif", "tiff", "tif", "webp",
+             "gif", "bmp"}
 
 
 def _strip_frontmatter(md: str) -> str:
@@ -59,7 +66,7 @@ def scan(scope: str | None = None, output_file: str | None = None,
     base = DOCUMENTS_DIR if scope is None else (DOCUMENTS_DIR / scope)
     quarantine = _filtres.load_quarantine_set()
     packets: list[dict] = []
-    skipped = {"dataless": 0, "secret": 0}
+    skipped = {"dataless": 0, "secret": 0, "image_non_document": 0}
     seen = 0
 
     if not base.exists():
@@ -86,9 +93,10 @@ def scan(scope: str | None = None, output_file: str | None = None,
             for fname in filenames:
                 if fname.startswith("."):
                     continue
-                if Path(fname).suffix.lower().lstrip(".") not in DOC_EXTS:
+                ext = Path(fname).suffix.lower().lstrip(".")
+                is_img = ext in _IMG_EXTS
+                if ext not in DOC_EXTS and not is_img:
                     continue
-                seen += 1
                 fpath = d / fname
                 rel = str(fpath.relative_to(DOCUMENTS_DIR))
 
@@ -99,13 +107,22 @@ def scan(scope: str | None = None, output_file: str | None = None,
                     skipped["secret"] += 1
                     continue
 
+                ocr = _ocr_cache_text(rel)
+
+                # Image SANS transcription = photo souvenir (pas un document) :
+                # hors doc_signals. Avec transcription = reconnue document par
+                # `ocr-images` → traitée comme les PDF (pré-classement, repasse).
+                if is_img and ocr is None:
+                    skipped["image_non_document"] += 1
+                    continue
+
+                seen += 1
+
                 read_path = documents_read_path(fpath)
                 read = read_path
                 if read_path == fpath and is_dataless(fpath):
                     read = None
                     skipped["dataless"] += 1
-
-                ocr = _ocr_cache_text(rel)
 
                 def _compute(p, _rel=rel, _read=read, _ocr=ocr):
                     return _signals.extract_signals(p, rel=_rel, read_path=_read,

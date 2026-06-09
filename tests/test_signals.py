@@ -167,3 +167,34 @@ def test_pptx_text_stdlib(tmp_path):
     _make_pptx(p, ["Stratégie données", "Jemena", "Plan 2024"])
     t = _pptx_text(p)
     assert "Stratégie données" in t and "Jemena" in t
+
+
+def test_scan_includes_image_documents_only(tmp_path, monkeypatch, tracking_db):
+    """scan() : une image AVEC transcription (= document détecté par ocr-images)
+    entre dans doc_signals ; une image SANS transcription (photo souvenir) non."""
+    from connaissance.commands import signals as CSIG
+    docs = tmp_path / "Documents"
+    trans = tmp_path / "Transcriptions" / "Documents"
+    docs.mkdir(parents=True)
+    trans.mkdir(parents=True)
+    (docs / "recu.png").write_bytes(b"img-bytes")        # document
+    (docs / "souvenir.jpg").write_bytes(b"img-bytes")    # photo
+    (docs / "lettre.pdf").write_bytes(b"%PDF-1.4")       # doc classique
+    # transcription seulement pour le reçu
+    (trans / "recu.md").write_text("---\nocr_engine: vision-local\n---\nFACTURE 12$",
+                                   encoding="utf-8")
+    monkeypatch.setattr(CSIG, "DOCUMENTS_DIR", docs)
+    monkeypatch.setattr(CSIG, "TRANSCRIPTIONS_DIR", trans)
+    monkeypatch.setattr(CSIG, "documents_read_path", lambda p: p)
+    monkeypatch.setattr(CSIG, "is_dataless", lambda p: False)
+    monkeypatch.setattr(CSIG._filtres, "load_quarantine_set", lambda: set())
+
+    res = CSIG.scan(db=tracking_db)
+    rels = {p["rel"] for p in res["documents"]}
+    assert "recu.png" in rels            # image-document inclus
+    assert "souvenir.jpg" not in rels    # photo souvenir exclue
+    assert res["skipped"]["image_non_document"] == 1
+    # le reçu a bien le texte du cache OCR
+    recu = next(p for p in res["documents"] if p["rel"] == "recu.png")
+    assert recu["text_source"] == "ocr_cache"
+    assert recu["type"] == "png"
