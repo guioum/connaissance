@@ -163,6 +163,26 @@ def test_transcribe_plan_excludes_encrypted_broken(tmp_path, monkeypatch, tracki
     assert {e["rel"] for e in res["excluded"]} == {"locked.pdf", "broken.pdf"}
 
 
+def test_transcribe_plan_excludes_non_ocr_formats(tmp_path, monkeypatch, tracking_db):
+    """Un ebook/markdown avec transcription n'est PAS une cible OCR (Mistral n'a
+    rien à OCRiser) ; seuls PDF + images le sont."""
+    docs = tmp_path / "Documents"; trans = tmp_path / "Transcriptions" / "Documents"
+    docs.mkdir(parents=True); trans.mkdir(parents=True)
+    monkeypatch.setattr(O, "DOCUMENTS_DIR", docs)
+    monkeypatch.setattr(O, "TRANSCRIPTIONS_DIR", trans)
+    monkeypatch.setattr(O, "documents_read_path", lambda p: str(p))
+    # ont tous une transcription (ocr_cache), mais formats différents
+    _put_signals(tracking_db, "scan.pdf", type="pdf", text_source="ocr_cache",
+                 born_digital=False, pages=1, pdf_status="ok")
+    _put_signals(tracking_db, "book.epub", type="epub", text_source="ocr_cache")
+    _put_signals(tracking_db, "note.markdown", type="markdown", text_source="ocr_cache")
+    _put_signals(tracking_db, "recu.png", type="png", text_source="ocr_cache")
+    res = O.transcribe_plan(max_pages=10, db=tracking_db)
+    rels = {e["rel"] for e in res["to_transcribe"]}
+    assert rels == {"scan.pdf", "recu.png"}          # epub + markdown exclus
+    assert res["counts"]["non_ocr_type_skip"] == 2
+
+
 def test_classify_pdf_error():
     from connaissance.core.signals import _classify_pdf_error
     assert _classify_pdf_error(Exception("Incorrect password error")) == "encrypted"

@@ -161,6 +161,8 @@ def repass(max_confidence: float = 0.6, apply: bool = False,
 
 
 _MISTRAL_PAGE_COST = 0.001   # $1 / 1000 pages (Mistral OCR, batch).
+# Types OCRisables côté image (sans le point), pour la cible de la repasse.
+_OCR_IMAGE_TYPES = {e.lstrip(".") for e in _IMG_EXTS}
 
 
 def transcribe_plan(max_pages: int = 10, include_missing: bool = True,
@@ -201,7 +203,7 @@ def transcribe_plan(max_pages: int = 10, include_missing: bool = True,
     seen: set[str] = set()          # rel normalisé → dédup des lignes-fantômes
     counts = {"upgrade_vision": 0, "missing": 0, "already_mistral": 0,
               "born_digital_skip": 0, "deferred_pages": 0, "phantom_dupes": 0,
-              "encrypted_or_broken": 0}
+              "encrypted_or_broken": 0, "non_ocr_type_skip": 0}
     excluded: list[dict] = []
     try:
         for rel, pkt in db.all_doc_signals():
@@ -211,12 +213,19 @@ def transcribe_plan(max_pages: int = 10, include_missing: bool = True,
             ts = pkt.get("text_source")
             born = pkt.get("born_digital")
             is_pdf = typ == "pdf"
-            # Cible OCR : transcription Vision déjà là (ocr_cache, couvre PDF
-            # scannés ET images-documents) OU PDF scanné encore sans transcription.
-            ocr_target = (ts == "ocr_cache") or (is_pdf and born is False)
+            is_image = typ in _OCR_IMAGE_TYPES
+            # Cible OCR : seulement des formats OCRisables (PDF + images). Un PDF
+            # scanné (born False) ou un PDF/image déjà transcrit par Vision
+            # (ocr_cache). On EXCLUT explicitement les formats à texte structuré
+            # (epub/mobi/azw3/markdown/office) même s'ils ont une transcription :
+            # les envoyer à un OCR n'a aucun sens (cf. ebooks captés par erreur).
+            ocr_target = (is_pdf and (born is False or ts == "ocr_cache")) \
+                or (is_image and ts == "ocr_cache")
             if not ocr_target:
                 if is_pdf and born is True:
                     counts["born_digital_skip"] += 1
+                elif ts == "ocr_cache":   # transcription mais format non-OCR
+                    counts["non_ocr_type_skip"] += 1
                 continue
             # Écarter en amont les PDF qu'un OCR ne pourra pas traiter
             # (protégés par mot de passe / corrompus) — Mistral échouerait dessus.
