@@ -342,11 +342,12 @@ server.registerTool(
 server.registerTool(
   "connaissance_documents_transcribe_plan",
   {
-    description: "Mistral re-pass WORKLIST, page-bounded for cost. Lists documents that need OCR (scanned PDFs, image-documents) and do NOT yet have a Mistral transcription — either a vision-local transcription to UPGRADE to Mistral's structured markdown, or (by default) a scanned doc with no transcription at all. Born-digital PDFs (clean text layer) are excluded and counted (born_digital_skip). Documents over max_pages go to 'deferred' (above budget). Returns worklist[] (each with source path + pages + reason), estimated_pages and estimated_cost_usd ($1/1000 pages). Read-only. The transcrire skill consumes worklist[].source, OCRs via mistral-ocr, then re-registers each with documents_register(ocr_engine='mistral'). Requires up-to-date signals (documents signals, schema v>=5) so existing vision transcriptions show as text_source=ocr_cache.",
+    description: "Mistral re-pass WORKLIST, page-bounded for cost. DB-driven (doc_signals). Lists documents that need OCR (scanned PDFs, image-documents) and do NOT yet have a Mistral transcription — either a vision-local transcription to UPGRADE to Mistral's structured markdown, or (by default) a scanned doc with no transcription at all. Born-digital PDFs (clean text layer) are excluded and counted (born_digital_skip). Phantom duplicate rows (NFC/NFD/case variants of the same file) are deduped (counts.phantom_dupes). Documents over max_pages go to 'deferred'. Returns counts, estimated_pages and estimated_cost_usd ($1/1000 pages), plus to_transcribe[] (each item carries source canonical + read_source SSD mirror + transcription target). Read-only except --output_file. INTENDED FLOW: call with output_file to write a manifest, then mistral-ocr ocr_batch_submit(files_from_json=manifest, preserve_paths=~/Documents) → ocr_batch_results(output=Transcriptions/Documents) → documents_register_batch(from_scan=manifest, ocr_engine='mistral'). The manifest's read_source makes mistral-ocr read from the SSD mirror (no iCloud download). Requires up-to-date signals (documents signals, schema v>=6) for pages + ocr_cache.",
     inputSchema: {
       max_pages: z.number().optional().describe("Page ceiling for the re-pass (default 10). Docs above go to deferred."),
       scope: z.string().optional().describe("Restrict to a subfolder (relative to ~/Documents)."),
       upgrade_only: z.boolean().optional().describe("Only upgrade existing vision-local transcriptions; exclude scanned docs with no transcription."),
+      output_file: z.string().optional().describe("Write the to_transcribe manifest here (consumable by mistral-ocr files_from_json and register-batch). Without it, the full list returns inline."),
     },
   },
   async (args) => {
@@ -354,6 +355,7 @@ server.registerTool(
     if (args.max_pages != null) a.push("--max-pages", String(args.max_pages));
     if (args.scope) a.push("--scope", args.scope);
     if (args.upgrade_only) a.push("--upgrade-only");
+    if (args.output_file) a.push("--output-file", args.output_file);
     return runAndFormat("documents", "transcribe-plan", a);
   }
 );
@@ -370,15 +372,17 @@ server.registerTool(
 server.registerTool(
   "connaissance_documents_register_batch",
   {
-    description: "Batch-register a `documents scan` manifest : read the scan output-file (to_transcribe items carry source + transcription paths) and register every document whose transcription now exists on disk, reusing the exact paths computed at scan time. Missing transcriptions are reported loudly under `missing` (e.g. an OCR batch written outside Transcriptions/Documents/) instead of producing silent orphans. Use after an OCR batch instead of calling register per file.",
+    description: "Batch-register a scan/transcribe-plan manifest : read the output-file (to_transcribe items carry source + transcription paths) and register every document whose transcription now exists on disk, reusing the exact paths computed at plan time. Missing transcriptions are reported loudly under `missing` (e.g. an OCR batch written outside Transcriptions/Documents/) instead of producing silent orphans. Use after an OCR batch instead of calling register per file. Pass ocr_engine='mistral' to stamp provenance when registering a Mistral re-pass (from documents_transcribe_plan).",
     inputSchema: {
-      from_scan: z.string().describe("Path to the JSON manifest produced by `documents scan --output-file`."),
+      from_scan: z.string().describe("Path to the JSON manifest produced by `documents scan --output-file` or `documents transcribe-plan --output-file`."),
       dry_run: z.boolean().optional().describe("Report what would be registered (and what's missing) without writing."),
+      ocr_engine: z.string().optional().describe("OCR engine provenance stamped into each transcription's frontmatter (e.g. 'mistral')."),
     },
   },
   async (args) => {
     const a = ["--from-scan", args.from_scan];
     if (args.dry_run) a.push("--dry-run");
+    if (args.ocr_engine) a.push("--ocr-engine", args.ocr_engine);
     return runAndFormat("documents", "register-batch", a);
   }
 );

@@ -99,6 +99,50 @@ def test_transcribe_plan_worklist(tmp_path, monkeypatch, tracking_db):
     assert res["estimated_cost_usd"] == round(8 * 0.001, 2)
 
 
+def test_transcribe_plan_manifest_fields_and_dedup(tmp_path, monkeypatch, tracking_db):
+    """Entrées au format scan (source/read_source/transcription) + dédup des
+    lignes-fantômes (variantes NFC/casse du même fichier)."""
+    docs = tmp_path / "Documents"
+    trans = tmp_path / "Transcriptions" / "Documents"
+    docs.mkdir(parents=True); trans.mkdir(parents=True)
+    monkeypatch.setattr(O, "DOCUMENTS_DIR", docs)
+    monkeypatch.setattr(O, "TRANSCRIPTIONS_DIR", trans)
+    # read_source = miroir : on simule en renvoyant un chemin /ssd/<rel>
+    monkeypatch.setattr(O, "documents_read_path", lambda p: f"/ssd/{p.name}")
+
+    # deux lignes pour le MÊME fichier (casse différente) → 1 seule entrée
+    _put_signals(tracking_db, "Releve.pdf", type="pdf", text_source="none",
+                 born_digital=False, pages=2)
+    _put_signals(tracking_db, "releve.pdf", type="pdf", text_source="none",
+                 born_digital=False, pages=2)
+
+    res = O.transcribe_plan(max_pages=10, db=tracking_db)
+    assert res["worklist_count"] == 1
+    assert res["counts"]["phantom_dupes"] == 1
+    e = res["to_transcribe"][0]
+    assert e["source"] == str(docs / e["rel"])
+    assert e["read_source"].startswith("/ssd/")
+    assert e["transcription"].endswith(".md")
+
+
+def test_transcribe_plan_output_file(tmp_path, monkeypatch, tracking_db):
+    """--output-file écrit un manifeste to_transcribe et renvoie un résumé compact."""
+    docs = tmp_path / "Documents"; trans = tmp_path / "Transcriptions" / "Documents"
+    docs.mkdir(parents=True); trans.mkdir(parents=True)
+    monkeypatch.setattr(O, "DOCUMENTS_DIR", docs)
+    monkeypatch.setattr(O, "TRANSCRIPTIONS_DIR", trans)
+    monkeypatch.setattr(O, "documents_read_path", lambda p: str(p))
+    _put_signals(tracking_db, "a.pdf", type="pdf", text_source="none",
+                 born_digital=False, pages=1)
+    out = tmp_path / "manifest.json"
+    res = O.transcribe_plan(max_pages=10, output_file=str(out), db=tracking_db)
+    import json
+    man = json.loads(out.read_text())
+    assert man["to_transcribe"][0]["rel"] == "a.pdf"
+    # le retour est compact (résumé), pas la liste complète inline
+    assert "sample" in res and res["worklist_count"] == 1
+
+
 def test_transcribe_plan_upgrade_only(tmp_path, monkeypatch, tracking_db):
     """--upgrade-only exclut les scannés sans transcription."""
     docs = tmp_path / "Documents"

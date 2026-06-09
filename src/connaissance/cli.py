@@ -49,7 +49,8 @@ def _cmd_documents(args) -> Any:
     if args.verb == "register-existing":
         return documents.register_existing_all()
     if args.verb == "register-batch":
-        return documents.register_batch(args.from_scan, dry_run=args.dry_run)
+        return documents.register_batch(args.from_scan, dry_run=args.dry_run,
+                                        ocr_engine=getattr(args, "ocr_engine", None))
     if args.verb == "category-view":
         return documents.category_view(apply=args.apply, clear=args.clear)
     if args.verb == "triage":
@@ -86,7 +87,8 @@ def _cmd_documents(args) -> Any:
         from connaissance.commands import ocr
         return ocr.transcribe_plan(max_pages=args.max_pages,
                                    include_missing=not args.upgrade_only,
-                                   scope=args.scope)
+                                   scope=args.scope,
+                                   output_file=args.output_file)
     raise SystemExit(f"verbe inconnu : documents {args.verb}")
 
 
@@ -505,8 +507,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_doc_rb = p_doc_verbs.add_parser("register-batch")
     p_doc_rb.add_argument("--from-scan", dest="from_scan", required=True,
                           help="Fichier JSON produit par `documents scan "
-                               "--output-file` (clé to_transcribe).")
+                               "--output-file` ou `transcribe-plan --output-file` "
+                               "(clé to_transcribe).")
     p_doc_rb.add_argument("--dry-run", dest="dry_run", action="store_true")
+    p_doc_rb.add_argument("--ocr-engine", dest="ocr_engine", default=None,
+                          help="Provenance OCR estampillée au register (ex. mistral).")
     p_doc_cv = p_doc_verbs.add_parser("category-view")
     p_doc_cv.add_argument("--apply", action="store_true",
                           help="(Re)construire la vue par catégorie en raccourcis.")
@@ -590,6 +595,9 @@ def build_parser() -> argparse.ArgumentParser:
                           action="store_true",
                           help="Seulement upgrader les transcriptions vision-local "
                                "(exclure les scannés sans transcription).")
+    p_doc_tp.add_argument("--output-file", dest="output_file", default=None,
+                          help="Écrire le manifeste to_transcribe (consommable par "
+                               "mistral-ocr --files-from-json et register-batch).")
 
     # emails
     p_em = sub.add_parser("emails")

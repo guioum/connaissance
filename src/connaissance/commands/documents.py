@@ -806,6 +806,7 @@ def register_existing_all(db: TrackingDB | None = None) -> dict:
 
 
 def register_batch(scan_file: str, dry_run: bool = False,
+                   ocr_engine: str | None = None,
                    db: TrackingDB | None = None) -> dict:
     """Enregistrer en lot les documents d'un manifeste de `documents scan`.
 
@@ -844,7 +845,8 @@ def register_batch(scan_file: str, dry_run: bool = False,
             })
             continue
         if not dry_run:
-            register_document(db, it.get("source"), transcription, it.get("hash"))
+            register_document(db, it.get("source"), transcription, it.get("hash"),
+                              ocr_engine=ocr_engine)
         registered.append(transcription)
 
     return {

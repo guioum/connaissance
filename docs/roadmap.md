@@ -46,10 +46,18 @@ quand c'est obsolète. Priorités indicatives : 🔴 haute · 🟡 moyenne · �
   reste en `deferred`. Renvoie `estimated_pages`/`estimated_cost_usd`
   ($1/1000 p). Le skill `transcrire` consomme `worklist[].source`, OCRise via
   `mistral-ocr`, ré-enregistre avec `ocr_engine="mistral"`.
-- [ ] 🟡 **Exécuter la repasse Mistral** : après un re-signal en v5 (peuple
-  `pages` + capte les transcriptions Vision en `text_source=ocr_cache`), lancer
-  `transcribe-plan --max-pages 10` (~$18 estimé ; les longues gardent Vision ;
-  le coût « tout » serait ~$124, dominé par ~378 gros PDF manuels/dumps exclus).
+- [ ] 🟡 **Exécuter la repasse Mistral** (≤50 p confirmé) : flux 100 % DB →
+  CLI → MCP, aucun JSON à la main :
+  1. `documents transcribe-plan --max-pages 50 --output-file M.json`
+     (911 docs distincts, 1 960 p, **~$1,96** ; born-digital exclus, doublons
+     de chemin dédupliqués).
+  2. `mistral-ocr ocr_batch_submit(files_from_json=M.json,
+     preserve_paths=~/Documents)` — **en lots** (~7×130 : un seul méga-upload
+     échoue) ; lit via `read_source` (SSD).
+  3. `mistral-ocr ocr_batch_results(output=Transcriptions/Documents)` — miroir.
+  4. `documents register-batch --from-scan M.json --ocr-engine mistral`.
+  Pilote 5 docs validé. (Le coût « tout », ≤∞ p, serait ~$17,6 ; les 44 longs
+  >50 p gardent Vision.)
 
 ## Registre d'entités vivant (table `entities`)
 
@@ -373,11 +381,15 @@ grande réorg tant que ce n'est pas validé.
   miroir mais indexe sous le canonique ; `documents scan` émet `read_source`.
   Routé dans `documents` (scan/register) et `audit reindex`. Voir
   [environments.md](environments.md).
-- [ ] 🔴 **Skill `transcrire` : OCR depuis `read_source`** — le gros gain de
-  masse. Le CLI émet déjà `read_source` (SSD) ; le skill/MCP d'OCR doit lire ce
-  chemin (pas `source`) pour éviter de matérialiser iCloud à chaque nouveau
-  document. `register` garde `source` comme identité. (Repo séparé du shim de
-  skills.)
+- [x] **OCR depuis `read_source`** (mistral-ocr 0.5.2) : `_files_from_json`
+  renvoie désormais des paires `(read_path, identity_path)` — lit les octets
+  depuis `read_source` (miroir SSD, zéro download iCloud) et calcule le layout
+  `--preserve-paths` + l'identité depuis `source` (canonique). Couplé au fix
+  `--preserve-paths` **lexical** (0.5.1, ne suit plus les symlinks : les
+  snapshots `- Historique/<date>` du miroir SSD ne sortaient plus la source de
+  la base). Côté connaissance, `documents transcribe-plan --output-file` émet le
+  manifeste `to_transcribe` (source + read_source + transcription, dédupliqué
+  des lignes-fantômes) et `register-batch --ocr-engine` referme la boucle.
 - [ ] 🟢 Mode `--materialized-only` pour les passes de masse **sans** SSD :
   sauter les fichiers `dataless` (helper déjà présent) au lieu de déclencher
   des téléchargements.

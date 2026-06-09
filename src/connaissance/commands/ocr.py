@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import os
 import statistics
+import unicodedata
 from pathlib import Path
 
 import yaml
@@ -21,6 +22,7 @@ from connaissance.commands.documents import (TRANSCRIPTIONS_DIR,
                                              _merge_frontmatter, register_document)
 from connaissance.commands.triage import (BUNDLE_SUFFIXES, CODE_MARKERS,
                                           MARKER_DIRS)
+from connaissance.core.output_file import write_or_inline
 from connaissance.core.paths import (DOCUMENTS_DIR, documents_read_path,
                                      require_paths)
 from connaissance.core.tracking import TrackingDB
@@ -162,7 +164,8 @@ _MISTRAL_PAGE_COST = 0.001   # $1 / 1000 pages (Mistral OCR, batch).
 
 
 def transcribe_plan(max_pages: int = 10, include_missing: bool = True,
-                    scope: str | None = None, db: TrackingDB | None = None) -> dict:
+                    scope: str | None = None, output_file: str | None = None,
+                    db: TrackingDB | None = None) -> dict:
     """Worklist de la **repasse Mistral**, bornée par le nombre de pages (coût).
 
     Cible : documents qui ont besoin d'OCR (PDF scannés, images-documents) et qui
@@ -173,20 +176,31 @@ def transcribe_plan(max_pages: int = 10, include_missing: bool = True,
     (``born_digital_skip``) : pas de coût OCR inutile. Borne ``--max-pages`` : un
     document de plus de N pages part dans ``deferred`` (au-dessus du budget).
 
-    N'écrit/ne déplace rien. Le skill ``transcrire`` consomme ``worklist`` (champs
-    ``source``), OCRise via Mistral, puis ré-enregistre avec
-    ``register_document(..., ocr_engine="mistral")`` (écrase la version locale).
+    Issu de la DB (``doc_signals``). **Déduplique** les lignes-fantômes
+    (variantes NFC/NFD/casse du même fichier sur un FS insensible à la casse) par
+    ``rel`` normalisé → un fichier physique = une entrée. Chaque entrée porte le
+    format de manifeste ``documents scan`` (consommable tel quel par
+    ``mistral-ocr --files-from-json`` ET ``documents register-batch``) :
+    ``source`` (canonique, pour le frontmatter + le miroir ``--preserve-paths``),
+    ``read_source`` (miroir SSD, lu par l'OCR sans download iCloud),
+    ``transcription`` (chemin cible sous ``Transcriptions/Documents``).
 
-    Prérequis : signaux à jour (``documents signals`` en v≥4) pour que les
-    transcriptions Vision existantes apparaissent en ``text_source=ocr_cache``."""
+    N'écrit/ne déplace rien (sauf le manifeste si ``--output-file``). Flux :
+    ``transcribe-plan --output-file`` → ``mistral-ocr ocr_batch_submit
+    files_from_json=…`` → ``mistral-ocr ocr_batch_results output=Transcriptions``
+    → ``documents register-batch --ocr-engine mistral``.
+
+    Prérequis : signaux à jour (``documents signals`` en v≥6) pour ``pages`` +
+    les transcriptions Vision existantes en ``text_source=ocr_cache``."""
     require_paths(DOCUMENTS_DIR, context="documents transcribe-plan")
     owns = db is None
     if db is None:
         db = TrackingDB()
     worklist: list[dict] = []
     deferred: list[dict] = []
+    seen: set[str] = set()          # rel normalisé → dédup des lignes-fantômes
     counts = {"upgrade_vision": 0, "missing": 0, "already_mistral": 0,
-              "born_digital_skip": 0, "deferred_pages": 0}
+              "born_digital_skip": 0, "deferred_pages": 0, "phantom_dupes": 0}
     try:
         for rel, pkt in db.all_doc_signals():
             if scope and not rel.startswith(scope):
@@ -202,6 +216,11 @@ def transcribe_plan(max_pages: int = 10, include_missing: bool = True,
                 if is_pdf and born is True:
                     counts["born_digital_skip"] += 1
                 continue
+            key = unicodedata.normalize("NFC", rel).lower()
+            if key in seen:
+                counts["phantom_dupes"] += 1
+                continue
+            seen.add(key)
             trans = TRANSCRIPTIONS_DIR / Path(rel).with_suffix(".md")
             engine = None
             if trans.exists():
@@ -218,7 +237,11 @@ def transcribe_plan(max_pages: int = 10, include_missing: bool = True,
             pages = pkt.get("pages")
             n = pages if isinstance(pages, int) and pages > 0 else 1
             reason = "upgrade_vision" if engine == _ocr.OCR_ENGINE else "missing"
-            entry = {"rel": rel, "source": str(DOCUMENTS_DIR / rel),
+            src = DOCUMENTS_DIR / rel
+            entry = {"rel": rel,
+                     "source": str(src),                       # canonique
+                     "read_source": str(documents_read_path(src)),  # miroir SSD
+                     "transcription": str(trans),
                      "pages": n, "reason": reason, "current_engine": engine}
             if n > max_pages:
                 counts["deferred_pages"] += 1
@@ -231,14 +254,25 @@ def transcribe_plan(max_pages: int = 10, include_missing: bool = True,
             db.close()
     worklist.sort(key=lambda e: e["pages"])
     est_pages = sum(e["pages"] for e in worklist)
-    return {"max_pages": max_pages,
-            "worklist_count": len(worklist),
-            "deferred_count": len(deferred),
-            "estimated_pages": est_pages,
-            "estimated_cost_usd": round(est_pages * _MISTRAL_PAGE_COST, 2),
-            "counts": counts,
-            "worklist": worklist,
-            "deferred_sample": deferred[:20]}
+    payload = {"max_pages": max_pages,
+               "worklist_count": len(worklist),
+               "deferred_count": len(deferred),
+               "estimated_pages": est_pages,
+               "estimated_cost_usd": round(est_pages * _MISTRAL_PAGE_COST, 2),
+               "counts": counts,
+               # `to_transcribe` : clé consommée par mistral-ocr / register-batch.
+               # `worklist` : alias conservé pour les appelants existants.
+               "to_transcribe": worklist,
+               "worklist": worklist,
+               "deferred": deferred}
+
+    def _summary(p: dict) -> dict:
+        keep = ("max_pages", "worklist_count", "deferred_count",
+                "estimated_pages", "estimated_cost_usd", "counts")
+        return {**{k: p[k] for k in keep},
+                "sample": [e["rel"] for e in p["to_transcribe"][:10]]}
+
+    return write_or_inline(payload, output_file=output_file, summary_fn=_summary)
 
 
 def ocr_images(limit: int | None = None, min_chars: int = 100, min_lines: int = 3,
