@@ -143,6 +143,33 @@ def test_transcribe_plan_output_file(tmp_path, monkeypatch, tracking_db):
     assert "sample" in res and res["worklist_count"] == 1
 
 
+def test_transcribe_plan_excludes_encrypted_broken(tmp_path, monkeypatch, tracking_db):
+    """Les PDF protégés/corrompus (pdf_status) sont écartés avant l'OCR."""
+    docs = tmp_path / "Documents"; trans = tmp_path / "Transcriptions" / "Documents"
+    docs.mkdir(parents=True); trans.mkdir(parents=True)
+    monkeypatch.setattr(O, "DOCUMENTS_DIR", docs)
+    monkeypatch.setattr(O, "TRANSCRIPTIONS_DIR", trans)
+    monkeypatch.setattr(O, "documents_read_path", lambda p: str(p))
+    _put_signals(tracking_db, "ok.pdf", type="pdf", text_source="none",
+                 born_digital=False, pages=2, pdf_status="ok")
+    _put_signals(tracking_db, "locked.pdf", type="pdf", text_source="none",
+                 born_digital=False, pages=1, pdf_status="encrypted")
+    _put_signals(tracking_db, "broken.pdf", type="pdf", text_source="none",
+                 born_digital=False, pages=1, pdf_status="unreadable")
+    res = O.transcribe_plan(max_pages=10, db=tracking_db)
+    rels = {e["rel"] for e in res["to_transcribe"]}
+    assert rels == {"ok.pdf"}
+    assert res["counts"]["encrypted_or_broken"] == 2
+    assert {e["rel"] for e in res["excluded"]} == {"locked.pdf", "broken.pdf"}
+
+
+def test_classify_pdf_error():
+    from connaissance.core.signals import _classify_pdf_error
+    assert _classify_pdf_error(Exception("Incorrect password error")) == "encrypted"
+    assert _classify_pdf_error(Exception("Failed to load (encrypted)")) == "encrypted"
+    assert _classify_pdf_error(Exception("Format error: not a PDF")) == "unreadable"
+
+
 def test_transcribe_plan_upgrade_only(tmp_path, monkeypatch, tracking_db):
     """--upgrade-only exclut les scannés sans transcription."""
     docs = tmp_path / "Documents"

@@ -200,7 +200,9 @@ def transcribe_plan(max_pages: int = 10, include_missing: bool = True,
     deferred: list[dict] = []
     seen: set[str] = set()          # rel normalisé → dédup des lignes-fantômes
     counts = {"upgrade_vision": 0, "missing": 0, "already_mistral": 0,
-              "born_digital_skip": 0, "deferred_pages": 0, "phantom_dupes": 0}
+              "born_digital_skip": 0, "deferred_pages": 0, "phantom_dupes": 0,
+              "encrypted_or_broken": 0}
+    excluded: list[dict] = []
     try:
         for rel, pkt in db.all_doc_signals():
             if scope and not rel.startswith(scope):
@@ -215,6 +217,12 @@ def transcribe_plan(max_pages: int = 10, include_missing: bool = True,
             if not ocr_target:
                 if is_pdf and born is True:
                     counts["born_digital_skip"] += 1
+                continue
+            # Écarter en amont les PDF qu'un OCR ne pourra pas traiter
+            # (protégés par mot de passe / corrompus) — Mistral échouerait dessus.
+            if pkt.get("pdf_status") in ("encrypted", "unreadable"):
+                counts["encrypted_or_broken"] += 1
+                excluded.append({"rel": rel, "pdf_status": pkt.get("pdf_status")})
                 continue
             key = unicodedata.normalize("NFC", rel).lower()
             if key in seen:
@@ -264,7 +272,8 @@ def transcribe_plan(max_pages: int = 10, include_missing: bool = True,
                # `worklist` : alias conservé pour les appelants existants.
                "to_transcribe": worklist,
                "worklist": worklist,
-               "deferred": deferred}
+               "deferred": deferred,
+               "excluded": excluded}
 
     def _summary(p: dict) -> dict:
         keep = ("max_pages", "worklist_count", "deferred_count",

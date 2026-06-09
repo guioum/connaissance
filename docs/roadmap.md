@@ -449,9 +449,12 @@ l'outil de ménage de fichiers `czkawka`.
 
 ### Inspirées de czkawka (ménage pré-OCR)
 
-- [ ] 🟡 **Détection de fichiers cassés** avant OCR (`pikepdf`) : valider qu'un
-  PDF s'ouvre avant de payer un OCR voué à l'échec. À brancher en pré-vol de
-  `documents scan`.
+- [x] **Détection de PDF cassés/chiffrés avant OCR** (v2.57.0) : pas besoin de
+  `pikepdf` — pypdfium2 (déjà là) lève l'erreur à l'ouverture. Signaux (schéma
+  **v7**) portent `pdf_status` (`ok`/`encrypted`/`unreadable`) ; `transcribe-plan`
+  écarte les protégés/corrompus en amont (`counts.encrypted_or_broken` +
+  liste `excluded`), évitant des échecs Mistral payants. Découvert en vrai sur le
+  lot 1 (2 manuels chiffrés `AgilePracticeGuide`/`ManagingChange…`).
 - [ ] 🟢 **Détection de mauvaises extensions** (`python-magic` / libmagic) : un
   `.pdf` qui est en réalité un JPEG, un `.docx` zip cassé — fréquent dans les
   exports de PJ, fait échouer l'OCR silencieusement.

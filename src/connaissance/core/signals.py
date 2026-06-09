@@ -60,7 +60,9 @@ _EXCERPT_MAX_CHARS = 1500      # extrait brut envoyé au classifieur (Phase C)
 # v6 : `pages` capturé aussi pour les PDF dont le texte vient du cache OCR
 # (court-circuit) — sinon les scannés OCRisés (cible de la repasse) n'avaient pas
 # de nb de pages → coût sous-estimé.
-SIGNALS_SCHEMA_VERSION = 6
+# v7 : `pdf_status` (ok/encrypted/unreadable) — écarte en amont les PDF protégés
+# par mot de passe ou corrompus qu'un OCR ne pourra pas traiter.
+SIGNALS_SCHEMA_VERSION = 7
 
 
 def _excerpt(text: str, max_chars: int = _EXCERPT_MAX_CHARS) -> str:
@@ -238,20 +240,31 @@ def _plain_text(read_path: Path, max_chars: int = _PLAIN_MAX_CHARS) -> str:
         return ""
 
 
+def _classify_pdf_error(exc: Exception) -> str:
+    """Classer un échec d'ouverture pypdfium2 : ``encrypted`` (protégé par mot de
+    passe) vs ``unreadable`` (corrompu / illisible)."""
+    msg = str(exc).lower()
+    if "password" in msg or "encrypt" in msg:
+        return "encrypted"
+    return "unreadable"
+
+
 def _pdf_text_and_meta(read_path: Path) -> tuple[str | None, dict, bool]:
     """(texte page(s) 1, métadonnées, pypdfium2_disponible).
 
     ``texte`` vaut ``None`` si pypdfium2 est absent (impossible de trancher),
-    ``""`` si le PDF est ouvert mais sans couche texte (⇒ scanné).
+    ``""`` si le PDF est ouvert mais sans couche texte (⇒ scanné). ``meta`` porte
+    ``pdf_status`` (``ok``/``encrypted``/``unreadable``) — utilisé pour écarter en
+    amont les PDF qu'un OCR ne pourra pas traiter.
     """
     if _pdfium is None:
         return None, {}, False
     try:
         doc = _pdfium.PdfDocument(str(read_path))
-    except Exception:
-        return "", {}, True
+    except Exception as e:
+        return "", {"pdf_status": _classify_pdf_error(e)}, True
     try:
-        meta: dict = {}
+        meta: dict = {"pdf_status": "ok"}
         try:
             meta["pages"] = len(doc)
         except Exception:
@@ -286,22 +299,23 @@ def _pdf_text_and_meta(read_path: Path) -> tuple[str | None, dict, bool]:
             pass
 
 
-def _pdf_page_count(read_path: Path) -> int | None:
-    """Nombre de pages d'un PDF (ouverture légère, sans extraction de texte).
+def _pdf_page_count_and_status(read_path: Path) -> tuple[int | None, str | None]:
+    """``(nb_pages, pdf_status)`` par ouverture légère (sans extraction de texte).
 
     Sert quand le texte vient du cache OCR (court-circuit) mais qu'on veut quand
-    même `pages` (filtre de coût de la repasse Mistral). None si pypdfium2 absent
-    ou PDF illisible."""
+    même `pages` (filtre de coût) + le statut (``ok``/``encrypted``/``unreadable``)
+    pour écarter en amont les PDF qu'un OCR ne pourra pas traiter. ``status`` vaut
+    None si pypdfium2 est absent (indécidable)."""
     if _pdfium is None:
-        return None
+        return None, None
     try:
         doc = _pdfium.PdfDocument(str(read_path))
-    except Exception:
-        return None
+    except Exception as e:
+        return None, _classify_pdf_error(e)
     try:
-        return len(doc)
+        return len(doc), "ok"
     except Exception:
-        return None
+        return None, "unreadable"
     finally:
         try:
             doc.close()
@@ -372,13 +386,16 @@ def extract_signals(path, *, rel: str | None = None,
                 else:
                     born_digital = False         # page 1 sans texte ⇒ scanné
 
-    # `pages` est une propriété du PDF indépendante de la source du texte : si le
-    # texte vient du cache OCR (court-circuit, PDF jamais ouvert), le compter
-    # quand même (ouverture légère) pour le filtre de coût de la repasse Mistral.
-    if ext == ".pdf" and read is not None and meta.get("pages") is None:
-        pc = _pdf_page_count(read)
+    # `pages` + `pdf_status` sont des propriétés du PDF indépendantes de la source
+    # du texte : si le texte vient du cache OCR (court-circuit, PDF jamais ouvert),
+    # ouvrir quand même (léger) pour le filtre de coût (pages) ET pour écarter en
+    # amont les PDF qu'un OCR ne pourra pas traiter (encrypted/unreadable).
+    if ext == ".pdf" and read is not None and "pdf_status" not in meta:
+        pc, status = _pdf_page_count_and_status(read)
         if pc is not None:
             meta["pages"] = pc
+        if status is not None:
+            meta["pdf_status"] = status
 
     summary = _sum.summarize(text) if text.strip() else \
         {"keywords": [], "sentences": [], "entities": {}, "chars": 0}
@@ -405,6 +422,9 @@ def extract_signals(path, *, rel: str | None = None,
         # Nombre de pages (PDF via pypdfium2). None hors PDF / si indécidable.
         # Sert au filtre de coût de la repasse Mistral (≤ N pages).
         "pages": meta.get("pages"),
+        # Statut d'ouverture PDF : ok / encrypted / unreadable (None hors PDF ou
+        # pypdfium2 absent). Écarte en amont les PDF qu'un OCR ne traitera pas.
+        "pdf_status": meta.get("pdf_status"),
         # Extrait brut (début du texte) : signal premier pour le classement.
         # Le résumé extractif est conservé pour d'autres usages (metadata/qmd).
         "excerpt": _excerpt(text),
