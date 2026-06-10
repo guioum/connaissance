@@ -263,6 +263,21 @@ CREATE TABLE IF NOT EXISTS llm_usage (
 CREATE INDEX IF NOT EXISTS idx_llm_usage_timestamp ON llm_usage(timestamp);
 CREATE INDEX IF NOT EXISTS idx_llm_usage_operation ON llm_usage(operation);
 CREATE INDEX IF NOT EXISTS idx_llm_usage_source_type ON llm_usage(source_type);
+
+-- Journal de la passe `documents ocr-images` : UNE ligne par image traitée
+-- (document OU non-document). Permet une reprise idempotente d'un balayage long
+-- sans re-OCRiser les photos déjà classées, et garde la trace des décisions
+-- (densité de texte → doc/photo). `is_document` 1/0 ; `chars`/`confidence` =
+-- mesure Vision. Additive, CREATE IF NOT EXISTS.
+CREATE TABLE IF NOT EXISTS image_ocr_log (
+    rel_path TEXT PRIMARY KEY,        -- relatif à ~/Documents
+    is_document INTEGER NOT NULL,     -- 1 = document (transcription écrite), 0 = photo
+    chars INTEGER,
+    confidence REAL,
+    processed_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%S', 'now', 'localtime'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_image_ocr_log_isdoc ON image_ocr_log(is_document);
 """
 
 
@@ -862,6 +877,27 @@ class TrackingDB:
             except (ValueError, TypeError):
                 continue
         return out
+
+    # --- Journal de la passe ocr-images (reprise idempotente) ---
+
+    def image_ocr_logged_rels(self) -> set[str]:
+        """Ensemble des ``rel_path`` d'images déjà traitées par ``ocr-images``
+        (document OU photo). Sert à reprendre un balayage sans re-OCRiser."""
+        return {r[0] for r in self._conn.execute(
+            "SELECT rel_path FROM image_ocr_log")}
+
+    def log_image_ocr(self, rel_path: str, is_document: bool,
+                      chars: int | None, confidence: float | None) -> None:
+        """Journaliser le verdict Vision d'une image (idempotent par rel)."""
+        self._conn.execute(
+            """INSERT INTO image_ocr_log (rel_path, is_document, chars, confidence)
+               VALUES (?, ?, ?, ?)
+               ON CONFLICT(rel_path) DO UPDATE SET
+                 is_document=excluded.is_document, chars=excluded.chars,
+                 confidence=excluded.confidence,
+                 processed_at=strftime('%Y-%m-%dT%H:%M:%S', 'now', 'localtime')""",
+            (_nfc(rel_path), 1 if is_document else 0, chars, confidence))
+        self._conn.commit()
 
     def upsert_classification(self, rel_path, data: dict) -> None:
         """Insérer/rafraîchir l'étage classement de la fiche d'un document."""

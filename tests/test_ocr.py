@@ -44,6 +44,30 @@ def test_ocr_images_classifies_by_text_density(tmp_path, monkeypatch, tracking_d
     assert not (trans / "souvenir.md").exists()
 
 
+def test_ocr_images_resume_skips_logged(tmp_path, monkeypatch, tracking_db):
+    """Reprise : une image déjà jugée (journal DB) est sautée au run suivant —
+    pas de re-OCR des photos rejetées."""
+    docs = tmp_path / "Documents"; trans = tmp_path / "Transcriptions" / "Documents"
+    docs.mkdir(parents=True)
+    (docs / "photo.jpg").write_bytes(b"img")
+    monkeypatch.setattr(O, "DOCUMENTS_DIR", docs)
+    monkeypatch.setattr(O, "TRANSCRIPTIONS_DIR", trans)
+    monkeypatch.setattr(O, "documents_read_path", lambda p: p)
+    monkeypatch.setattr(O._ocr, "available", lambda: True)
+    calls = {"n": 0}
+    def fake_ocr(p, max_pages=1):
+        calls["n"] += 1
+        return {"text": "", "confidence": 0.0}        # photo (non-doc)
+    monkeypatch.setattr(O._ocr, "ocr_file", fake_ocr)
+
+    r1 = O.ocr_images(min_chars=10, db=tracking_db)
+    assert r1["non_documents"] == 1 and calls["n"] == 1
+    # 2e passage : l'image est journalisée → sautée, pas de nouvel OCR
+    r2 = O.ocr_images(min_chars=10, db=tracking_db)
+    assert calls["n"] == 1                              # ocr_file NON rappelé
+    assert r2["skipped"]["deja_traite"] == 1
+
+
 def _put_signals(db, rel, **fields):
     import json
     pkt = {"_v": 99, "rel": rel, **fields}      # _v non vérifié par all_doc_signals

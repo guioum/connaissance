@@ -314,6 +314,10 @@ def ocr_images(limit: int | None = None, min_chars: int = 100, min_lines: int = 
     borderline: list[dict] = []
     skipped = {"transcription_existe": 0, "sans_miroir": 0}
     base = (DOCUMENTS_DIR / scope) if scope else DOCUMENTS_DIR
+    # Reprise idempotente : sauter les images déjà jugées (doc OU photo) lors d'un
+    # balayage précédent — sinon on re-OCRise toutes les photos rejetées.
+    processed = set() if force else db.image_ocr_logged_rels()
+    skipped["deja_traite"] = 0
     stop = False
     try:
         for dp, dirs, fs in os.walk(base):
@@ -330,6 +334,9 @@ def ocr_images(limit: int | None = None, min_chars: int = 100, min_lines: int = 
                 if fn.startswith(".") or Path(fn).suffix.lower() not in _IMG_EXTS:
                     continue
                 rel = str((d / fn).relative_to(DOCUMENTS_DIR))
+                if rel in processed:
+                    skipped["deja_traite"] += 1
+                    continue
                 trans = TRANSCRIPTIONS_DIR / Path(rel).with_suffix(".md")
                 if trans.exists() and not force:
                     skipped["transcription_existe"] += 1
@@ -343,7 +350,8 @@ def ocr_images(limit: int | None = None, min_chars: int = 100, min_lines: int = 
                 text = (res or {}).get("text", "").strip() if res else ""
                 lines = text.count("\n") + 1 if text else 0
                 conf = round(float((res or {}).get("confidence") or 0), 3)
-                if len(text) >= min_chars and lines >= min_lines:
+                is_document = len(text) >= min_chars and lines >= min_lines
+                if is_document:
                     trans.parent.mkdir(parents=True, exist_ok=True)
                     trans.write_text(text + "\n", encoding="utf-8")
                     register_document(db, ab, trans)
@@ -352,13 +360,15 @@ def ocr_images(limit: int | None = None, min_chars: int = 100, min_lines: int = 
                         {"ocr_engine": _ocr.OCR_ENGINE, "ocr_confidence": conf,
                          "ocr_kind": "image"}), encoding="utf-8")
                     docs.append({"rel": rel, "chars": len(text), "confidence": conf})
-                    if limit and len(docs) >= limit:
-                        stop = True
-                        break
                 else:
                     non_doc += 1
                     if 0 < len(text) < min_chars * 2:   # proche du seuil → à revoir
                         borderline.append({"rel": rel, "chars": len(text), "conf": conf})
+                # Journaliser le verdict (doc/photo) → reprise idempotente.
+                db.log_image_ocr(rel, is_document, len(text), conf)
+                if limit and len(docs) >= limit:
+                    stop = True
+                    break
     finally:
         if owns:
             db.close()
