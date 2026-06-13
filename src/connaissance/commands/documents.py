@@ -847,6 +847,16 @@ def register_batch(scan_file: str, dry_run: bool = False,
         if not dry_run:
             register_document(db, it.get("source"), transcription, it.get("hash"),
                               ocr_engine=ocr_engine)
+            # Journaliser le coût OCR réel (Mistral facturé à la page). Le `pages`
+            # du manifeste = compte pypdfium (exact pour un PDF, 1 pour une image),
+            # soit la base de facturation Mistral. → `pipeline costs --real` voit
+            # le coût OCR, pas seulement les résumés/classements Claude.
+            if ocr_engine == "mistral":
+                db.log_ocr_usage(operation="ocr_mistral",
+                                 pages=it.get("pages") or 1,
+                                 source_path=it.get("source"),
+                                 dest_path=transcription,
+                                 model="mistral-ocr-latest", mode="batch")
         registered.append(transcription)
 
     return {

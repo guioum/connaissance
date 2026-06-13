@@ -563,6 +563,7 @@ def _split_fiche_chronologie(content: str) -> tuple[str, str] | None:
 def register_from_results_file(results_file: str,
                                requests_file: str | None = None,
                                cleanup: bool = True,
+                               batch: bool = True,
                                db: TrackingDB | None = None) -> dict:
     """Enregistrer en masse les fiches+chronologies d'un fichier de résultats API.
 
@@ -664,6 +665,8 @@ def register_from_results_file(results_file: str,
                 dest_path=rf.get("path"),
                 custom_id=cid,
                 model=model_by_id.get(cid),
+                mode="batch" if batch else "direct",
+                batch=batch,
             )
 
     from connaissance.core.paths import TRANSIT_DIR

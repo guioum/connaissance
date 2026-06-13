@@ -58,6 +58,32 @@ quand c'est obsolète. Priorités indicatives : 🔴 haute · 🟡 moyenne · �
   4. `documents register-batch --from-scan M.json --ocr-engine mistral`.
   Pilote 5 docs validé. (Le coût « tout », ≤∞ p, serait ~$17,6 ; les 44 longs
   >50 p gardent Vision.)
+- [ ] 🟡 **Born-digital → Mistral aussi** (décision 2026-06, un seul moteur/
+  format pour toute la base plutôt qu'un second flux d'extraction couche-texte) :
+  `transcribe-plan --include-born-digital` (CLI + MCP, compte
+  `born_digital_included`) les embarque dans le même flux. Mesuré sur la base :
+  ≤50 p = **5 296 docs / ~22 756 p / ~$22,76** ; les ~317 longs >50 p restent
+  en `deferred` (couche texte + signaux suffisent). Motivation : sans
+  transcription `.md`, un born-digital n'a que ses 4 000 premiers caractères en
+  `doc_signals` → pas de résumé LLM complet possible. À lancer **après** la
+  repasse scannés/images en cours.
+- [ ] 🟢 **Formats hors PDF/images — décisions de couverture** (triage de
+  valeur fait 2026-06, chemins + noms inspectés) :
+  - **docx/pptx (397)** : supportés par Mistral et le wrapper (`.pdf/.docx/.pptx`)
+    → même geste que `--include-born-digital` (étendre la sélection
+    `transcribe-plan`), ~$2-4. Caveat : pas de compte de pages dans les signaux
+    → borne `--max-pages` inopérante pour eux.
+  - **doc legacy (191)** : vraie valeur dispersée (CVs `_Permanent`, souvenirs
+    famille) → pré-conversion `textutil -convert docx` (natif, gratuit, déjà
+    utilisé en Phase B) puis flux Mistral. ~$1.
+  - **xlsx (371)** : JAMAIS d'OCR — un tableur est déjà structuré ; transcription
+    = dump tableau markdown local (étendre `_xlsx_text` Phase B, sans le
+    plafond 20k). Seul mini-flux local justifié.
+  - **rtf (1 173, dont 1 170 = dump de notes `Classer/2020/Archive 2020`,
+    export Evernote-like) et key (126, dont 118 = Google Takeout 2021-11-19)** :
+    **signaux seuls, assumé** (décidé 2026-06) — contenu dormant, relève des
+    notes plus que des documents ; pré-classable via doc_signals, pas de
+    transcription/résumé en masse. Traitement à la demande si un doc ressort.
 
 ## Registre d'entités vivant (table `entities`)
 
@@ -309,6 +335,35 @@ grande réorg tant que ce n'est pas validé.
   confiance basse ne bloque plus (réversible via ledger) ; `auto_low_confidence`
   exposé, `attente_reasons` restreint aux attente. Effet lot 200 : auto 83→97,
   zéro BDC, zéro hallucination en auto, `abonnements` maîtrisé.
+- [x] **Levier « date manquante » : repli fiable côté register** (calibré sur
+  échantillon mix 120 docs, 2026-06-13) : quand Haiku n'émet pas de date (il
+  reçoit pourtant `date_name/meta/fs` et reste prudemment muet), `register`
+  retombe sur la date des SIGNAUX — **uniquement `name` + `metadata`**, jamais
+  `filesystem` (date d'import : daterait un reçu OIQ 2015 à son année de scan).
+  Tracé `date_repli` dans `reasons` (auditable, réversible). Effet mesuré :
+  auto **73 % → 78 %** (+6/120), 0 date erronée introduite (les 4 cas filesystem
+  restent en attente, à raison). Test Haiku validé pour le run : qualité des auto
+  bonne (résout BNC→Banque Nationale, Manulife→Manuvie, T3012A→ARC), seules
+  erreurs franches = ~2-3 placeholders sur OCR-bouillie (« X ») que la porte
+  assouplie laisse passer → **spot-check par lot**, pas confiance au seul taux.
+- [x] **Suivi des coûts réels de bout en bout** (2026-06-13) : les retours batch
+  portent le coût réel (Claude : `usage` tokens+cache ; Mistral : `pages_processed`),
+  mais la journalisation `llm_usage` était incomplète. Trois correctifs :
+  (1) **`classify register` journalise** désormais l'usage Haiku (était absent →
+  le coût récurrent du pré-classement échappait à `pipeline costs --real`) ;
+  (2) **remise Batch −50 % appliquée** dans `compute_cost_usd(batch=True)` (avant :
+  coût batch 2× trop élevé ; threadé dans classify/summarize/synthesis) ;
+  (3) **OCR Mistral journalisé** via `log_ocr_usage` (colonne additive `units`=pages,
+  tokens=0, $0,001/p) câblé dans `register-batch` quand `--ocr-engine mistral`.
+  `usage_summary` agrège `units`. NB : les ~271 lignes resume/synthesis
+  antérieures restent au plein tarif (non corrigées rétro).
+- [x] **Caching Batch : la cause « sous le seuil » est caduque** (2026-06-13) : la
+  note [[caching-inefficace-en-batch]] disait système pré < seuil cachable Haiku
+  (~4096 tok) → no-op. Or le registre d'entités a grossi (**192** connues injectées)
+  → système ≈ 4582 tok, **au-dessus du seuil** : le batch classify de test a montré
+  **311k tokens de cache-read** (le caching FIRE). Les lignes resume/synthesis
+  historiques montrent encore `cache_read=0` (système plus court). Le nouveau
+  logging par opération permettra de mesurer le `cache_hit_rate` réel au run.
 - [x] **Signal premier = extrait du texte brut, plus le résumé extractif**
   (v2.45.0) : le résumé Luhn + mots-clés-par-fréquence était un proxy trop faible
   (mots vides, phrases répétées) ET le texte extrait (PDF born-digital 4000 car.,

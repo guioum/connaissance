@@ -87,6 +87,7 @@ def _cmd_documents(args) -> Any:
         from connaissance.commands import ocr
         return ocr.transcribe_plan(max_pages=args.max_pages,
                                    include_missing=not args.upgrade_only,
+                                   include_born_digital=args.include_born_digital,
                                    scope=args.scope,
                                    output_file=args.output_file)
     raise SystemExit(f"verbe inconnu : documents {args.verb}")
@@ -595,6 +596,11 @@ def build_parser() -> argparse.ArgumentParser:
                           action="store_true",
                           help="Seulement upgrader les transcriptions vision-local "
                                "(exclure les scannés sans transcription).")
+    p_doc_tp.add_argument("--include-born-digital", dest="include_born_digital",
+                          action="store_true",
+                          help="Inclure aussi les PDF born-digital (un seul "
+                               "moteur/format pour toute la base ; sinon exclus, "
+                               "couche texte propre).")
     p_doc_tp.add_argument("--output-file", dest="output_file", default=None,
                           help="Écrire le manifeste to_transcribe (consommable par "
                                "mistral-ocr --files-from-json et register-batch).")

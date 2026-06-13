@@ -473,6 +473,18 @@ def register(results_file: str, from_prepare: str,
         etype_raw = j.get("entity_type") or "divers"
         category = canonicalize_category(j.get("category"))
         date = j.get("date") if isinstance(j.get("date"), str) and _DATE_OK.match(j.get("date") or "") else None
+        # Repli date (levier taux auto) : si Haiku n'émet pas de date, retomber
+        # sur la date des SIGNAUX — mais seulement les sources FIABLES (nom de
+        # fichier, métadonnée PDF). On EXCLUT `filesystem` (date d'import, pas
+        # date du doc : daterait p.ex. un reçu OIQ 2015 à son année de scan).
+        # Tracé `date_approx` pour rester réversible/auditable. Haiku reçoit déjà
+        # ces dates et choisit prudemment de ne pas les émettre → décision de
+        # politique assumée ici, le déplacement restant réversible (ledger).
+        date_approx = False
+        if not date:
+            hd, hsrc = hint.get("date"), hint.get("date_source")
+            if hd and _DATE_OK.match(hd or "") and hsrc in ("name", "metadata"):
+                date, date_approx = hd, True
         title = (j.get("title") or "").strip()
         # Sujet normalisé en slug (minuscules-tirets, ACCENTS CONSERVÉS — même
         # règle que les slugs d'entité) pour éviter les variantes café/cafes.
@@ -488,6 +500,8 @@ def register(results_file: str, from_prepare: str,
             reasons.append("catégorie_invalide")
         if not date:
             reasons.append("date_absente")
+        elif date_approx:
+            reasons.append("date_repli")
 
         # Aligner sur le registre `entities` : si le nom (ou son slug) matche une
         # entité connue / un alias, réutiliser SON canonique (anti-fragmentation
@@ -525,10 +539,21 @@ def register(results_file: str, from_prepare: str,
             "custom_id": cid, "source": source, "status": status, "dest": dest,
             "entity": entity or hint.get("entity"), "entity_type": etype,
             "entity_slug": slug, "category": category, "date": date,
+            "date_approx": date_approx,
             "title": title, "sujet": sujet, "confidence": confidence,
             "reasons": reasons,
         }
         entries.append(entry)
+
+        # Journaliser le coût réel du pré-classement (batch Haiku) si l'API a
+        # retourné un usage — sinon le coût récurrent de la classification
+        # échappe à `pipeline costs --real`. mode/batch = Batch API (−50 %).
+        usage = res.get("usage")
+        if isinstance(usage, dict):
+            db.log_usage(operation="classify", usage=usage,
+                         source_type=etype, source_path=source,
+                         custom_id=cid, model=req.get("model"),
+                         mode="batch", batch=True)
 
         # Persister l'étage classement de la fiche (résumable, interrogeable).
         try:

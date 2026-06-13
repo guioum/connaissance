@@ -624,6 +624,7 @@ def register(custom_id: str, content: str,
 def register_from_results_file(results_file: str,
                                requests_file: str | None = None,
                                cleanup: bool = True,
+                               batch: bool = True,
                                db: TrackingDB | None = None) -> dict:
     """Enregistrer en masse les résumés d'un fichier de résultats API.
 
@@ -757,6 +758,8 @@ def register_from_results_file(results_file: str,
                     dest_path=result.get("path"),
                     custom_id=custom_id,
                     model=meta.get("model"),
+                    mode="batch" if batch else "direct",
+                    batch=batch,
                 )
 
     # Cleanup : supprimer les fichiers de transit si tout s'est bien passé.

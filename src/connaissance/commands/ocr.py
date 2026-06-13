@@ -166,6 +166,7 @@ _OCR_IMAGE_TYPES = {e.lstrip(".") for e in _IMG_EXTS}
 
 
 def transcribe_plan(max_pages: int = 10, include_missing: bool = True,
+                    include_born_digital: bool = False,
                     scope: str | None = None, output_file: str | None = None,
                     db: TrackingDB | None = None) -> dict:
     """Worklist de la **repasse Mistral**, bornée par le nombre de pages (coût).
@@ -175,7 +176,10 @@ def transcribe_plan(max_pages: int = 10, include_missing: bool = True,
     ``vision-local`` à *upgrader* vers le markdown structuré de Mistral, soit
     (``include_missing``) un scanné sans aucune transcription. Les PDF
     **born-digital** (couche texte propre) sont exclus et comptés
-    (``born_digital_skip``) : pas de coût OCR inutile. Borne ``--max-pages`` : un
+    (``born_digital_skip``) : pas de coût OCR inutile — sauf
+    ``include_born_digital``, qui les embarque aussi (un seul moteur, un seul
+    format de transcription pour toute la base ; comptés
+    ``born_digital_included``). Borne ``--max-pages`` : un
     document de plus de N pages part dans ``deferred`` (au-dessus du budget).
 
     Issu de la DB (``doc_signals``). **Déduplique** les lignes-fantômes
@@ -202,7 +206,8 @@ def transcribe_plan(max_pages: int = 10, include_missing: bool = True,
     deferred: list[dict] = []
     seen: set[str] = set()          # rel normalisé → dédup des lignes-fantômes
     counts = {"upgrade_vision": 0, "missing": 0, "already_mistral": 0,
-              "born_digital_skip": 0, "deferred_pages": 0, "phantom_dupes": 0,
+              "born_digital_skip": 0, "born_digital_included": 0,
+              "deferred_pages": 0, "phantom_dupes": 0,
               "encrypted_or_broken": 0, "non_ocr_type_skip": 0}
     excluded: list[dict] = []
     try:
@@ -221,6 +226,12 @@ def transcribe_plan(max_pages: int = 10, include_missing: bool = True,
             # les envoyer à un OCR n'a aucun sens (cf. ebooks captés par erreur).
             ocr_target = (is_pdf and (born is False or ts == "ocr_cache")) \
                 or (is_image and ts == "ocr_cache")
+            if not ocr_target and include_born_digital \
+                    and is_pdf and born is True:
+                # Uniformisation sur Mistral (décision 2026-06) : la couche
+                # texte reste fidèle mais sans structure ; le markdown Mistral
+                # vaut ~$1/1000 p, borné par --max-pages comme le reste.
+                ocr_target = True
             if not ocr_target:
                 if is_pdf and born is True:
                     counts["born_digital_skip"] += 1
@@ -253,7 +264,12 @@ def transcribe_plan(max_pages: int = 10, include_missing: bool = True,
                 continue
             pages = pkt.get("pages")
             n = pages if isinstance(pages, int) and pages > 0 else 1
-            reason = "upgrade_vision" if engine == _ocr.OCR_ENGINE else "missing"
+            if engine == _ocr.OCR_ENGINE:
+                reason = "upgrade_vision"
+            elif include_born_digital and is_pdf and born is True:
+                reason = "born_digital_included"
+            else:
+                reason = "missing"
             src = DOCUMENTS_DIR / rel
             entry = {"rel": rel,
                      "source": str(src),                       # canonique
@@ -333,7 +349,11 @@ def ocr_images(limit: int | None = None, min_chars: int = 100, min_lines: int = 
             for fn in fs:
                 if fn.startswith(".") or Path(fn).suffix.lower() not in _IMG_EXTS:
                     continue
-                rel = str((d / fn).relative_to(DOCUMENTS_DIR))
+                # NFC obligatoire : os.walk renvoie du NFD sur APFS alors que
+                # le journal stocke du NFC — sans normaliser, la reprise rate
+                # les chemins accentués et re-OCRise ces images à chaque run.
+                rel = unicodedata.normalize(
+                    "NFC", str((d / fn).relative_to(DOCUMENTS_DIR)))
                 if rel in processed:
                     skipped["deja_traite"] += 1
                     continue

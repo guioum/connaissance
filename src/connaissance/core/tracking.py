@@ -257,6 +257,7 @@ CREATE TABLE IF NOT EXISTS llm_usage (
     output_tokens INTEGER,
     cache_creation_input_tokens INTEGER,
     cache_read_input_tokens INTEGER,
+    units INTEGER,            -- unité non-token (pages OCR Mistral) ; NULL pour Claude
     cost_usd REAL
 );
 
@@ -294,12 +295,22 @@ PRICING_USD_PER_MTOK: dict[str, dict[str, float]] = {
 _DEFAULT_PRICING = {"input": 3.0, "output": 15.0}
 
 
-def compute_cost_usd(model: str | None, usage: dict) -> float | None:
+# Prix Mistral OCR (déjà tarif batch : $1 / 1000 pages). Source unique du coût
+# OCR journalisé dans ``llm_usage`` (lignes Mistral : tokens=0, units=pages).
+MISTRAL_PAGE_COST_USD = 0.001
+
+
+def compute_cost_usd(model: str | None, usage: dict,
+                     batch: bool = False) -> float | None:
     """Calculer le coût USD d'un appel LLM à partir du ``usage`` Anthropic.
 
     ``usage`` doit contenir ``input_tokens``, ``output_tokens`` et optionnellement
     ``cache_creation_input_tokens`` et ``cache_read_input_tokens``. Retourne
     ``None`` si le dict est vide.
+
+    ``batch=True`` applique la **remise Batch API −50 %** : une opération soumise
+    via ``messages/batches`` est facturée la moitié du tarif direct. Sans ce flag,
+    le coût journalisé d'un batch serait 2× trop élevé.
     """
     if not usage:
         return None
@@ -314,7 +325,10 @@ def compute_cost_usd(model: str | None, usage: dict) -> float | None:
         + cr * pricing["input"] * 0.10
     ) / 1_000_000
     output_cost = out * pricing["output"] / 1_000_000
-    return round(input_cost + output_cost, 6)
+    total = input_cost + output_cost
+    if batch:
+        total *= 0.5
+    return round(total, 6)
 
 
 class TrackingDB:
@@ -355,6 +369,7 @@ class TrackingDB:
             "files": {"size": "INTEGER"},
             "doc_classification": {c: self._COL_TYPES.get(c, "TEXT")
                                    for c in self._CLS_COLS},
+            "llm_usage": {"units": "INTEGER"},
         }
 
     def _migrate(self):
@@ -1447,19 +1462,21 @@ class TrackingDB:
                   dest_path: str | None = None,
                   custom_id: str | None = None,
                   model: str | None = None,
-                  mode: str | None = None) -> None:
+                  mode: str | None = None,
+                  batch: bool = False) -> None:
         """Enregistrer un usage LLM (tokens + coût) après un appel API.
 
-        Utilisé par ``summarize.register_from_results_file`` et
-        ``synthesis.register_from_results_file`` pour tracer les coûts réels
+        Utilisé par ``classify.register``, ``summarize.register_from_results_file``
+        et ``synthesis.register_from_results_file`` pour tracer les coûts réels
         par opération et source. ``usage`` suit le format Anthropic
         (``input_tokens``, ``output_tokens``, ``cache_creation_input_tokens``,
-        ``cache_read_input_tokens``). Les appels manuels (mode « dans Claude »)
-        n'ont pas de usage API et ne sont pas tracés.
+        ``cache_read_input_tokens``). ``batch=True`` applique la remise Batch
+        API −50 % sur le coût. Les appels manuels (mode « dans Claude ») n'ont
+        pas de usage API et ne sont pas tracés.
         """
         if not usage:
             return
-        cost = compute_cost_usd(model, usage)
+        cost = compute_cost_usd(model, usage, batch=batch)
         self._conn.execute(
             """INSERT INTO llm_usage
                (operation, source_type, source_path, dest_path, custom_id,
@@ -1475,6 +1492,35 @@ class TrackingDB:
              usage.get("cache_creation_input_tokens") or 0,
              usage.get("cache_read_input_tokens") or 0,
              cost))
+        self._conn.commit()
+
+    def log_ocr_usage(self, operation: str, pages: int,
+                      source_path: str | None = None,
+                      dest_path: str | None = None,
+                      model: str | None = None,
+                      mode: str = "batch") -> None:
+        """Journaliser le coût d'un OCR Mistral (facturé à la **page**).
+
+        Écrit une ligne ``llm_usage`` avec ``units=pages`` et les compteurs de
+        tokens à 0 (l'OCR ne consomme pas de tokens Claude). Le coût suit
+        ``MISTRAL_PAGE_COST_USD`` ($1/1000 p, déjà tarif batch). Sert à ce que
+        ``pipeline costs --real`` reflète le coût OCR de bout en bout, pas
+        seulement les résumés/classements Claude.
+        """
+        pages = int(pages or 0)
+        if pages <= 0:
+            return
+        cost = round(pages * MISTRAL_PAGE_COST_USD, 6)
+        self._conn.execute(
+            """INSERT INTO llm_usage
+               (operation, source_path, dest_path, model, mode,
+                input_tokens, output_tokens, cache_creation_input_tokens,
+                cache_read_input_tokens, units, cost_usd)
+               VALUES (?, ?, ?, ?, ?, 0, 0, 0, 0, ?, ?)""",
+            (operation,
+             str(source_path) if source_path else None,
+             str(dest_path) if dest_path else None,
+             model, mode, pages, cost))
         self._conn.commit()
 
     def usage_summary(self, since: str | None = None,
@@ -1509,6 +1555,7 @@ class TrackingDB:
                     COALESCE(SUM(output_tokens), 0) as output_tokens,
                     COALESCE(SUM(cache_creation_input_tokens), 0) as cache_write,
                     COALESCE(SUM(cache_read_input_tokens), 0) as cache_read,
+                    COALESCE(SUM(units), 0) as units,
                     COALESCE(SUM(cost_usd), 0.0) as cost_usd
                 FROM llm_usage WHERE {w}"""
             if group_col:
@@ -1520,7 +1567,7 @@ class TrackingDB:
         total_rows = _agg(None)
         total = total_rows[0] if total_rows else {
             "n": 0, "input_tokens": 0, "output_tokens": 0,
-            "cache_write": 0, "cache_read": 0, "cost_usd": 0.0,
+            "cache_write": 0, "cache_read": 0, "units": 0, "cost_usd": 0.0,
         }
         # Cache hit rate = read / (read + write + uncached). Le input_tokens
         # stocké exclut déjà les tokens cachés (semantics de l'usage Anthropic).

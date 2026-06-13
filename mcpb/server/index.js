@@ -342,11 +342,12 @@ server.registerTool(
 server.registerTool(
   "connaissance_documents_transcribe_plan",
   {
-    description: "Mistral re-pass WORKLIST, page-bounded for cost. DB-driven (doc_signals). Lists documents that need OCR (scanned PDFs, image-documents) and do NOT yet have a Mistral transcription — either a vision-local transcription to UPGRADE to Mistral's structured markdown, or (by default) a scanned doc with no transcription at all. Born-digital PDFs (clean text layer) are excluded and counted (born_digital_skip). Phantom duplicate rows (NFC/NFD/case variants of the same file) are deduped (counts.phantom_dupes). Documents over max_pages go to 'deferred'. Returns counts, estimated_pages and estimated_cost_usd ($1/1000 pages), plus to_transcribe[] (each item carries source canonical + read_source SSD mirror + transcription target). Read-only except --output_file. INTENDED FLOW: call with output_file to write a manifest, then mistral-ocr ocr_batch_submit(files_from_json=manifest, preserve_paths=~/Documents) → ocr_batch_results(output=Transcriptions/Documents) → documents_register_batch(from_scan=manifest, ocr_engine='mistral'). The manifest's read_source makes mistral-ocr read from the SSD mirror (no iCloud download). Requires up-to-date signals (documents signals, schema v>=6) for pages + ocr_cache.",
+    description: "Mistral re-pass WORKLIST, page-bounded for cost. DB-driven (doc_signals). Lists documents that need OCR (scanned PDFs, image-documents) and do NOT yet have a Mistral transcription — either a vision-local transcription to UPGRADE to Mistral's structured markdown, or (by default) a scanned doc with no transcription at all. Born-digital PDFs (clean text layer) are excluded and counted (born_digital_skip) unless include_born_digital=true (single engine/format for the whole base; counted born_digital_included). Phantom duplicate rows (NFC/NFD/case variants of the same file) are deduped (counts.phantom_dupes). Documents over max_pages go to 'deferred'. Returns counts, estimated_pages and estimated_cost_usd ($1/1000 pages), plus to_transcribe[] (each item carries source canonical + read_source SSD mirror + transcription target). Read-only except --output_file. INTENDED FLOW: call with output_file to write a manifest, then mistral-ocr ocr_batch_submit(files_from_json=manifest, preserve_paths=~/Documents) → ocr_batch_results(output=Transcriptions/Documents) → documents_register_batch(from_scan=manifest, ocr_engine='mistral'). The manifest's read_source makes mistral-ocr read from the SSD mirror (no iCloud download). Requires up-to-date signals (documents signals, schema v>=6) for pages + ocr_cache.",
     inputSchema: {
       max_pages: z.number().optional().describe("Page ceiling for the re-pass (default 10). Docs above go to deferred."),
       scope: z.string().optional().describe("Restrict to a subfolder (relative to ~/Documents)."),
       upgrade_only: z.boolean().optional().describe("Only upgrade existing vision-local transcriptions; exclude scanned docs with no transcription."),
+      include_born_digital: z.boolean().optional().describe("Also include born-digital PDFs (default false: clean text layer, no OCR needed). Use to unify the whole base on Mistral markdown."),
       output_file: z.string().optional().describe("Write the to_transcribe manifest here (consumable by mistral-ocr files_from_json and register-batch). Without it, the full list returns inline."),
     },
   },
@@ -355,6 +356,7 @@ server.registerTool(
     if (args.max_pages != null) a.push("--max-pages", String(args.max_pages));
     if (args.scope) a.push("--scope", args.scope);
     if (args.upgrade_only) a.push("--upgrade-only");
+    if (args.include_born_digital) a.push("--include-born-digital");
     if (args.output_file) a.push("--output-file", args.output_file);
     return runAndFormat("documents", "transcribe-plan", a);
   }
