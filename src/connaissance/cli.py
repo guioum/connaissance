@@ -87,7 +87,8 @@ def _cmd_documents(args) -> Any:
         from connaissance.commands import ocr
         return ocr.review_candidates(max_confidence=args.max_confidence,
                                      engine=(None if args.engine == "all"
-                                             else args.engine))
+                                             else args.engine),
+                                     output_file=args.output_file)
     if args.verb == "transcribe-plan":
         from connaissance.commands import ocr
         return ocr.transcribe_plan(max_pages=args.max_pages,
@@ -591,6 +592,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_doc_rev.add_argument("--engine", type=str, default="mistral",
                            help="Filtrer par moteur OCR (mistral, vision-local) "
                                 "ou 'all' pour tous (défaut mistral).")
+    p_doc_rev.add_argument("--output-file", dest="output_file", default=None,
+                           help="Écrire la liste complète des candidats ici "
+                                "(sinon : résumé compact inline).")
     p_doc_oi = p_doc_verbs.add_parser("ocr-images")
     p_doc_oi.add_argument("--limit", type=int, default=None,
                           help="Limiter le nombre de documents-images écrits.")

@@ -14,6 +14,8 @@ import statistics
 import unicodedata
 from pathlib import Path
 
+import json
+
 import yaml
 
 from connaissance.core import ledger as _ledger
@@ -134,6 +136,7 @@ def repass_candidates(max_confidence: float = 0.6,
 
 def review_candidates(max_confidence: float = 0.85,
                       engine: str | None = "mistral",
+                      output_file: str | None = None,
                       db: TrackingDB | None = None) -> dict:
     """Lister les transcriptions à **confiance basse** (≤ seuil) pour REVUE.
 
@@ -142,7 +145,11 @@ def review_candidates(max_confidence: float = 0.85,
     OCR douteux à vérifier *avant* de s'y fier en classement/résumé). Lit
     ``ocr_confidence`` (le minimum des pages) du frontmatter ; les transcriptions
     sans score (p.ex. demandées sans ``confidence_scores``) sont ignorées.
-    ``engine=None`` → tous moteurs. N'écrit/ne déplace rien."""
+    ``engine=None`` → tous moteurs. N'écrit/ne déplace rien.
+
+    Sortie **compacte par défaut** (total + distribution par tranche + par
+    dossier + top-20 des pires) pour rester lisible même à plusieurs centaines de
+    candidats. ``output_file`` écrit la **liste complète** sur disque."""
     out: list[dict] = []
     for f in TRANSCRIPTIONS_DIR.rglob("*.md"):
         try:
@@ -164,8 +171,31 @@ def review_candidates(max_confidence: float = 0.85,
                         "confidence_avg": fm.get("ocr_confidence_avg"),
                         "source": str(fm.get("source") or "")})
     out.sort(key=lambda d: d["confidence"])
-    return {"engine": engine, "max_confidence": max_confidence,
-            "total": len(out), "candidates": out[:200]}
+
+    # Agrégats pour une lecture d'un coup d'œil (où ça se concentre, les pires).
+    buckets = {"≤0.3": 0, "0.3–0.5": 0, "0.5–0.7": 0, "0.7+": 0}
+    by_folder: dict[str, int] = {}
+    for d in out:
+        c = d["confidence"]
+        key = ("≤0.3" if c <= 0.3 else "0.3–0.5" if c <= 0.5
+               else "0.5–0.7" if c <= 0.7 else "0.7+")
+        buckets[key] += 1
+        folder = "/".join(d["transcription"].split("/")[:2])
+        by_folder[folder] = by_folder.get(folder, 0) + 1
+    top_folders = dict(sorted(by_folder.items(), key=lambda kv: -kv[1])[:10])
+
+    # Toujours compact inline (la liste brute dépasse vite la limite de tokens) ;
+    # la liste complète ne part QUE dans output_file si demandé.
+    summary = {"engine": engine, "max_confidence": max_confidence,
+               "total": len(out), "by_confidence": buckets,
+               "by_folder": top_folders, "top_worst": out[:20]}
+    if output_file:
+        p = Path(output_file).expanduser()
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(json.dumps({**summary, "candidates": out},
+                                ensure_ascii=False), encoding="utf-8")
+        summary["output_file"] = str(p)
+    return summary
 
 
 def repass(max_confidence: float = 0.6, apply: bool = False,
