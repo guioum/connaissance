@@ -1216,6 +1216,21 @@ server.registerTool(
 );
 
 server.registerTool(
+  "connaissance_audit_restore_journals",
+  {
+    description: "Rebuild the journal tables (file_ledger, llm_usage) from their append-only JSONL copies under .config/journal/ (recovery after DB loss). These are primary records — NOT derivable from the markdown frontmatter — so reindex-db cannot restore them; this command can. Without force: ledger adds only missing run_ids, usage imports only if its table is empty. With force: wipe then reimport.",
+    inputSchema: {
+      force: z.boolean().default(false).describe("Wipe then reimport (else: ledger adds missing runs, usage imports only if empty)."),
+    },
+  },
+  async (args) => {
+    const a = [];
+    if (args.force) a.push("--force");
+    return runAndFormat("audit", "restore-journals", a);
+  }
+);
+
+server.registerTool(
   "connaissance_audit_repair_attachments",
   {
     description: "Repair broken attachment references in document transcriptions. Copies files from a central Attachments/ directory into the per-document locations.",

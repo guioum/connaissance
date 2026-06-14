@@ -294,6 +294,8 @@ def _cmd_audit(args) -> Any:
         return audit.check(steps=steps)
     if args.verb == "reindex-db":
         return audit.reindex_db(dry_run=args.dry_run)
+    if args.verb == "restore-journals":
+        return audit.restore_journals(force=args.force)
     if args.verb == "repair-attachments":
         return audit.repair_attachments(dry_run=args.dry_run)
     if args.verb == "archive-non-documents":
@@ -861,6 +863,10 @@ def build_parser() -> argparse.ArgumentParser:
         else:
             # reindex-db / repair-attachments : action primaire, dry-run opt-in.
             vp.add_argument("--dry-run", action="store_true")
+    p_aud_restore = p_aud_verbs.add_parser("restore-journals")
+    p_aud_restore.add_argument("--force", action="store_true",
+                               help="Vider puis réimporter (sinon : ajout des "
+                                    "runs ledger absents, usage si table vide).")
 
     # actions
     p_act = sub.add_parser("actions")

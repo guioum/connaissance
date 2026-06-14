@@ -26,7 +26,7 @@ from connaissance.core.output_file import write_or_inline
 from connaissance.core.paths import DOCUMENTS_DIR, require_paths, transit_file
 from connaissance.core.resolution import (chercher_alias, construire_nom_fichier,
                                           construire_slug, slugify)
-from connaissance.core.tracking import TrackingDB
+from connaissance.core.tracking import TrackingDB, snapshot_db
 
 # Taxonomie canonique des catégories — SOURCE UNIQUE, alignée sur
 # prompts/_category_rules.md (partagé pré-classement / résumé).
@@ -322,6 +322,9 @@ def apply(manifest_file: str, dry_run: bool = True,
     if db is None:
         db = TrackingDB()
     run_id = _ledger.new_run_id("classify")
+    # Avant tout déplacement réel : snapshot de la DB (le ledger qui rend la
+    # réorg réversible y vit ; perdre la DB en cours de run = perdre l'undo).
+    db_snapshot = None if dry_run else snapshot_db(reason="classify-apply")
 
     planned: list[dict] = []
     skipped: list[dict] = []
@@ -363,8 +366,14 @@ def apply(manifest_file: str, dry_run: bool = True,
         "errors": errors,
         "moves": planned[:50],
     }
+    if db_snapshot:
+        result["db_snapshot"] = db_snapshot
     if not dry_run and planned:
         result["ledger_run"] = run_id
+        # Vue Markdown lisible du run (consultation), à côté du JSONL durable.
+        report = _ledger.write_run_report(run_id)
+        if report:
+            result["ledger_report"] = report
     return result
 
 

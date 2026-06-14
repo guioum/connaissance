@@ -48,6 +48,14 @@ mcpb/                    → MCPB Node.js, installé dans Claude Desktop
   tables **additives** en `CREATE TABLE IF NOT EXISTS` (`text_simhash`,
   `file_ledger`, `doc_signals`, `doc_classification` — la « fiche d'identité »
   par document). Aucune migration destructive.
+- **La DB est un index dérivé, reconstructible depuis le disque.** Source de
+  vérité = le **frontmatter** des `.md` (contenu/métadonnées métier) +, pour les
+  **journaux primaires** non dérivables du frontmatter (`file_ledger`,
+  `llm_usage`), des **JSONL append-only** sous `.config/journal/`. Deux chemins
+  de rebuild : `audit reindex-db` (tables dérivées ← frontmatter) et
+  `audit restore-journals` (`file_ledger`/`llm_usage` ← JSONL). `snapshot_db()`
+  (`VACUUM INTO` sous `.config/backups/`) est appelé avant tout `classify apply`
+  réel — le ledger qui rend la réorg réversible vit dans la DB.
 
 ## Détection de la racine
 

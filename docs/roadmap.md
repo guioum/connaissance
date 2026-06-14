@@ -357,6 +357,20 @@ grande réorg tant que ce n'est pas validé.
   tokens=0, $0,001/p) câblé dans `register-batch` quand `--ocr-engine mistral`.
   `usage_summary` agrège `units`. NB : les ~271 lignes resume/synthesis
   antérieures restent au plein tarif (non corrigées rétro).
+- [x] **Durabilité disque + DB reconstructible** (2026-06-14) : la DB contenait
+  des enregistrements *uniques* non dérivables du frontmatter (`file_ledger` =
+  réversibilité de la réorg, `llm_usage` = coûts) → perte de DB = perte sèche.
+  Désormais (1) **snapshot DB** (`snapshot_db`, `VACUUM INTO` → `.config/backups/`,
+  garde 10) appelé en tête de `classify apply` réel ; (2) **write-through JSONL
+  append-only** sous `.config/journal/` : ledger (`safe_move` → un `.jsonl` par
+  run, couvre tous les appelants) + usage (`log_usage`/`log_ocr_usage`) ;
+  (3) **rebuild** : `audit restore-journals [--force]` (CLI + MCP) réimporte les
+  journaux ; `ledger.run_report_md`/`write_run_report` = vue md de consultation
+  d'un run (lue du JSONL, marche sans DB), écrite à côté du `.jsonl` à l'apply.
+  Invariant atteint : DB = frontmatter (contenu) + JSONL (journaux). Round-trip
+  testé (write-through → DELETE → restore = identité). NB : les ~271 lignes
+  usage antérieures au write-through ne sont pas dans le JSONL (seul le DB
+  snapshot les couvre).
 - [x] **Confiance OCR Mistral + flag de revue** (2026-06-13) : Mistral expose des
   scores (opt-in `confidence_scores_granularity`). Côté `mistral-ocr` :
   `--confidence-scores` (CLI + MCP, 3 outils) demande la granularité `page` et

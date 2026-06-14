@@ -341,6 +341,25 @@ def reindex_db(dry_run: bool = False) -> dict:
     return audit_reindex.reindex(dry_run=dry_run)
 
 
+def restore_journals(force: bool = False) -> dict:
+    """Reconstruire les tables-journaux depuis les JSONL disque.
+
+    ``file_ledger`` et ``llm_usage`` sont des enregistrements primaires (pas
+    dérivables du frontmatter) ; ils sont doublés en JSONL append-only sous
+    ``.config/journal/``. Cette commande les réimporte dans une DB perdue ou
+    recréée (complément de ``reindex-db`` qui, lui, rebuild depuis les
+    frontmatter). ``--force`` vide puis réimporte tout (sinon : ledger ajoute
+    les runs absents, usage n'importe que si la table est vide)."""
+    from connaissance.core.tracking import TrackingDB
+    db = TrackingDB()
+    try:
+        return {"force": force,
+                "ledger": db.import_ledger_journal(force=force),
+                "usage": db.import_usage_journal(force=force)}
+    finally:
+        db.close()
+
+
 def repair_attachments(dry_run: bool = False) -> dict:
     """Réparer les références d'attachements cassées (wrapper audit_attachments)."""
     from connaissance.commands import audit_attachments

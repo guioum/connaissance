@@ -12,11 +12,13 @@ ensemble.
 Le ledger n'enregistre que les opérations **appliquées**. En ``dry_run``,
 ``safe_move`` retourne l'entrée prévue sans toucher ni au disque ni au ledger.
 """
+import json
 import shutil
 import uuid
 from pathlib import Path
 
 from connaissance.core.paths import CONNAISSANCE_ROOT, documents_read_path
+from connaissance.core.tracking import LEDGER_JOURNAL_DIR, _append_jsonl
 
 
 def new_run_id(prefix: str = "run") -> str:
@@ -70,6 +72,9 @@ def safe_move(db, old_path, new_path, reason: str, run_id: str,
     shutil.move(str(old), str(new))
     db.ledger_record(entry, commit=commit)
     entry["status"] = "applied"
+    # Journal disque append-only : la réversibilité (old→new + sha) survit à une
+    # perte de la DB. Best-effort, ne casse jamais le move déjà appliqué.
+    _append_jsonl(LEDGER_JOURNAL_DIR / f"{run_id}.jsonl", dict(entry))
     return entry
 
 
@@ -218,6 +223,42 @@ def revert_run(db, run_id: str, *, dry_run: bool = False) -> dict:
         result["reverted"] += 1
 
     return result
+
+
+def run_report_md(run_id: str) -> str:
+    """Vue Markdown lisible d'un run de déplacements, lue du **JSONL disque**.
+
+    Indépendante de la DB (consultation même si la base est perdue). Sert de
+    projection jetable (le JSONL reste la source durable)."""
+    path = LEDGER_JOURNAL_DIR / f"{run_id}.jsonl"
+    entries: list[dict] = []
+    if path.exists():
+        for line in path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if line:
+                try:
+                    entries.append(json.loads(line))
+                except json.JSONDecodeError:
+                    pass
+    lines = [f"# Run ledger `{run_id}`", "",
+             f"{len(entries)} opération(s).", "",
+             "| op | de | vers |", "|----|----|------|"]
+    for e in entries:
+        old = (e.get("old_path") or "").replace("|", "\\|")
+        new = (e.get("new_path") or "").replace("|", "\\|")
+        lines.append(f"| {e.get('op', '')} | `{old}` | `{new}` |")
+    return "\n".join(lines) + "\n"
+
+
+def write_run_report(run_id: str) -> str | None:
+    """Écrire la vue Markdown du run à côté de son JSONL ; retourne le chemin."""
+    md_path = LEDGER_JOURNAL_DIR / f"{run_id}.md"
+    try:
+        md_path.parent.mkdir(parents=True, exist_ok=True)
+        md_path.write_text(run_report_md(run_id), encoding="utf-8")
+        return str(md_path)
+    except OSError:
+        return None
 
 
 def verify_run(db, run_id: str) -> dict:

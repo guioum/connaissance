@@ -27,14 +27,68 @@ Usage :
 """
 
 import json
+import re
 import sqlite3
 import unicodedata
 from contextlib import contextmanager
+from datetime import datetime
 from pathlib import Path
 
 from connaissance.core.paths import CONNAISSANCE_ROOT, require_connaissance_root
 
 DB_PATH = CONNAISSANCE_ROOT / ".config" / "tracking.db"
+# Artefacts couplés à la base, sous .config/ (cf. paths : .config = couplé DB).
+# Journaux append-only sur disque : la DB en devient reconstructible (les
+# tables file_ledger / llm_usage sont des enregistrements primaires, pas
+# dérivables du frontmatter — sans copie disque, elles seraient perdues si la
+# DB l'était). `backups/` = snapshots avant opérations risquées.
+BACKUPS_DIR = DB_PATH.parent / "backups"
+JOURNAL_DIR = DB_PATH.parent / "journal"
+LEDGER_JOURNAL_DIR = JOURNAL_DIR / "ledger"
+USAGE_JOURNAL = JOURNAL_DIR / "llm_usage.jsonl"
+
+
+def snapshot_db(reason: str = "", *, keep: int = 10,
+                db_path: Path | None = None) -> str | None:
+    """Copie **consistante** de tracking.db avant une opération risquée.
+
+    ``VACUUM INTO`` produit un snapshot propre (gère le WAL, pas de demi-écriture).
+    Garde les ``keep`` plus récents (purge des plus vieux). Retourne le chemin du
+    snapshot, ou ``None`` si la base n'existe pas encore. Best-effort : une erreur
+    de copie n'interrompt pas l'appelant (elle est remontée par l'absence de
+    retour, jamais en exception non gérée côté run)."""
+    src = db_path or DB_PATH
+    if not Path(src).exists():
+        return None
+    BACKUPS_DIR.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now().strftime("%Y%m%dT%H%M%S_%f")
+    tag = re.sub(r"[^a-z0-9]+", "-", (reason or "").lower()).strip("-")[:30]
+    dest = BACKUPS_DIR / f"tracking-{stamp}{('-' + tag) if tag else ''}.db"
+    conn = sqlite3.connect(str(src))
+    try:
+        conn.execute("VACUUM INTO ?", (str(dest),))
+    finally:
+        conn.close()
+    snaps = sorted(BACKUPS_DIR.glob("tracking-*.db"))
+    for old in snaps[:-keep]:
+        try:
+            old.unlink()
+        except OSError:
+            pass
+    return str(dest)
+
+
+def _append_jsonl(path: Path, row: dict) -> None:
+    """Ajouter une ligne JSON à un journal append-only (best-effort).
+
+    Une erreur d'écriture du journal ne doit JAMAIS casser l'opération DB
+    qu'il double — la DB reste la copie de travail, le JSONL la copie durable."""
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(row, ensure_ascii=False) + "\n")
+    except OSError:
+        pass
 
 
 def _nfc(rel_path) -> str:
@@ -1493,6 +1547,17 @@ class TrackingDB:
              usage.get("cache_read_input_tokens") or 0,
              cost))
         self._conn.commit()
+        _append_jsonl(USAGE_JOURNAL, {
+            "ts": datetime.now().strftime("%Y-%m-%dT%H:%M:%S"),
+            "operation": operation, "source_type": source_type,
+            "source_path": str(source_path) if source_path else None,
+            "dest_path": str(dest_path) if dest_path else None,
+            "custom_id": custom_id, "model": model, "mode": mode,
+            "input_tokens": usage.get("input_tokens") or 0,
+            "output_tokens": usage.get("output_tokens") or 0,
+            "cache_creation_input_tokens": usage.get("cache_creation_input_tokens") or 0,
+            "cache_read_input_tokens": usage.get("cache_read_input_tokens") or 0,
+            "units": None, "cost_usd": cost})
 
     def log_ocr_usage(self, operation: str, pages: int,
                       source_path: str | None = None,
@@ -1522,6 +1587,110 @@ class TrackingDB:
              str(dest_path) if dest_path else None,
              model, mode, pages, cost))
         self._conn.commit()
+        _append_jsonl(USAGE_JOURNAL, {
+            "ts": datetime.now().strftime("%Y-%m-%dT%H:%M:%S"),
+            "operation": operation, "source_type": None,
+            "source_path": str(source_path) if source_path else None,
+            "dest_path": str(dest_path) if dest_path else None,
+            "custom_id": None, "model": model, "mode": mode,
+            "input_tokens": 0, "output_tokens": 0,
+            "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0,
+            "units": pages, "cost_usd": cost})
+
+    # --- Restauration depuis les journaux disque (DB reconstructible) ---
+
+    def import_ledger_journal(self, *, force: bool = False) -> dict:
+        """Réimporter ``file_ledger`` depuis les JSONL disque (DB perdue/rebuild).
+
+        Sans ``force`` : ajoute uniquement les ``run_id`` absents de la table
+        (idempotent). Avec ``force`` : vide ``file_ledger`` puis réimporte tout.
+        **Garde-fou** : ``force`` REFUSE de vider si aucun JSONL n'est présent
+        sur disque (ne jamais remplacer des données par du vide)."""
+        files = (sorted(LEDGER_JOURNAL_DIR.glob("*.jsonl"))
+                 if LEDGER_JOURNAL_DIR.exists() else [])
+        if force:
+            current = self._conn.execute(
+                "SELECT COUNT(*) FROM file_ledger").fetchone()[0]
+            if not files and current:
+                return {"runs_imported": 0, "rows": 0,
+                        "refused": "aucun JSONL ledger sur disque — refus de "
+                                   "vider une table non vide"}
+            self._conn.execute("DELETE FROM file_ledger")
+        existing = {r[0] for r in self._conn.execute(
+            "SELECT DISTINCT run_id FROM file_ledger")}
+        runs = rows = 0
+        if files:
+            for jf in files:
+                if jf.stem in existing:
+                    continue
+                runs += 1
+                for line in jf.read_text(encoding="utf-8").splitlines():
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        e = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    self._conn.execute(
+                        """INSERT INTO file_ledger
+                           (run_id, op, old_path, new_path, sha256, size, mtime,
+                            reason, status)
+                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                        (e.get("run_id"), e.get("op"), e.get("old_path"),
+                         e.get("new_path"), e.get("sha256"), e.get("size"),
+                         e.get("mtime"), e.get("reason"),
+                         e.get("status") or "applied"))
+                    rows += 1
+        self._conn.commit()
+        return {"runs_imported": runs, "rows": rows}
+
+    def import_usage_journal(self, *, force: bool = False) -> dict:
+        """Réimporter ``llm_usage`` depuis le JSONL disque (DB perdue/rebuild).
+
+        Sans ``force`` : n'importe que si la table est vide (évite les doublons,
+        les lignes d'usage n'ayant pas de clé naturelle). Avec ``force`` : vide
+        puis réimporte tout. **Garde-fou** : ``force`` REFUSE de vider si le
+        JSONL est absent/vide (ne jamais remplacer des données par du vide)."""
+        has_journal = USAGE_JOURNAL.exists() and USAGE_JOURNAL.stat().st_size > 0
+        if force:
+            current = self._conn.execute(
+                "SELECT COUNT(*) FROM llm_usage").fetchone()[0]
+            if not has_journal and current:
+                return {"rows": 0,
+                        "refused": "aucun JSONL usage sur disque — refus de "
+                                   "vider une table non vide"}
+            self._conn.execute("DELETE FROM llm_usage")
+        n = self._conn.execute("SELECT COUNT(*) FROM llm_usage").fetchone()[0]
+        if n > 0:
+            return {"rows": 0, "skipped": "table non vide (utiliser --force)"}
+        rows = 0
+        if USAGE_JOURNAL.exists():
+            for line in USAGE_JOURNAL.read_text(encoding="utf-8").splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    e = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                self._conn.execute(
+                    """INSERT INTO llm_usage
+                       (timestamp, operation, source_type, source_path, dest_path,
+                        custom_id, model, mode, input_tokens, output_tokens,
+                        cache_creation_input_tokens, cache_read_input_tokens,
+                        units, cost_usd)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (e.get("ts") or e.get("timestamp"), e.get("operation"),
+                     e.get("source_type"), e.get("source_path"), e.get("dest_path"),
+                     e.get("custom_id"), e.get("model"), e.get("mode"),
+                     e.get("input_tokens") or 0, e.get("output_tokens") or 0,
+                     e.get("cache_creation_input_tokens") or 0,
+                     e.get("cache_read_input_tokens") or 0,
+                     e.get("units"), e.get("cost_usd")))
+                rows += 1
+        self._conn.commit()
+        return {"rows": rows}
 
     def usage_summary(self, since: str | None = None,
                       until: str | None = None,
