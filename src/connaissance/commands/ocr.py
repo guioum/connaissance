@@ -132,6 +132,42 @@ def repass_candidates(max_confidence: float = 0.6,
                            for f, c, src in items[:200]]}
 
 
+def review_candidates(max_confidence: float = 0.85,
+                      engine: str | None = "mistral",
+                      db: TrackingDB | None = None) -> dict:
+    """Lister les transcriptions à **confiance basse** (≤ seuil) pour REVUE.
+
+    Flag qualité OCR : par défaut les transcriptions **Mistral** (moteur
+    terminal — pas de repasse au-delà, mais un ``ocr_confidence`` bas signale un
+    OCR douteux à vérifier *avant* de s'y fier en classement/résumé). Lit
+    ``ocr_confidence`` (le minimum des pages) du frontmatter ; les transcriptions
+    sans score (p.ex. demandées sans ``confidence_scores``) sont ignorées.
+    ``engine=None`` → tous moteurs. N'écrit/ne déplace rien."""
+    out: list[dict] = []
+    for f in TRANSCRIPTIONS_DIR.rglob("*.md"):
+        try:
+            fm = _read_frontmatter(f.read_text(encoding="utf-8")) or {}
+        except OSError:
+            continue
+        if engine and fm.get("ocr_engine") != engine:
+            continue
+        c = fm.get("ocr_confidence")
+        if c is None:
+            continue
+        try:
+            c = float(c)
+        except (TypeError, ValueError):
+            continue
+        if c <= max_confidence:
+            out.append({"transcription": str(f.relative_to(TRANSCRIPTIONS_DIR)),
+                        "confidence": c,
+                        "confidence_avg": fm.get("ocr_confidence_avg"),
+                        "source": str(fm.get("source") or "")})
+    out.sort(key=lambda d: d["confidence"])
+    return {"engine": engine, "max_confidence": max_confidence,
+            "total": len(out), "candidates": out[:200]}
+
+
 def repass(max_confidence: float = 0.6, apply: bool = False,
            db: TrackingDB | None = None) -> dict:
     """Mettre les transcriptions OCR local faibles « à retranscrire » : les

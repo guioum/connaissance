@@ -83,6 +83,11 @@ def _cmd_documents(args) -> Any:
         return ocr.ocr_images(limit=args.limit, min_chars=args.min_chars,
                               min_lines=args.min_lines, scope=args.scope,
                               force=args.force)
+    if args.verb == "ocr-review":
+        from connaissance.commands import ocr
+        return ocr.review_candidates(max_confidence=args.max_confidence,
+                                     engine=(None if args.engine == "all"
+                                             else args.engine))
     if args.verb == "transcribe-plan":
         from connaissance.commands import ocr
         return ocr.transcribe_plan(max_pages=args.max_pages,
@@ -576,6 +581,14 @@ def build_parser() -> argparse.ArgumentParser:
                            help="Seuil de confiance pour --repass[-candidates] (défaut 0.6).")
     p_doc_ocr.add_argument("--apply", action="store_true",
                            help="Avec --repass : exécuter (défaut : dry-run).")
+    p_doc_rev = p_doc_verbs.add_parser("ocr-review")
+    p_doc_rev.add_argument("--max-confidence", dest="max_confidence", type=float,
+                           default=0.85,
+                           help="Seuil : lister les transcriptions à confiance "
+                                "≤ ce seuil (défaut 0.85).")
+    p_doc_rev.add_argument("--engine", type=str, default="mistral",
+                           help="Filtrer par moteur OCR (mistral, vision-local) "
+                                "ou 'all' pour tous (défaut mistral).")
     p_doc_oi = p_doc_verbs.add_parser("ocr-images")
     p_doc_oi.add_argument("--limit", type=int, default=None,
                           help="Limiter le nombre de documents-images écrits.")

@@ -482,6 +482,24 @@ server.registerTool(
 );
 
 server.registerTool(
+  "connaissance_documents_ocr_review",
+  {
+    description: "List OCR transcriptions whose confidence score is at or below a threshold — a quality flag for human review BEFORE trusting them in classification/summaries. Reads ocr_confidence (the minimum page score) from the transcription frontmatter; transcriptions without a score (OCR'd without confidence_scores) are skipped. Defaults to Mistral transcriptions (the terminal engine: no re-pass beyond, but a low score means a dubious OCR). Read-only.",
+    inputSchema: {
+      max_confidence: z.number().default(0.85).describe("List transcriptions with ocr_confidence <= this threshold (default 0.85)."),
+      engine: z.string().default("mistral").describe('Filter by OCR engine (mistral, vision-local) or "all" for any engine (default mistral).'),
+    },
+    annotations: { readOnlyHint: true },
+  },
+  async (args) => {
+    const a = [];
+    if (args.max_confidence != null) a.push("--max-confidence", String(args.max_confidence));
+    if (args.engine) a.push("--engine", args.engine);
+    return runAndFormat("documents", "ocr-review", a);
+  }
+);
+
+server.registerTool(
   "connaissance_documents_verify_preserve",
   {
     description: "Verify that a corrected transcription preserves the textual content of the original (tokenization comparison). Used by fix-ocr to ensure strict preservation.",

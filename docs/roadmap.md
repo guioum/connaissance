@@ -357,6 +357,17 @@ grande réorg tant que ce n'est pas validé.
   tokens=0, $0,001/p) câblé dans `register-batch` quand `--ocr-engine mistral`.
   `usage_summary` agrège `units`. NB : les ~271 lignes resume/synthesis
   antérieures restent au plein tarif (non corrigées rétro).
+- [x] **Confiance OCR Mistral + flag de revue** (2026-06-13) : Mistral expose des
+  scores (opt-in `confidence_scores_granularity`). Côté `mistral-ocr` :
+  `--confidence-scores` (CLI + MCP, 3 outils) demande la granularité `page` et
+  **écrit `ocr_confidence` (min) + `ocr_confidence_avg` en frontmatter** du `.md`.
+  Côté connaissance : `register_document` **préserve** déjà ces clés (merge
+  frontmatter) → le score survit avec `ocr_engine: mistral`. Nouveau
+  **`documents ocr-review --max-confidence 0.85 --engine mistral`** (CLI + MCP) :
+  liste les transcriptions à confiance basse pour revue humaine AVANT de s'y fier
+  en classement/résumé (Mistral est terminal : pas de repasse, juste un garde-fou
+  qualité). Marche aussi `--engine vision-local` (179 réelles ≤0.6 listées).
+  ⚠️ Au run : passer `confidence_scores: true` à `ocr_batch_submit` pour activer.
 - [x] **Caching Batch : la cause « sous le seuil » est caduque** (2026-06-13) : la
   note [[caching-inefficace-en-batch]] disait système pré < seuil cachable Haiku
   (~4096 tok) → no-op. Or le registre d'entités a grossi (**192** connues injectées)
