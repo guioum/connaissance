@@ -446,6 +446,19 @@ def _cmd_sujet(args) -> Any:
     raise SystemExit(f"verbe inconnu : sujet {args.verb}")
 
 
+def _cmd_snapshots(args) -> Any:
+    from connaissance.commands import snapshots
+    if args.verb == "create":
+        return snapshots.create(label=args.label, no_view=args.no_view)
+    if args.verb == "list":
+        return snapshots.list_snapshots()
+    if args.verb == "view":
+        return snapshots.view(args.name, apply=not args.dry_run, clear=args.clear)
+    if args.verb == "diff":
+        return snapshots.diff(args.a, args.b)
+    raise SystemExit(f"verbe inconnu : snapshots {args.verb}")
+
+
 _GROUPS: dict[str, Callable] = {
     "documents": _cmd_documents,
     "emails": _cmd_emails,
@@ -463,6 +476,7 @@ _GROUPS: dict[str, Callable] = {
     "manifest": _cmd_manifest,
     "ledger": _cmd_ledger,
     "sujet": _cmd_sujet,
+    "snapshots": _cmd_snapshots,
     "duplicates": _cmd_duplicates,
     "media": _cmd_media,
     "entities": _cmd_entities,
@@ -957,12 +971,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_lg_snap.add_argument("--run", dest="run_id", type=str, default=None,
                            help="Limiter à un run_id (défaut : tous).")
     p_lg_snap.add_argument("--clear", action="store_true",
-                           help="Supprimer la vue - Historique/.")
+                           help="Supprimer la vue Historique (~/Connaissance/Vues/).")
     p_lg_snap.add_argument("--apply", dest="dry_run", action="store_false",
                            default=True,
                            help="(Re)construire la vue (défaut : dry-run / aperçu).")
 
-    # sujet (vue virtuelle « - Sujets »)
+    # sujet (vue virtuelle « Sujets » sous ~/Connaissance/Vues/)
     p_suj = sub.add_parser("sujet")
     p_suj_verbs = p_suj.add_subparsers(dest="verb", required=True)
     p_suj_view = p_suj_verbs.add_parser("view")
@@ -972,14 +986,34 @@ def build_parser() -> argparse.ArgumentParser:
                             default=True,
                             help="(Re)construire la vue (défaut : dry-run / aperçu).")
     p_suj_view.add_argument("--clear", action="store_true",
-                            help="Supprimer la vue - Sujets/ (rien d'autre touché).")
+                            help="Supprimer la vue Sujets (rien d'autre touché).")
     p_suj_exp = p_suj_verbs.add_parser("export")
     p_suj_exp.add_argument("name")
     p_suj_exp.add_argument("--dest", type=str, default=None,
-                           help="Dossier de destination (défaut : - Sujets-export/<nom>).")
+                           help="Dossier de destination (défaut : ~/Connaissance/Vues/Sujets-export/<nom>).")
     p_suj_exp.add_argument("--zip", action="store_true",
                            help="Produire un .zip au lieu d'un dossier.")
     p_suj_verbs.add_parser("list")
+
+    # snapshots (photos point-in-time de la base, sous ~/Connaissance/Vues/Snapshots/)
+    p_snap = sub.add_parser("snapshots")
+    p_snap_verbs = p_snap.add_subparsers(dest="verb", required=True)
+    p_snap_create = p_snap_verbs.add_parser("create")
+    p_snap_create.add_argument("label", nargs="?", default="",
+                               help="Étiquette de la photo (ex. avant-reorg).")
+    p_snap_create.add_argument("--no-view", dest="no_view", action="store_true",
+                               help="Ne pas rendre la vue navigable (photo DB seule).")
+    p_snap_verbs.add_parser("list")
+    p_snap_view = p_snap_verbs.add_parser("view")
+    p_snap_view.add_argument("name", help="Nom (ou suffixe de label) du snapshot.")
+    p_snap_view.add_argument("--apply", dest="dry_run", action="store_false",
+                             default=True,
+                             help="(Re)construire la vue (défaut : dry-run).")
+    p_snap_view.add_argument("--clear", action="store_true",
+                             help="Supprimer la vue de ce snapshot.")
+    p_snap_diff = p_snap_verbs.add_parser("diff")
+    p_snap_diff.add_argument("a", help="Snapshot A.")
+    p_snap_diff.add_argument("b", help="Snapshot B.")
 
     # duplicates (Phase D — doublons de ~/Documents)
     p_dup = sub.add_parser("duplicates")

@@ -40,7 +40,7 @@ from collections import Counter
 from pathlib import Path
 
 from connaissance.core.output_file import write_or_inline
-from connaissance.core.paths import DOCUMENTS_DIR
+from connaissance.core.paths import DOCUMENTS_DIR, SPECIAL_TOP_DIRS
 
 # Marqueurs FICHIERS : si un dossier en contient un, c'est un repo de code.
 CODE_MARKERS = {
@@ -122,8 +122,9 @@ def _grouped_theme(name: str) -> str | None:
             return theme
     return None
 
-# Notre propre vue (raccourcis) + dossiers déjà classés : à ne pas triager.
-SKIP_TOP = {"- Par catégorie", "organismes", "personnes", "divers", "promus"}
+# Dossiers spéciaux (vues/relocations, source unique) + déjà classés.
+SKIP_TOP = set(SPECIAL_TOP_DIRS) | {"organismes", "personnes",
+                                    "divers", "promus"}
 
 
 def _classify_ext(ext: str) -> str:

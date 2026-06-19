@@ -405,8 +405,9 @@ grande réorg tant que ce n'est pas validé.
   YAKE pour les mots-clés *stockés* (qmd/metadata) et piste Ollama/OCR local —
   non faits, cf. [[caching-inefficace-en-batch]] pour le contexte coût.
 - [x] **Sujets = vue virtuelle unique** (v2.35.0 — modèle sujets) :
-  `sujet view` génère `~/Documents/- Sujets/<sujet>/` en symlinks depuis
-  `doc_classification.sujet` (régénérable), **remplace `- Par catégorie/`** ;
+  `sujet view` génère `~/Connaissance/Vues/Sujets/<sujet>/` en symlinks depuis
+  `doc_classification.sujet` (régénérable), **axe complémentaire de
+  `- Catégories/`** (taxonomie fixe, 1/doc ; les deux vues coexistent) ;
   `sujet export <nom>` (`--zip`) matérialise un sujet à la demande (copie/zip,
   ex. comptable) sans dossier physique permanent ; `sujet list` compte.
 - [x] **Phase D — Doublons** (v2.35.0) : `duplicates scan` détecte exacts

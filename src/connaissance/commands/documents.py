@@ -15,7 +15,7 @@ from pathlib import Path
 
 import yaml
 
-from connaissance.core.paths import (BASE_PATH, documents_read_path,
+from connaissance.core.paths import (BASE_PATH, VIEWS_ROOT, documents_read_path,
                                       require_paths)
 from connaissance.core.tracking import TrackingDB
 from connaissance.core.filtres import Filtres
@@ -24,7 +24,7 @@ DOCUMENTS_DIR = BASE_PATH / "Documents"
 TRANSCRIPTIONS_DIR = BASE_PATH / "Connaissance" / "Transcriptions" / "Documents"
 RESUMES_DOCS_DIR = BASE_PATH / "Connaissance" / "Résumés" / "Documents"
 # Vue par catégorie : le préfixe « - » fait auto-exclure ce dossier du scan.
-CATEGORY_VIEW_NAME = "- Par catégorie"
+CATEGORY_VIEW_NAME = "Catégories"   # sous VIEWS_ROOT (hors ~/Documents/iCloud)
 _VIEW_SOURCE_EXTS = [".pdf", ".png", ".jpg", ".jpeg", ".docx", ".doc",
                      ".xlsx", ".xls", ".pptx", ".ppt", ".heic", ".tiff",
                      ".tif", ".txt"]
@@ -886,8 +886,8 @@ def category_view(apply: bool = False, clear: bool = False) -> dict:
 
     L'arborescence canonique reste par ENTITÉ ; cette vue ajoute une navigation
     par catégorie SANS rien déplacer. Chaque entrée est un raccourci vers le
-    vrai fichier source, sous ``~/Documents/- Par catégorie/<categorie>/``. Le
-    préfixe « - » exclut ce dossier du scan du pipeline.
+    vrai fichier source, sous ``~/Connaissance/Vues/Catégories/<categorie>/``
+    (hors ~/Documents : pas de pollution iCloud, hors du scan du pipeline).
 
     La catégorie est lue dans le frontmatter des résumés (qui miroitent les
     sources). Modes :
@@ -896,7 +896,7 @@ def category_view(apply: bool = False, clear: bool = False) -> dict:
     - ``apply`` : (re)construit la vue à neuf (idempotent).
     - ``clear`` : supprime la vue (réversible — rien d'autre n'est touché).
     """
-    view_dir = DOCUMENTS_DIR / CATEGORY_VIEW_NAME
+    view_dir = VIEWS_ROOT / CATEGORY_VIEW_NAME
 
     if clear:
         existed = view_dir.exists()

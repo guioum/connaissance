@@ -32,8 +32,9 @@ from connaissance.core import filtres as _filtres
 from connaissance.core import ledger as _ledger
 from connaissance.core import secrets as _secrets
 from connaissance.core.output_file import write_or_inline
-from connaissance.core.paths import (DOCUMENTS_DIR, documents_read_path,
-                                      is_dataless, require_connaissance_root)
+from connaissance.core.paths import (DOCUMENTS_DIR, SPECIAL_TOP_DIRS,
+                                      documents_read_path, is_dataless,
+                                      require_connaissance_root)
 
 # Zone physique des secrets relocalisés (préfixe « - » → hors scan pipeline).
 PROTECTED_SUBDIR = "- Protégés/secrets"
@@ -57,9 +58,9 @@ TEXT_SCAN_EXTS = {
 _EXTLESS_SCAN = {".env", ".netrc", ".pgpass", ".htpasswd", ".git-credentials",
                  "id_rsa", "id_dsa", "id_ecdsa", "id_ed25519"}
 
-# Notre propre vue + dossiers déjà classés : ignorés (comme le triage).
-_SKIP_TOP = {"- Par catégorie", "- Sujets", "organismes", "personnes",
-             "divers", "promus"}
+# Dossiers spéciaux (vues/relocations, source unique) + déjà classés.
+_SKIP_TOP = set(SPECIAL_TOP_DIRS) | {"organismes", "personnes",
+                                     "divers", "promus"}
 
 _MAX_BYTES = 5_000_000   # au-delà, on ne lit pas le contenu (gros log/dump)
 

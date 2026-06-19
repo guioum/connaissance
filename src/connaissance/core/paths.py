@@ -48,9 +48,32 @@ BASE_PATH = _detect_base_path()
 # Racine de la base de connaissance : prérequis strict, jamais créée par le plugin.
 CONNAISSANCE_ROOT = BASE_PATH / "Connaissance"
 
+# Racine des VUES navigables (symlinks) — Sujets / Catégories / Historique /
+# Snapshots. HORS ~/Documents (qui est iCloud : les symlinks y polluent/cassent
+# la sync) et hors du scan (le pipeline ne parcourt que DOCUMENTS_DIR).
+VIEWS_ROOT = CONNAISSANCE_ROOT / "Vues"
+
+# Photos point-in-time de la base (copies VACUUM INTO de tracking.db, nommées).
+# Distinctes des backups auto pré-`classify apply` (.config/backups/) : celles-ci
+# sont des snapshots utilisateur étiquetés, conservés (pas de purge auto).
+SNAPSHOTS_DIR = CONNAISSANCE_ROOT / ".config" / "snapshots"
+
 # Racine canonique des documents source (typiquement en iCloud Drive — des
 # fichiers peuvent être `dataless`, leur contenu rechargé à la lecture).
 DOCUMENTS_DIR = BASE_PATH / "Documents"
+
+# Dossiers top-level SPÉCIAUX sous ~/Documents, exclus de tout balayage de
+# documents source. Depuis le déménagement des vues vers VIEWS_ROOT, seuls
+# « - Médias » (médias relocalisés) et « - Protégés » (sensibles) sont des vrais
+# dossiers actifs ICI ; les noms de vues restent en LEGACY (au cas où d'anciens
+# dossiers dashés traîneraient encore dans ~/Documents). Source unique de vérité
+# (avant : 4 listes divergentes signals/ocr/secrets/triage). NB : les symlinks
+# sont en plus exclus PARTOUT par règle (un lien = doublon) ; cette liste couvre
+# les vrais fichiers relocalisés (- Médias, - Protégés) que la règle n'attrape pas.
+SPECIAL_TOP_DIRS = frozenset({
+    "- Médias", "- Protégés",                              # actifs (physiques)
+    "- Sujets", "- Catégories", "- Historique", "- Par catégorie",  # legacy (vues parties)
+})
 
 
 def _detect_documents_cache_root() -> Path | None:

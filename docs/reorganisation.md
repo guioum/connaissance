@@ -166,9 +166,10 @@ Modèle acté : un document est rangé **physiquement par entité** et porte un
 arborescence physique mais une **vue de symlinks** régénérable :
 
 - **`sujet view`** (`--apply` pour écrire, `--clear` pour supprimer) : génère
-  `~/Documents/- Sujets/<sujet>/` en raccourcis vers les fichiers à leur
-  emplacement courant. **Remplace `- Par catégorie/`** (la catégorie devient un
-  sujet grossier). Régénérer après tout déplacement remet la vue à jour.
+  `~/Connaissance/Vues/Sujets/<sujet>/` en raccourcis vers les fichiers à leur
+  emplacement courant. **Axe complémentaire de `- Catégories/`** (taxonomie
+  fixe, 1/doc ; thèmes libres, N/doc — les deux coexistent). Régénérer après
+  tout déplacement remet la vue à jour.
 - **`sujet export <nom>`** (`--zip`, `--dest`) : matérialise un sujet à la
   demande (copie/zip réel, ex. envoi au comptable). Ne touche jamais les
   sources — pas de dossier physique permanent.
@@ -292,7 +293,7 @@ idempotent** (ramène une transcription égarée à sa place sans rien renommer)
 ### Historique — naviguer le passé (`ledger snapshot`)
 
 Même principe que `- Sujets` mais pour le **temps** : `ledger snapshot` génère
-`~/Documents/- Historique/` avec **un sous-dossier par jour** (`AAAA-MM-JJ`) qui
+`~/Connaissance/Vues/Historique/` avec **un sous-dossier par jour** (`AAAA-MM-JJ`) qui
 reconstruit l'**ancienne arborescence** (noms + structure d'avant les
 déplacements) en **symlinks** pointant l'emplacement **actuel** de chaque
 fichier. La chaîne old→new est suivie (un fichier déplacé plusieurs fois pointe

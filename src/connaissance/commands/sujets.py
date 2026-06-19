@@ -1,13 +1,14 @@
-"""Module commands/sujets : vue virtuelle « - Sujets » + export à la demande.
+"""Module commands/sujets : vue virtuelle « Sujets » + export à la demande.
 
 Modèle de sujets acté : un document est classé **physiquement par ENTITÉ**
 (`organismes/personnes/divers`) et porte un **sujet** (champ
 `doc_classification.sujet` — source de vérité unique, pas de frontmatter sur un
 PDF brut). Les sujets ne sont PAS une arborescence physique : une **vue unique
-de symlinks** ``~/Documents/- Sujets/<sujet>/`` les rassemble, régénérable à
-volonté, et **remplace** ``- Par catégorie/`` (la catégorie devient un sujet
-grossier). Virtuel par défaut ; le « physique » se fait à la demande via
-``sujet export`` (copie/zip réel, ex. envoi au comptable).
+de symlinks** ``~/Connaissance/Vues/Sujets/<sujet>/`` les rassemble, régénérable à
+volonté. **Axe complémentaire** de ``- Catégories/`` (taxonomie fixe, 1/doc) :
+les sujets sont des thèmes libres, N par doc ; les deux vues coexistent.
+Virtuel par défaut ; le « physique » se fait à la demande via ``sujet export``
+(copie/zip réel, ex. envoi au comptable).
 
 Expose :
 - ``view(apply=False, clear=False) -> SujetView`` : (re)génère la vue symlink.
@@ -20,10 +21,10 @@ import shutil
 import unicodedata
 from pathlib import Path
 
-from connaissance.core.paths import DOCUMENTS_DIR, require_paths
+from connaissance.core.paths import DOCUMENTS_DIR, VIEWS_ROOT, require_paths
 from connaissance.core.tracking import TrackingDB
 
-SUJETS_VIEW_NAME = "- Sujets"
+SUJETS_VIEW_NAME = "Sujets"   # sous VIEWS_ROOT (hors ~/Documents/iCloud)
 
 
 def _slug_dir(sujet: str) -> str:
@@ -67,14 +68,15 @@ def view(apply: bool = False, clear: bool = False,
     capturés par la dédup consciente.
 
     - défaut : **dry-run** — renvoie la répartition sans rien écrire.
-    - ``apply`` : (re)construit ``~/Documents/- Sujets/`` à neuf (idempotent).
+    - ``apply`` : (re)construit ``~/Connaissance/Vues/Sujets/`` à neuf (idempotent).
     - ``clear`` : supprime la vue (réversible — aucun fichier source touché).
 
-    Le préfixe « - » exclut le dossier du scan. Les raccourcis pointent le vrai
-    fichier à son emplacement courant ; régénérer après tout déplacement.
+    Sous ``~/Connaissance/Vues/`` (hors ~/Documents : ni pollution iCloud, ni
+    scan). Les raccourcis pointent le vrai fichier à son emplacement courant ;
+    régénérer après tout déplacement.
     """
     require_paths(DOCUMENTS_DIR, context="sujet view")
-    view_dir = DOCUMENTS_DIR / SUJETS_VIEW_NAME
+    view_dir = VIEWS_ROOT / SUJETS_VIEW_NAME
 
     if clear:
         existed = view_dir.exists()
@@ -139,8 +141,8 @@ def export(name: str, dest: str | None = None, as_zip: bool = False,
     dossier réel, à la demande (schema SujetExport).
 
     Pour le cas « envoi au comptable » : pas de dossier physique permanent, une
-    copie ponctuelle. ``dest`` par défaut : ``~/Documents/- Sujets-export/<nom>``
-    (préfixe « - » → hors scan). ``as_zip`` produit un .zip à la place.
+    copie ponctuelle. ``dest`` par défaut : ``~/Connaissance/Vues/Sujets-export/<nom>``
+    (hors ~/Documents). ``as_zip`` produit un .zip à la place.
     Ne touche jamais les sources (copie pure, hors ledger).
     """
     require_paths(DOCUMENTS_DIR, context="sujet export")
@@ -165,7 +167,7 @@ def export(name: str, dest: str | None = None, as_zip: bool = False,
         sources.append(src)
 
     out_base = (Path(dest).expanduser() if dest
-                else DOCUMENTS_DIR / "- Sujets-export" / _slug_dir(name))
+                else VIEWS_ROOT / "Sujets-export" / _slug_dir(name))
 
     if not sources:
         return {"sujet": name, "exported": 0, "missing_source": missing,

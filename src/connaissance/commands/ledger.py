@@ -9,10 +9,10 @@ import shutil
 from pathlib import Path
 
 from connaissance.core import ledger as _ledger
-from connaissance.core.paths import DOCUMENTS_DIR
+from connaissance.core.paths import DOCUMENTS_DIR, VIEWS_ROOT
 from connaissance.core.tracking import TrackingDB
 
-SNAPSHOT_VIEW = "- Historique"
+SNAPSHOT_VIEW = "Historique"   # sous VIEWS_ROOT (hors ~/Documents/iCloud)
 
 
 def list_runs(limit: int = 20) -> dict:
@@ -52,7 +52,7 @@ def snapshot(run_id: str | None = None, apply: bool = False,
 
     - défaut : **dry-run** (compteurs) ; ``apply`` (re)construit ; ``clear`` supprime.
     """
-    view = DOCUMENTS_DIR / SNAPSHOT_VIEW
+    view = VIEWS_ROOT / SNAPSHOT_VIEW
     if clear:
         existed = view.exists()
         if existed:

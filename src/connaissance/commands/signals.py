@@ -25,12 +25,15 @@ from connaissance.core import secrets as _secrets
 from connaissance.core import signals as _signals
 from connaissance.core.output_file import write_or_inline
 from connaissance.core.paths import (CONNAISSANCE_ROOT, DOCUMENTS_DIR,
-                                      documents_read_path, is_dataless)
+                                      SPECIAL_TOP_DIRS, documents_read_path,
+                                      is_dataless)
 from connaissance.core.tracking import TrackingDB
 
 TRANSCRIPTIONS_DIR = CONNAISSANCE_ROOT / "Transcriptions" / "Documents"
-_SKIP_TOP = {"- Par catégorie", "- Sujets", "organismes", "personnes",
-             "divers", "promus"}
+# Dossiers spéciaux (vues/relocations, source unique SPECIAL_TOP_DIRS) +
+# destinations du classement (déjà rangées, pas à re-signaler).
+_SKIP_TOP = set(SPECIAL_TOP_DIRS) | {"organismes", "personnes",
+                                     "divers", "promus"}
 _NOISE_DIRS = {"bower_components", "Pods", "site-packages", ".tox", ".venv",
                "venv", "dist", "build", ".next", ".nuxt", "__pycache__"}
 # Extensions image (sans le point). Les images ne sont PAS scannées en masse
@@ -82,6 +85,11 @@ def scan(scope: str | None = None, output_file: str | None = None,
             d = Path(dirpath)
             if d == DOCUMENTS_DIR:
                 dirnames[:] = [n for n in dirnames if n not in _SKIP_TOP]
+            # Règle symlink universelle : ne jamais descendre un dossier-lien ni
+            # traiter un fichier-lien (toujours un doublon d'une cible déjà
+            # indexée ; évite aussi de suivre un lien hors périmètre). Couvre les
+            # vues virtuelles (- Sujets/- Historique/- Catégories) partout.
+            dirnames[:] = [n for n in dirnames if not (d / n).is_symlink()]
             is_bundle = d.suffix.lower() in BUNDLE_SUFFIXES
             is_repo = bool(set(filenames) & CODE_MARKERS) \
                 or bool(set(dirnames) & MARKER_DIRS)
@@ -92,6 +100,8 @@ def scan(scope: str | None = None, output_file: str | None = None,
 
             for fname in filenames:
                 if fname.startswith("."):
+                    continue
+                if (d / fname).is_symlink():   # fichier-lien = doublon, jamais
                     continue
                 ext = Path(fname).suffix.lower().lstrip(".")
                 is_img = ext in _IMG_EXTS

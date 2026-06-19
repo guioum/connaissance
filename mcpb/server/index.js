@@ -392,7 +392,7 @@ server.registerTool(
 server.registerTool(
   "connaissance_documents_category_view",
   {
-    description: "Generate a category-based VIEW of ~/Documents/ as symlinks under '- Par catégorie/<category>/'. The canonical tree stays organized by entity; the category lives in metadata. Read-only on the originals, fully regenerable, and excluded from the pipeline scan via the '- ' prefix. Default is dry-run (returns the per-category breakdown). Pass apply=true to (re)build the symlinks, clear=true to remove the view. Regenerate after a classification session, since it's a snapshot.",
+    description: "Generate a category-based VIEW of ~/Documents/ as symlinks under ~/Connaissance/Vues/Catégories/<category>/ (outside ~/Documents, so no iCloud pollution and never scanned). The canonical tree stays organized by entity; the category lives in metadata. Read-only on the originals, fully regenerable. Default is dry-run (returns the per-category breakdown). Pass apply=true to (re)build the symlinks, clear=true to remove the view. Regenerate after a classification session, since it's a snapshot.",
     inputSchema: {
       apply: z.boolean().optional().describe("(Re)build the symlink view (idempotent)."),
       clear: z.boolean().optional().describe("Remove the view (reversible)."),
@@ -1485,7 +1485,7 @@ server.registerTool(
 server.registerTool(
   "connaissance_ledger_snapshot",
   {
-    description: "Build the ~/Documents/- Historique/ view: dated per-run snapshots reconstructing the OLD file structure/names BEFORE moves/renames, as symlinks pointing to each file's CURRENT location (move chain followed). Read-only, regenerable, cheap (symlinks from the ledger). Purged files → .disparu marker. Dry-run by default ; apply=true (re)builds, clear=true removes the view.",
+    description: "Build the ~/Connaissance/Vues/Historique/ view: dated per-run snapshots reconstructing the OLD file structure/names BEFORE moves/renames, as symlinks pointing to each file's CURRENT location (move chain followed). Read-only, regenerable, cheap (symlinks from the ledger). Purged files → .disparu marker. Dry-run by default ; apply=true (re)builds, clear=true removes the view.",
     inputSchema: {
       run_id: z.string().optional().describe("Limit to a single run_id (default: all runs)."),
       apply: z.boolean().default(false).describe("(Re)build the - Historique view."),
@@ -1516,10 +1516,10 @@ server.registerTool(
 server.registerTool(
   "connaissance_sujet_view",
   {
-    description: "(Re)generate the navigable per-subject view ~/Documents/- Sujets/ as symlinks pointing to each document's current location, from doc_classification.sujet. Replaces '- Par catégorie/'. Dry-run by default (returns the breakdown) ; pass apply=true to (re)build, or clear=true to remove the view (nothing else touched).",
+    description: "(Re)generate the navigable per-subject view ~/Connaissance/Vues/Sujets/ as symlinks pointing to each document's current location, from doc_classification.sujet. Complementary axis to the Catégories view (fixed taxonomy, 1/doc) — both coexist under ~/Connaissance/Vues/. Dry-run by default (returns the breakdown) ; pass apply=true to (re)build, or clear=true to remove the view (nothing else touched).",
     inputSchema: {
       apply: z.boolean().default(false).describe("(Re)build the symlink view."),
-      clear: z.boolean().default(false).describe("Remove the - Sujets/ view."),
+      clear: z.boolean().default(false).describe("Remove the Sujets view."),
     },
   },
   async (args) => {
@@ -1533,10 +1533,10 @@ server.registerTool(
 server.registerTool(
   "connaissance_sujet_export",
   {
-    description: "Materialize a subject on demand : COPY (or zip) all its documents into a real folder (e.g. to send to an accountant). Never touches the sources. Default dest: ~/Documents/- Sujets-export/<name>.",
+    description: "Materialize a subject on demand : COPY (or zip) all its documents into a real folder (e.g. to send to an accountant). Never touches the sources. Default dest: ~/Connaissance/Vues/Sujets-export/<name>.",
     inputSchema: {
       name: z.string().describe("The subject name to export."),
-      dest: z.string().optional().describe("Destination folder (default: - Sujets-export/<name>)."),
+      dest: z.string().optional().describe("Destination folder (default: ~/Connaissance/Vues/Sujets-export/<name>)."),
       zip: z.boolean().default(false).describe("Produce a .zip instead of a folder."),
     },
   },
@@ -1546,6 +1546,65 @@ server.registerTool(
     if (args.zip) a.push("--zip");
     return runAndFormat("sujet", "export", a);
   }
+);
+
+// ── Snapshots (photos point-in-time de l'organisation) ─────────
+
+server.registerTool(
+  "connaissance_snapshots_create",
+  {
+    description: "Freeze a point-in-time PHOTO of tracking.db (VACUUM INTO → .config/snapshots/<date>-<label>.db), capturing the full state (all documents + organization + ledger). By default ALSO renders the navigable view immediately under ~/Connaissance/Vues/Snapshots/<name>/ (no_view=true keeps only the DB photo). Unlike the single Historique baseline, you keep N dated photos. Use before a big reorg (e.g. label 'avant-reorg').",
+    inputSchema: {
+      label: z.string().optional().describe("Label for the photo (e.g. avant-reorg)."),
+      no_view: z.boolean().default(false).describe("Skip rendering the navigable view (keep only the DB photo)."),
+    },
+  },
+  async (args) => {
+    const a = args.label ? [args.label] : [];
+    if (args.no_view) a.push("--no-view");
+    return runAndFormat("snapshots", "create", a);
+  }
+);
+
+server.registerTool(
+  "connaissance_snapshots_list",
+  {
+    description: "List available point-in-time snapshots (name, date, classified-document count).",
+    inputSchema: {},
+    annotations: { readOnlyHint: true },
+  },
+  async () => runAndFormat("snapshots", "list", [])
+);
+
+server.registerTool(
+  "connaissance_snapshots_view",
+  {
+    description: "Render a snapshot as a navigable, SELF-HEALING symlink tree under ~/Connaissance/Vues/Snapshots/<name>/ : each document appears at its path AS OF the snapshot, but the symlink points to its CURRENT location, resolved by hash (stable across move/rename — never rots). Dry-run by default ; apply=true (re)builds, clear=true removes the view.",
+    inputSchema: {
+      name: z.string().describe("Snapshot name (or label suffix)."),
+      apply: z.boolean().default(false).describe("(Re)build the symlink view."),
+      clear: z.boolean().default(false).describe("Remove this snapshot's view."),
+    },
+  },
+  async (args) => {
+    const a = [args.name];
+    if (args.clear) { a.push("--clear"); return runAndFormat("snapshots", "view", a); }
+    if (args.apply) a.push("--apply");
+    return runAndFormat("snapshots", "view", a);
+  }
+);
+
+server.registerTool(
+  "connaissance_snapshots_diff",
+  {
+    description: "Compare two snapshots by hash : how many documents were added / removed / moved (different path) / reclassified (different entity or category) between the two instants. Returns counts + samples.",
+    inputSchema: {
+      a: z.string().describe("Snapshot A."),
+      b: z.string().describe("Snapshot B."),
+    },
+    annotations: { readOnlyHint: true },
+  },
+  async (args) => runAndFormat("snapshots", "diff", [args.a, args.b])
 );
 
 // ── Duplicates (Phase D — doublons de ~/Documents) ─────────────

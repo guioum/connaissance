@@ -25,13 +25,13 @@ from connaissance.commands.documents import (TRANSCRIPTIONS_DIR,
 from connaissance.commands.triage import (BUNDLE_SUFFIXES, CODE_MARKERS,
                                           MARKER_DIRS)
 from connaissance.core.output_file import write_or_inline
-from connaissance.core.paths import (DOCUMENTS_DIR, documents_read_path,
-                                     require_paths)
+from connaissance.core.paths import (DOCUMENTS_DIR, SPECIAL_TOP_DIRS,
+                                     documents_read_path, require_paths)
 from connaissance.core.tracking import TrackingDB
 
 _IMG_EXTS = {".jpg", ".jpeg", ".png", ".heic", ".heif", ".tiff", ".tif",
              ".webp", ".gif", ".bmp"}
-_VIEW_TOP = {"- Sujets", "- Par catégorie", "- Historique", "- Médias"}
+_VIEW_TOP = set(SPECIAL_TOP_DIRS)   # source unique (était une liste divergente)
 
 
 def _read_frontmatter(content: str) -> dict:
@@ -408,12 +408,15 @@ def ocr_images(limit: int | None = None, min_chars: int = 100, min_lines: int = 
             d = Path(dp)
             if d == DOCUMENTS_DIR:
                 dirs[:] = [n for n in dirs if n not in _VIEW_TOP]
+            dirs[:] = [n for n in dirs if not (d / n).is_symlink()]  # jamais un lien
             if (d.suffix.lower() in BUNDLE_SUFFIXES
                     or (set(fs) & CODE_MARKERS) or (set(dirs) & MARKER_DIRS)):
                 dirs[:] = []
                 continue
             for fn in fs:
                 if fn.startswith(".") or Path(fn).suffix.lower() not in _IMG_EXTS:
+                    continue
+                if (d / fn).is_symlink():   # fichier-lien = doublon
                     continue
                 # NFC obligatoire : os.walk renvoie du NFD sur APFS alors que
                 # le journal stocke du NFC — sans normaliser, la reprise rate

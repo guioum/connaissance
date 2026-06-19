@@ -94,8 +94,8 @@ contient les documents promus depuis des pièces jointes (`optimize`).
 > dossier (la catégorie est fortement corrélée à l'entité pour les organismes,
 > et baker un jugement IA mutable dans l'arborescence la fragiliserait).
 > `documents category-view` génère une **vue** navigable par catégorie sous
-> `~/Documents/- Par catégorie/`, en raccourcis vers les originaux : l'autre axe
-> sans déplacer ni dupliquer. Le préfixe `- ` l'exclut du scan ; elle est
+> `~/Connaissance/Vues/Catégories/`, en raccourcis vers les originaux : l'autre axe
+> sans déplacer ni dupliquer. Hors ~/Documents (pas de pollution iCloud, jamais scannée) ; elle est
 > régénérable (`--apply`) et réversible (`--clear`).
 
 ## tracking.db
