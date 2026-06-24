@@ -1,14 +1,19 @@
 # Basic Memory en serveur MCP, exposé HTTPS interne via Tailscale
 
-> **Statut : plan documenté, non exécuté** (24 juin 2026). Ce guide décrit la
-> mise en place prévue pour adosser un serveur de mémoire MCP
-> [Basic Memory](https://github.com/basicmachines-co/basic-memory) au système
+> **Statut (24 juin 2026, Basic Memory 0.22.1)** — adosser un serveur de mémoire
+> MCP [Basic Memory](https://github.com/basicmachines-co/basic-memory) au système
 > `connaissance`, joignable depuis le chat de l'app Claude sur iPhone via une URL
 > HTTPS **privée au tailnet** (jamais de `tailscale funnel`).
 >
-> Basic Memory évolue vite : **revérifier la commande d'install, le flag de
-> transport HTTP, le port et le chemin d'endpoint sur le repo officiel avant
-> d'exécuter**.
+> - ✅ Étape 1 (install), ✅ Étape 2 (projet `memoire`), ✅ Étape 3 (serveur HTTP
+>   local vérifié, `200 OK` sur `/mcp`).
+> - ⛔ **Étape 0 bloquante** : `tailscale cert` → *« your Tailscale account does
+>   not support getting TLS certs »* → **activer HTTPS Certificates dans la
+>   console admin Tailscale** (manuel). Tant que non fait, l'étape 4 échoue.
+> - ⏳ Étapes 4 (serve, après étape 0), 5 (pmset sudo), 6 (LaunchAgent) et le
+>   découpage qmd : à confirmer.
+>
+> Basic Memory évolue vite : revérifier les commandes sur le repo officiel.
 
 ## Objectif
 
@@ -53,14 +58,18 @@ d'avoir deux dossiers divergents pour la même entité.
 
 **Trois barrières d'étanchéité :**
 
-1. **Scope pipeline** — `Mémoire/` exclu (`scope exclude`). Sinon
-   `audit check --steps frontmatter_invalide` signale chaque note (Basic Memory
-   écrit `type: note` sans `date`/`category`) et `classify/organize` peut la
-   déplacer ou réécrire son frontmatter.
-2. **Collection qmd dédiée** — indexer `Mémoire/` comme collection qmd
-   *séparée* de `connaissance` (⚠️ **amende** la décision initiale qui la
-   fondait dans `connaissance`). On garde la recherche unifiée *à la demande*
-   sans diluer le corpus documentaire avec des scratch-notes d'IA.
+1. **Pipeline = aucune action requise** (vérifié dans le code le 2026-06-24).
+   Le pipeline ne balaie **jamais** la racine `~/Connaissance` : `audit` cible
+   des sous-arbres précis (`Transcriptions/`, `Résumés/`, `Synthèse/` ;
+   `verifier_frontmatter` ne scanne que `[RESUMES, SYNTHESE]`), `scope` vise
+   `~/Documents`, et `classify/organize` opèrent dans leurs arbres gérés.
+   `Mémoire/` est donc **nativement invisible** au pipeline — pas de `scope
+   exclude` (qui aurait ciblé `~/Documents`, le mauvais mécanisme).
+2. **Collection qmd dédiée** — seul `qmd` balaie la racine (`**/*.md`) et
+   happerait `Mémoire/`. Indexer `Mémoire/` comme collection qmd *séparée* de
+   `connaissance` (⚠️ **amende** la décision initiale qui la fondait dans
+   `connaissance`). On garde la recherche unifiée *à la demande* sans diluer le
+   corpus documentaire avec des scratch-notes d'IA.
 3. **Frontmatter disjoint** — ne jamais soumettre les notes Basic Memory à
    `CHAMPS_REQUIS`.
 
@@ -233,31 +242,42 @@ basic-memory --version
 ```bash
 mkdir -p ~/Connaissance/Mémoire
 basic-memory project add memoire ~/Connaissance/Mémoire
-basic-memory project default memoire     # si la sous-commande existe (vérifier --help)
+basic-memory project default memoire
 basic-memory project list                # vérifier le mapping
 ```
 
+✅ **Fait le 2026-06-24** : projet `memoire` ajouté, mis par défaut, mode local
+(MCP route `stdio`). Embeddings **fastembed local** (`bge-small-en-v1.5`,
+aucun coût API). ⚠️ Modèle d'embedding *anglophone* → la recherche *interne* de
+Basic Memory sur du contenu FR sera médiocre ; le moteur principal reste qmd
+(étape collections). Un projet résiduel `main → ~/basic-memory` (créé à
+l'install) peut être retiré : `basic-memory project remove main`.
+
 Intégration `connaissance` :
 
-- **Exclure du pipeline** : `connaissance scope exclude ~/Connaissance/Mémoire`
-  (outil MCP `connaissance_scope_exclude`) — scan/classify/transcribe/audit
-  ignorent alors ce dossier.
-- **qmd** : indexer `Mémoire/` comme **collection dédiée** (voir « Frontière &
-  complémentarité » — ne pas le fondre dans la collection `connaissance`).
-  Lancer un reindex (`qmd-admin reindex`) après les premiers écrits, à refaire
-  quand le contenu évolue.
+- **Pipeline** : rien à faire — `Mémoire/` est nativement invisible (voir
+  « Frontière & complémentarité », barrière 1). **Pas** de `scope exclude`.
+- **qmd** : indexer `Mémoire/` comme **collection dédiée** (voir « Architecture
+  qmd » — différé, en une passe avec le reste du découpage).
 
 ## Étape 3 — Lancer en mode serveur HTTP et confirmer le port
 
 ```bash
-basic-memory mcp --transport streamable-http --port 8000
+# --host 127.0.0.1 : n'écoute QUE sur localhost (défaut = 0.0.0.0 = toutes
+# interfaces, ce qui exposerait en clair sur le LAN et l'IP Tailscale, court-
+# circuitant le HTTPS de `serve`). Seule entrée = tailscale serve.
+basic-memory mcp --transport streamable-http --host 127.0.0.1 --port 8000 --project memoire
 # dans un autre shell :
-curl -s -o /dev/null -w "%{http_code}\n" http://localhost:8000/mcp
 lsof -nP -iTCP:8000 -sTCP:LISTEN
+curl -s -i -X POST http://127.0.0.1:8000/mcp \
+  -H 'Content-Type: application/json' \
+  -H 'Accept: application/json, text/event-stream' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"t","version":"0"}}}'
 ```
 
-Port retenu : **8000** (libre). Lancement au premier plan pour valider, puis
-service (étape 6) ou background.
+✅ **Vérifié le 2026-06-24** : serveur en écoute sur `127.0.0.1:8000`, endpoint
+`/mcp`, handshake `initialize` → `200 OK` + `serverInfo: "Basic Memory"`. Port
+retenu : **8000**. `--path` défaut = `/mcp` (confirmé en 0.22.1).
 
 ## Étape 4 — Exposer en HTTPS interne au tailnet (après étape 0)
 
