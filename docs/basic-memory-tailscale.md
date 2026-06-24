@@ -296,16 +296,15 @@ Résultat attendu :
 
 ## Étape 5 — Veille : garder le Mac joignable (sudo)
 
-`tcpkeepalive` est déjà = 1 → rien à faire. Seule commande nécessaire :
-
-```bash
-sudo pmset -c sleep 0        # pas de veille système sur secteur
-```
-
-`displaysleep`/`disksleep` restent inchangés (écran/disque peuvent dormir, le
-réseau reste actif).
+**Décision (2026-06-24) : ne PAS modifier la veille.** Le Mac dort normalement ;
+l'iPhone ne le joindra que quand il est éveillé. (`tcpkeepalive` reste = 1.)
+Option à la demande sans changement permanent : `caffeinate -s` quand on veut le
+garder éveillé. Commande *non retenue* pour mémoire : `sudo pmset -c sleep 0`.
 
 ## Étape 6 — Persistance au démarrage (LaunchAgent)
+
+**Décision (2026-06-24) : reportée — à trancher après l'étape 0** (HTTPS activé +
+étape 4 validée), pour tout brancher d'un coup.
 
 `tailscale serve --bg` est déjà persistant (état tailscaled). Reste à relancer
 `basic-memory mcp` automatiquement via un LaunchAgent utilisateur
