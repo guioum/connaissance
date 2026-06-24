@@ -143,19 +143,44 @@ Justification : la redondance la plus dure à séparer est transcription↔résu
 transcriptions. Résumés et synthèse se recouvrent moins (per-source vs agrégé) :
 les garder distincts répond à deux questions différentes.
 
-Points à régler avant d'implémenter (config qmd, **pas maintenant**) :
+**Décision (2026-06-24) : implémentation différée, en une seule passe avec
+l'install de Basic Memory.** Raison : la collection `memoire` exige que
+`~/Connaissance/Mémoire/` existe (donc Basic Memory installé), et le découpage
+oblige à retoucher les skills d'un **autre repo** — autant tout faire d'un coup,
+de façon cohérente, plutôt qu'un additif provisoire.
 
-- **Consommateurs qmd** : `organize enrich` (désambiguïsation d'entité) et le
-  skill `synthetiser` (recherche) appellent qmd — décider quelle(s)
-  collection(s) ils ciblent (probablement `resumes` + `synthese`).
-- **Défaut de recherche manuelle** : union `resumes` + `synthese` ; les
-  transcriptions en *opt-in* pour le verbatim.
-- **Faisabilité config** : vérifier que qmd accepte plusieurs collections sur
-  des sous-dossiers d'une même racine (`~/Connaissance/{Transcriptions,Résumés,
-  Synthèse}` + `~/Connaissance/Mémoire`).
-- **Coût** : 1 index + 1 cycle de reindex par collection (surcoût mineur).
-- **Interim léger** si 4 paraît lourd : 3 collections — `transcriptions` (brut)
-  / curé (`resumes` + `synthese` fondus) / `memoire`.
+Faits qmd (relevés le 2026-06-24, pour rendre la passe turnkey) :
+
+- Config : **`~/.config/qmd/index.yml`** (YAML `collections: {<nom>: {path, pattern}}`).
+  Aujourd'hui une seule collection `connaissance` → `~/Connaissance`, `**/*.md`.
+- CLI : `qmd collection add/list/remove/rename/show` ; reindex via
+  `qmd update` / `qmd embed` (MCP : `qmd-admin reindex`).
+- **Embeddings locaux** (aucune clé API en config/env) → ré-indexer = temps CPU,
+  **pas de coût $**.
+
+Checklist de la passe (à exécuter avec Basic Memory) :
+
+1. **Config** — remplacer la collection unique par 4 collections sur
+   sous-dossiers :
+   `transcriptions` → `~/Connaissance/Transcriptions` ·
+   `resumes` → `~/Connaissance/Résumés` ·
+   `synthese` → `~/Connaissance/Synthèse` ·
+   `memoire` → `~/Connaissance/Mémoire` (toutes `**/*.md`). Vérifier au passage
+   que qmd accepte plusieurs collections sur des sous-dossiers d'une même racine.
+2. **Reindex + embed** (local).
+3. **Retargeting des consommateurs** (repo `cowork-plugins/connaissance`, qui
+   codent `["connaissance"]` en dur → cibler **`["resumes","synthese"]`** par
+   défaut, transcriptions en opt-in) :
+   - `skills/_shared/qmd-conventions.md` (la source de vérité « toujours
+     `connaissance` » — à réécrire en premier)
+   - `skills/organiser/SKILL.md`
+   - `skills/synthetiser/SKILL.md` + `references/format-templates.md`
+   - `skills/dashboard/SKILL.md` + `references/claude-md-template.md`
+4. **Vérif** : une requête « que sais-je sur X » ne renvoie plus le même contenu
+   en 2-3× (triplet dédupliqué).
+
+**Interim léger** si 4 paraît lourd le moment venu : 3 collections —
+`transcriptions` (brut) / curé (`resumes` + `synthese` fondus) / `memoire`.
 
 ## Faits d'environnement (constatés le 24 juin 2026)
 
