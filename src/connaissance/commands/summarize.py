@@ -17,11 +17,13 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import unicodedata
 from datetime import datetime
 from pathlib import Path
 
 import yaml
 
+from connaissance.core import filtres as _filtres
 from connaissance.core.paths import BASE_PATH, CONNAISSANCE_ROOT
 from connaissance.core.resolution import slugify
 from connaissance.core.tracking import TrackingDB
@@ -272,6 +274,8 @@ def prepare(paths: list[str] | str = "all", mode: str = "batch",
 
     requests = []
     total_input_chars = 0
+    exclude_set = _filtres.load_exclude_set()   # exclus du payant (OCR + résumé)
+    excluded_n = 0
 
     for rel_path in target_paths:
         trans_path = CONNAISSANCE_ROOT / rel_path
@@ -281,6 +285,13 @@ def prepare(paths: list[str] | str = "all", mode: str = "batch",
                 continue
 
         fm, body = _read_transcription(trans_path)
+        # Exclusion utilisateur : ne pas résumer un doc marqué exclu (même s'il a
+        # une transcription). La source du frontmatter est « Documents/<rel> ».
+        _src = str(fm.get("source") or "")
+        _src = _src[len("Documents/"):] if _src.startswith("Documents/") else _src
+        if _src and unicodedata.normalize("NFC", _src) in exclude_set:
+            excluded_n += 1
+            continue
         rel = _rel_transcription(trans_path)
         source_type = _source_label(
             fm.get("type") or source or _infer_source_type_from_path(rel) or "document"
@@ -368,6 +379,7 @@ def prepare(paths: list[str] | str = "all", mode: str = "batch",
     payload = {
         "requests": requests,
         "total": len(requests),
+        "user_excluded": excluded_n,
         "estimated_input_tokens": estimated_tokens,
         "mode": mode,
         "preference": preference,

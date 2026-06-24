@@ -89,11 +89,17 @@ def _cmd_documents(args) -> Any:
                                      engine=(None if args.engine == "all"
                                              else args.engine),
                                      output_file=args.output_file)
+    if args.verb == "exclude":
+        from connaissance.commands import documents
+        return documents.exclude(add=args.add, remove=args.remove,
+                                 add_from_file=args.add_from_file,
+                                 list_only=args.list)
     if args.verb == "transcribe-plan":
         from connaissance.commands import ocr
         return ocr.transcribe_plan(max_pages=args.max_pages,
                                    include_missing=not args.upgrade_only,
                                    include_born_digital=args.include_born_digital,
+                                   dedup_content=not args.no_dedup_content,
                                    scope=args.scope,
                                    output_file=args.output_file)
     raise SystemExit(f"verbe inconnu : documents {args.verb}")
@@ -609,6 +615,16 @@ def build_parser() -> argparse.ArgumentParser:
     p_doc_rev.add_argument("--output-file", dest="output_file", default=None,
                            help="Écrire la liste complète des candidats ici "
                                 "(sinon : résumé compact inline).")
+    p_doc_excl = p_doc_verbs.add_parser("exclude")
+    p_doc_excl.add_argument("--add", action="append", default=None, metavar="REL",
+                            help="Ajouter un chemin (rel ~/Documents) à exclure "
+                                 "du payant (OCR Mistral + résumé). Répétable.")
+    p_doc_excl.add_argument("--remove", action="append", default=None,
+                            metavar="REL", help="Retirer un chemin de la liste.")
+    p_doc_excl.add_argument("--add-from-file", dest="add_from_file", default=None,
+                            help="Ajouter tous les chemins d'un fichier (1/ligne).")
+    p_doc_excl.add_argument("--list", action="store_true",
+                            help="Afficher la liste sans la modifier.")
     p_doc_oi = p_doc_verbs.add_parser("ocr-images")
     p_doc_oi.add_argument("--limit", type=int, default=None,
                           help="Limiter le nombre de documents-images écrits.")
@@ -634,6 +650,11 @@ def build_parser() -> argparse.ArgumentParser:
                           help="Inclure aussi les PDF born-digital (un seul "
                                "moteur/format pour toute la base ; sinon exclus, "
                                "couche texte propre).")
+    p_doc_tp.add_argument("--no-dedup-content", dest="no_dedup_content",
+                          action="store_true",
+                          help="Désactiver la dédup par contenu (hash). Par "
+                               "défaut : un seul OCR par contenu identique, les "
+                               "doublons reçoivent une copie de la transcription.")
     p_doc_tp.add_argument("--output-file", dest="output_file", default=None,
                           help="Écrire le manifeste to_transcribe (consommable par "
                                "mistral-ocr --files-from-json et register-batch).")

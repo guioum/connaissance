@@ -97,6 +97,46 @@ def write_quarantine_set(rels) -> Path:
     return SECRETS_QUARANTINE
 
 
+# Liste d'exclusion UTILISATEUR du traitement payant : les fichiers listés ici
+# ne sont ni envoyés à l'OCR Mistral (transcribe-plan les saute) ni résumés par
+# LLM (summarize les saute). Motifs libres : gros docs sans valeur de structure,
+# documents sensibles à ne pas envoyer à un service externe, etc. Curée à la
+# main ou via `documents exclude`. Distincte de la quarantaine secrets (qui, elle,
+# exclut AUSSI de qmd et est pilotée par la détection de secrets).
+PROCESSING_EXCLUDE = CONNAISSANCE_ROOT / ".config" / "exclude-processing.txt"
+
+
+def load_exclude_set() -> set[str]:
+    """Chemins (rel à ~/Documents/, NFC) exclus du traitement payant OCR/résumé."""
+    if not PROCESSING_EXCLUDE.exists():
+        return set()
+    out: set[str] = set()
+    try:
+        for line in PROCESSING_EXCLUDE.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if line and not line.startswith("#"):
+                out.add(unicodedata.normalize("NFC", line))
+    except OSError:
+        return set()
+    return out
+
+
+def write_exclude_set(rels) -> Path:
+    """(Ré)écrire la liste d'exclusion (chemins rel à ~/Documents/), triée NFC."""
+    require_connaissance_root()
+    PROCESSING_EXCLUDE.parent.mkdir(parents=False, exist_ok=True)
+    header = (
+        "# Fichiers EXCLUS du traitement payant : ni OCR Mistral (transcribe-plan)\n"
+        "# ni résumé LLM (summarize). Motifs libres (gros sans structure, sensibles\n"
+        "# à ne pas envoyer à l'externe…). Chemins relatifs à ~/Documents/, un par\n"
+        "# ligne, '#' = commentaire. Géré par `documents exclude` ou éditable.\n"
+    )
+    body = "\n".join(sorted(unicodedata.normalize("NFC", r) for r in rels))
+    PROCESSING_EXCLUDE.write_text(header + body + ("\n" if body else ""),
+                                  encoding="utf-8")
+    return PROCESSING_EXCLUDE
+
+
 class Filtres:
     """Système de filtres unifié pour les 3 sources."""
 

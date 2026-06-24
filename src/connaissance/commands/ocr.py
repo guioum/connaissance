@@ -18,6 +18,7 @@ import json
 
 import yaml
 
+from connaissance.core import filtres as _filtres
 from connaissance.core import ledger as _ledger
 from connaissance.core import ocr_local as _ocr
 from connaissance.commands.documents import (TRANSCRIPTIONS_DIR,
@@ -233,6 +234,7 @@ _OCR_IMAGE_TYPES = {e.lstrip(".") for e in _IMG_EXTS}
 
 def transcribe_plan(max_pages: int = 10, include_missing: bool = True,
                     include_born_digital: bool = False,
+                    dedup_content: bool = True,
                     scope: str | None = None, output_file: str | None = None,
                     db: TrackingDB | None = None) -> dict:
     """Worklist de la **repasse Mistral**, bornée par le nombre de pages (coût).
@@ -273,12 +275,18 @@ def transcribe_plan(max_pages: int = 10, include_missing: bool = True,
     seen: set[str] = set()          # rel normalisé → dédup des lignes-fantômes
     counts = {"upgrade_vision": 0, "missing": 0, "already_mistral": 0,
               "born_digital_skip": 0, "born_digital_included": 0,
-              "deferred_pages": 0, "phantom_dupes": 0,
-              "encrypted_or_broken": 0, "non_ocr_type_skip": 0}
+              "deferred_pages": 0, "phantom_dupes": 0, "content_dupes": 0,
+              "user_excluded": 0, "encrypted_or_broken": 0,
+              "non_ocr_type_skip": 0}
     excluded: list[dict] = []
+    content_dupes: list[dict] = []   # même CONTENU (hash) qu'un représentant
+    exclude_set = _filtres.load_exclude_set()   # exclusions utilisateur (payant)
     try:
         for rel, pkt in db.all_doc_signals():
             if scope and not rel.startswith(scope):
+                continue
+            if unicodedata.normalize("NFC", rel) in exclude_set:
+                counts["user_excluded"] += 1     # exclu manuellement du payant
                 continue
             typ = pkt.get("type")
             ts = pkt.get("text_source")
@@ -348,6 +356,27 @@ def transcribe_plan(max_pages: int = 10, include_missing: bool = True,
                 continue
             counts[reason] += 1
             worklist.append(entry)
+
+        # Dédup par CONTENU (hash) : ne jamais envoyer deux fois le même fichier
+        # à Mistral. Un représentant par hash reste dans la worklist ; les autres
+        # vont en `content_dupes` (→ register-batch leur COPIERA la transcription
+        # du représentant, sans re-OCR ni suppression du fichier). Hash via le
+        # miroir SSD, mis en cache (1er passage lent, ensuite instantané).
+        if dedup_content:
+            by_hash: dict[str, dict] = {}
+            kept: list[dict] = []
+            for e in worklist:
+                h = db.get_or_compute_hash(Path(e["source"]),
+                                           read_path=Path(e["read_source"]))
+                e["hash"] = h
+                if h and h in by_hash:
+                    content_dupes.append({**e, "same_as": by_hash[h]["transcription"]})
+                else:
+                    if h:
+                        by_hash[h] = e
+                    kept.append(e)
+            counts["content_dupes"] = len(content_dupes)
+            worklist[:] = kept
     finally:
         if owns:
             db.close()
@@ -364,6 +393,7 @@ def transcribe_plan(max_pages: int = 10, include_missing: bool = True,
                "to_transcribe": worklist,
                "worklist": worklist,
                "deferred": deferred,
+               "content_dupes": content_dupes,
                "excluded": excluded}
 
     def _summary(p: dict) -> dict:

@@ -8,6 +8,7 @@ Expose :
 
 import json
 import shutil
+import unicodedata
 import sys
 import re
 from datetime import datetime, timezone
@@ -859,9 +860,34 @@ def register_batch(scan_file: str, dry_run: bool = False,
                                  model="mistral-ocr-latest", mode="batch")
         registered.append(transcription)
 
+    # Doublons de CONTENU (même hash qu'un représentant déjà OCRisé) : on COPIE
+    # la transcription du représentant au lieu de re-payer Mistral. Le fichier
+    # source du doublon reste en place (multi-classement préservé) ; sa
+    # transcription porte SA propre source (register_document réécrit le
+    # frontmatter). Aucun appel OCR, aucun coût.
+    dupes_propagated = 0
+    dupes_missing: list[dict] = []
+    for it in (payload.get("content_dupes") or []):
+        rep = it.get("same_as")
+        dest = it.get("transcription")
+        if not rep or not dest:
+            continue
+        if not Path(rep).expanduser().exists():
+            dupes_missing.append({"rel": it.get("rel"), "same_as": rep})
+            continue
+        if not dry_run:
+            dest_p = Path(dest).expanduser()
+            dest_p.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(Path(rep).expanduser(), dest_p)
+            register_document(db, it.get("source"), dest, it.get("hash"),
+                              ocr_engine=ocr_engine)
+        dupes_propagated += 1
+
     return {
         "registered": len(registered),
         "missing": missing,
+        "content_dupes_propagated": dupes_propagated,
+        "content_dupes_missing": dupes_missing,
         "total": len(items),
         "dry_run": dry_run,
     }
@@ -953,6 +979,41 @@ def category_view(apply: bool = False, clear: bool = False) -> dict:
         "links_created": links_created,
         "view_dir": str(view_dir),
     }
+
+
+def exclude(add: list[str] | None = None, remove: list[str] | None = None,
+            add_from_file: str | None = None, list_only: bool = False) -> dict:
+    """Gérer la liste d'exclusion du traitement payant (OCR Mistral + résumé LLM).
+
+    Les chemins (relatifs à ~/Documents/) listés sont sautés par ``transcribe-plan``
+    et ``summarize``. Pour de gros docs sans valeur de structure ou des fichiers
+    sensibles à ne pas envoyer à l'externe. ``add_from_file`` : ajoute tous les
+    chemins (un par ligne) d'un fichier — pratique pour un lot."""
+    from connaissance.core import filtres as _f
+    cur = _f.load_exclude_set()
+    to_add = list(add or [])
+    if add_from_file:
+        try:
+            for line in Path(add_from_file).expanduser().read_text(
+                    encoding="utf-8").splitlines():
+                line = line.strip()
+                if line and not line.startswith("#"):
+                    to_add.append(line)
+        except OSError as exc:
+            return {"error": f"add_from_file illisible : {exc}"}
+    if not list_only:
+        before = set(cur)
+        cur |= {unicodedata.normalize("NFC", r) for r in to_add}
+        cur -= {unicodedata.normalize("NFC", r) for r in (remove or [])}
+        if cur != before:
+            _f.write_exclude_set(cur)
+        added = len(cur - before)
+        removed = len(before - cur)
+    else:
+        added = removed = 0
+    return {"total": len(cur), "added": added, "removed": removed,
+            "path": str(_f.PROCESSING_EXCLUDE),
+            "sample": sorted(cur)[:20]}
 
 
 def suspects() -> dict:

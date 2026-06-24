@@ -3,6 +3,37 @@
 Liste vivante de ce qu'il reste à faire. Cocher quand c'est livré, retirer
 quand c'est obsolète. Priorités indicatives : 🔴 haute · 🟡 moyenne · 🟢 basse.
 
+## ⏯️ REPRISE (point de session 2026-06-19)
+
+**Vague 1 OCR (scannés + images) : TERMINÉE** — 2 780 docs Mistral, $3,83.
+
+**Vague 2 OCR (born-digital) : PRÊTE, pas lancée.** Manifeste frais déjà dédupliqué
+par contenu : `~/Connaissance/.config/repass-borndigital.json` = **4 175 docs à
+OCRiser + 957 doublons-contenu (copie, 0 OCR) → ~$16,49**. Flux (lots ≤350 MB par
+TAILLE, `image_annotations`+`table_format markdown`, **PAS confidence**) :
+`ocr_batch_submit(files_from_json=…)` → `ocr_batch_results(extract_images=true)` →
+`documents register-batch --ocr-engine mistral` (propage aussi les content_dupes).
+Script de boucle réutilisable : `~/Connaissance/.config/repass-chunks/run.sh`.
+Pièges API : upload <512 MB (chunker par taille), 50 MB/fichier max, confidence
+rejeté en batch. Avant de lancer : **finir le tri d'exclusion ci-dessous**.
+
+**EN COURS — tri d'exclusion des gros docs** (décision utilisateur en attente) :
+les longs born-digital (manuels/livres/whitepapers/archive dormante 2020-2021)
+sont de mauvais candidats Mistral (born-digital = texte déjà propre). Rapports
+HTML de tri générés : `~/Connaissance/.config/longs-a-trier.html` (>10 p, 357 docs)
+et `longs-a-trier-20.html` (>20 p, 186 docs, dont ~171/$5,40 = archive dormante).
+L'utilisateur coche → me donne la liste → `documents exclude --add-from-file` →
+régénérer le manifeste. **Aucune exclusion ajoutée pour l'instant.**
+
+**Snapshot pris avant tout** : `20260619T093401-avant-reorg` (photo DB + vue
+`~/Connaissance/Vues/Snapshots/`).
+
+**Ensuite (ordre) :** (1) lancer vague 2 par lots ; (2) correctifs `classify apply`
+(retrofit `relocate_document`, relink inverse au revert, réconciliation post-crash,
+garde `old==new`) AVANT tout déplacement ; (3) pré-classement complet (Haiku, ~$10,
+validé 78 % auto) ; (4) grand déplacement `classify apply --apply` par lots +
+`snapshots diff avant-reorg <après>`.
+
 ## Extraction de texte born-digital élargie (Phase B)
 
 - [x] **xlsx/pptx (stdlib) + rtf/doc (textutil natif macOS)** (v2.52.0) : la Phase B
