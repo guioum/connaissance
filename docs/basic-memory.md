@@ -1,25 +1,30 @@
-# Basic Memory en serveur MCP, exposé HTTPS interne via Tailscale
+# Basic Memory en serveur MCP local (stdio) pour Claude Code & Desktop
 
-> **Statut (24 juin 2026, Basic Memory 0.22.1)** — adosser un serveur de mémoire
-> MCP [Basic Memory](https://github.com/basicmachines-co/basic-memory) au système
-> `connaissance`, joignable depuis le chat de l'app Claude sur iPhone via une URL
-> HTTPS **privée au tailnet** (jamais de `tailscale funnel`).
+> **Statut (24 juin 2026, Basic Memory 0.22.1) — EN PLACE, approche local-only.**
+> [Basic Memory](https://github.com/basicmachines-co/basic-memory) tourne en
+> **stdio local**, branché dans **Claude Code** (scope user) et **Claude
+> Desktop** sur le Mac. Aucun serveur HTTP, aucun port, aucune exposition réseau.
 >
-> - ✅ Étape 1 (install), ✅ Étape 2 (projet `memoire`), ✅ Étape 3 (serveur HTTP
->   local vérifié, `200 OK` sur `/mcp`).
-> - ⛔ **Étape 0 bloquante** : `tailscale cert` → *« your Tailscale account does
->   not support getting TLS certs »* → **activer HTTPS Certificates dans la
->   console admin Tailscale** (manuel). Tant que non fait, l'étape 4 échoue.
-> - ⏳ Étapes 4 (serve, après étape 0), 5 (pmset sudo), 6 (LaunchAgent) et le
->   découpage qmd : à confirmer.
+> **Pivot du 2026-06-24 : l'approche « exposé HTTPS via Tailscale pour l'app
+> iPhone » a été ABANDONNÉE.** Raison (doc officielle Claude) : pour un
+> connecteur MCP distant, *« the connection to your MCP server originates from
+> Anthropic's servers, not from your machine's network interface »* et *« servers
+> behind a VPN … won't connect »*. L'app iPhone est donc servie **par le cloud
+> Anthropic**, qui ne voit pas un tailnet privé → `tailscale serve` (sans funnel)
+> est structurellement invisible à l'app. Les objectifs « strict tailnet-privé »
+> et « utilisable depuis l'app iPhone » sont **incompatibles**. Tout le volet
+> Tailscale/HTTPS/serve/pmset/launchd est conservé en **annexe** pour mémoire.
 >
-> Basic Memory évolue vite : revérifier les commandes sur le repo officiel.
+> Détail des sections d'analyse ci-dessous (frontière, arbitrage des mémoires,
+> collections qmd) : **toujours valides**, indépendantes du transport.
 
 ## Objectif
 
 Un serveur de mémoire MCP qui stocke ses notes en **Markdown local-first**
-(les `.md` ne quittent jamais le Mac), intégré au vault Obsidian existant, et
-appelable depuis l'app Claude iOS via le tailnet.
+(les `.md` ne vivent que sur le Mac), intégré au vault Obsidian existant, et
+appelable depuis **Claude Code et Claude Desktop** (qui se connectent aux
+serveurs MCP localement, depuis la machine). Accès mobile éventuel : **Obsidian
+mobile** sur le vault, sans serveur ni exposition.
 
 ## Décisions de conception
 
@@ -190,6 +195,48 @@ Checklist de la passe (à exécuter avec Basic Memory) :
 
 **Interim léger** si 4 paraît lourd le moment venu : 3 collections —
 `transcriptions` (brut) / curé (`resumes` + `synthese` fondus) / `memoire`.
+
+## Mise en place (local-only, stdio) — FAIT le 2026-06-24
+
+Pas de serveur HTTP, pas de Tailscale. Claude Code et Claude Desktop lancent
+`basic-memory mcp` en **stdio** à la demande.
+
+1. **Install** : `uv tool install basic-memory` (binaire
+   `~/.local/bin/basic-memory`, v0.22.1).
+2. **Projet** :
+   ```bash
+   mkdir -p ~/Connaissance/Mémoire
+   basic-memory project add memoire ~/Connaissance/Mémoire
+   basic-memory project default memoire
+   ```
+   (projet `main → ~/basic-memory` résiduel retirable : `project remove main`.)
+3. **Claude Code** (scope user = tous les projets) :
+   ```bash
+   claude mcp add --scope user basic-memory -- /Users/guillaumemonteillet/.local/bin/basic-memory mcp
+   claude mcp get basic-memory      # → Status: ✓ Connected, Type: stdio
+   ```
+   Écrit dans `~/.claude.json`. Retrait : `claude mcp remove basic-memory -s user`.
+4. **Claude Desktop** : ajout dans `~/Library/Application Support/Claude/claude_desktop_config.json`,
+   bloc `mcpServers` (à côté de `qmd`/`qmd-admin`), **chemin absolu** car le PATH
+   des apps GUI n'inclut pas `~/.local/bin` :
+   ```json
+   "basic-memory": { "command": "/Users/guillaumemonteillet/.local/bin/basic-memory", "args": ["mcp"] }
+   ```
+   Prise en compte au **redémarrage de Claude Desktop**.
+
+Points retenus : embeddings **fastembed local** (`bge-small-en-v1.5`, modèle
+anglophone → recherche interne BM médiocre en FR ; qmd reste le moteur
+principal). Frontière pipeline : rien à exclure (voir barrière 1).
+
+---
+
+# Annexe — approche Tailscale/HTTPS (ABANDONNÉE le 2026-06-24)
+
+Conservée pour mémoire. **Ne pas exécuter** : invalidée par le fait que l'app
+Claude (web/iPhone) fait fetch le MCP depuis le **cloud Anthropic**, qui ne voit
+pas un tailnet privé (cf. bandeau de statut en tête). Le seul moyen aurait été
+`tailscale funnel` (public, exclu) + un proxy d'auth (Basic Memory n'a pas
+d'auth). Décisions d'alors : veille inchangée, service reporté.
 
 ## Faits d'environnement (constatés le 24 juin 2026)
 
