@@ -15,6 +15,11 @@
 > et « utilisable depuis l'app iPhone » sont **incompatibles**. Tout le volet
 > Tailscale/HTTPS/serve/pmset/launchd est conservé en **annexe** pour mémoire.
 >
+> **Accès téléphone (2026-07-04) : pont vers la mémoire cloud CONFIRMÉ.** Push
+> **manuel** curé (notes `#cloud`) depuis un chat Desktop → rappelé sur l'iPhone.
+> Le push *automatique* (tâche planifiée) ne marche pas et a été retiré. Voir
+> « Pont vers la mémoire cloud ».
+>
 > Détail des sections d'analyse ci-dessous (frontière, arbitrage des mémoires,
 > collections qmd) : **toujours valides**, indépendantes du transport.
 
@@ -228,54 +233,53 @@ Points retenus : embeddings **fastembed local** (`bge-small-en-v1.5`, modèle
 anglophone → recherche interne BM médiocre en FR ; qmd reste le moteur
 principal). Frontière pipeline : rien à exclure (voir barrière 1).
 
-## Pont vers la mémoire cloud de Claude (accès téléphone)
+## Pont vers la mémoire cloud de Claude (accès téléphone) — ✅ CONFIRMÉ 2026-07-04
 
 L'app iPhone ne joint pas Basic Memory (cf. annexe), mais sa **mémoire chat** est
 *account-scoped* et partagée web/Desktop/Mobile ([doc Claude](https://support.claude.com/en/articles/11817273-use-claude-s-chat-search-and-memory-to-build-on-previous-context)).
 L'app **Desktop** voit Basic Memory (MCP local) **et** écrit cette mémoire → on
-s'en sert de **relais**. Il n'existe **pas** de synchro fichier/API de la mémoire
-chat (auto-curée, opaque ; un export/import manuel existe mais c'est de la
+s'en sert de **relais**. **Testé de bout en bout** : un « mémorise ceci » dans un
+chat Desktop est ensuite rappelé correctement **sur l'iPhone**. Il n'existe **pas**
+de synchro fichier/API (mémoire auto-curée, opaque ; l'export/import est de la
 migration, pas une synchro).
 
-**Principe : push curé, à sens unique.** Basic Memory = source de vérité ; la
-mémoire cloud = reflet pour le téléphone (lossy, résumé).
+**Principe : push curé, MANUEL, à sens unique.** Basic Memory = source de vérité ;
+la mémoire cloud = reflet pour le téléphone (lossy, résumé).
 
-**Convention de curation : seules les notes taguées `#cloud` sont publiées.** Tu
-contrôles ce qui quitte le Mac en taguant. Le reste ne part jamais par ce pont.
+**⚠️ Le push AUTOMATIQUE ne marche pas.** Une tâche planifiée tourne dans la
+surface cowork/agent, qui **n'a pas** la mémoire chat (feature claude.ai/app
+uniquement) — son « Retiens durablement » n'est jamais persisté. La tâche
+`memoire-cloud-push` a donc été **supprimée**. Le push doit se faire dans une
+**vraie conversation de l'app Claude**.
+
+**Réglages retenus :**
+- **Scope = mémoire globale** (chat **hors-projet**), côté Mac ET iPhone. (Un
+  Projet dédié isolerait du bruit mais impose de s'y placer des deux côtés.)
+- **Push en une phrase depuis Desktop** : `basic-memory` est branché dans Claude
+  Desktop (`claude_desktop_config.json`) → Claude lit les notes et mémorise dans
+  la même conversation.
+- **Curation par tag `#cloud`** : seules ces notes remontent. Le reste ne quitte
+  jamais le Mac.
 
 **Caveats :**
-- Portée probable = mémoire **globale** (hors-projet) → sur l'iPhone, consulter
-  en **chat normal**. Pour isoler, créer un **Projet « Mémoire »** et pousser
-  dedans (à confirmer que la tâche planifiée tourne bien dans ce projet).
-- ⚠️ **Vérifier au 1er run** que les faits poussés apparaissent côté téléphone
-  (le comportement d'écriture de la mémoire chat depuis une tâche planifiée n'est
-  pas garanti — c'est le point à valider empiriquement).
-- Ne JAMAIS rendre ce pont bidirectionnel automatiquement (divergence).
+- Persistance **différée** (« prochaine mise à jour en arrière-plan ») : ne pas
+  tester l'iPhone dans la foulée.
+- La mémoire globale **se mélange** aux autres conversations et accumule des faits
+  périmés → un push correctif écrase l'ancien (vérifié : la mémoire Tailscale
+  périmée a bien été corrigée). Nettoyage occasionnel via **Réglages → Mémoire**.
+- Ne JAMAIS rendre le pont bidirectionnel automatiquement (divergence).
 
-**Mécanisme :**
-- **Push** (auto, hebdo) — tâche planifiée `memoire-cloud-push` (app Desktop) :
-  lit les notes `#cloud`, demande à Claude de les retenir durablement.
-- **Pull** (manuel) — gabarit ci-dessous, à coller dans l'app Desktop.
-
-### Gabarit push (= prompt de la tâche planifiée)
+### Gabarit push (à dire dans un chat **hors-projet** de Claude Desktop)
 
 ```text
-Tu tournes dans l'app Claude Desktop (surface avec mémoire chat). Objectif :
-publier vers ta mémoire un sous-ensemble CURÉ de Basic Memory, pour qu'il soit
-accessible depuis l'app mobile.
-
-1. Via le connecteur MCP `basic-memory` (projet `memoire`), recherche les notes
-   portant le tag `#cloud` (search_notes / recent_activity).
-2. Lis-les, extrais 5–15 faits clés DURABLES utiles en mobilité (décisions,
-   préférences, état de projets, contacts importants). Ignore le bruit.
-3. Termine en formulant explicitement une liste « Retiens durablement : … » avec
-   ces faits, pour qu'ils entrent dans ta mémoire chat.
-4. Basic Memory reste la source de vérité : n'invente rien, ne contredis pas les
-   notes. Ne pousse QUE les notes `#cloud`. Sens unique (ne réécris pas Basic
-   Memory ici). Donne un court récap de ce qui a été poussé.
+Via le connecteur basic-memory (projet memoire), lis les notes taguées #cloud,
+extrais-en les faits clés durables et utiles en mobilité, et MÉMORISE-les
+durablement (mets à jour ta mémoire, corrige tout fait périmé). Basic Memory
+reste la source de vérité : n'invente rien, ne contredis pas les notes. Sens
+unique : ne réécris pas Basic Memory. Confirme ce que tu as retenu.
 ```
 
-### Gabarit pull (manuel, app Desktop)
+### Gabarit pull (manuel, chat Desktop)
 
 ```text
 Qu'as-tu en mémoire concernant {SUJET} ? Pour chaque fait durable, écris ou
