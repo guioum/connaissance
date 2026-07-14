@@ -15,7 +15,7 @@ marche et pourquoi**.
 | Réorganiser un `~/Documents` en désordre sans OCR, de façon réversible | [reorganisation.md](reorganisation.md) |
 | Comprendre le filtrage et le scoring des courriels | [emails.md](emails.md) |
 | Faire tourner ça en natif Mac, en VM cowork, ou via le SSD | [environments.md](environments.md) |
-| Brancher un serveur de mémoire MCP (Basic Memory, stdio local) dans Claude Code & Desktop | [basic-memory.md](basic-memory.md) |
+| Tenir une mémoire perso en Markdown (format OKF) sous `~/Connaissance/`, cherchable par qmd | [memoire.md](memoire.md) |
 | Contribuer : ajouter une commande, packager, tester | [development.md](development.md) |
 | Voir ce qu'il reste à faire | [roadmap.md](roadmap.md) |
 
