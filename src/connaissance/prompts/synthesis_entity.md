@@ -91,7 +91,7 @@ Idem personne + `subtype: {entreprise | institution | gouvernement | association
 
 - `## Profil` : 2-3 phrases factuelles.
 - `## Coordonnées` (personne) ou `## Contact principal` (organisme, uniquement si un interlocuteur nominatif existe).
-- `## Relations` : issues de `relations_candidates`, avec le rôle typé.
+- `## Relations` : issues de `relations_candidates`. Rendre chaque relation retenue comme un **lien markdown navigable**, une puce par relation : `- {rôle} : [{title}]({link})`, en réutilisant **tels quels** les champs `title` et `link` fournis, et un `{rôle}` de ROLE_VALUES. Ne jamais fabriquer de chemin. (Le `role` reste aussi dans le frontmatter `relations` — source de vérité ; ces liens en sont la vue navigable.)
 - `## Liens` : exactement les `entity_paths` fournis. Omettre si vide.
 - `## Mentionné dans` : laisser en placeholder `{à compléter par qmd}` — la skill appelante enrichira après la génération.
 

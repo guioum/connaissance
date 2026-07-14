@@ -75,6 +75,15 @@ Les fiches d'entité portent en plus `aliases` (noms/adresses alternatifs) et
 `relations` (liens vers d'autres entités) — alimentés par
 `synthesis aliases-candidates` / `relations-candidates`.
 
+> **Relations = frontmatter (vérité) + vue navigable (corps).** Le frontmatter
+> `relations` (`{entity: type/slug, role}`) reste la source de vérité (DB, audit
+> `liens_casses`). Depuis lors, `relations-candidates` renvoie aussi, par
+> candidat, un `title` et un `link` bundle-relative (`/Synthèse/{type}/{slug}/fiche.md`),
+> et la section `## Relations` de la fiche est rendue en **liens markdown
+> navigables** `- {rôle} : [{title}]({link})` — le graphe d'entités devient
+> cliquable dans Obsidian (inspiré de la convention de liens OKF ; les fiches
+> s'appelant toutes `fiche.md`, les wikilinks par nom seraient ambigus).
+
 > ⚠️ Piège connu : un champ liste vide en YAML (`relations:` seul) parse en
 > `None`, pas `[]`. Itérer dessus sans garde plante — voir le fix historique
 > dans `verifier_liens_casses` et le point dette dans [roadmap.md](roadmap.md).

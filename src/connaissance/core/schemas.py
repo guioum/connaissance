@@ -645,6 +645,8 @@ class AliasesCandidates(TypedDict):
 
 class RelationCandidate(TypedDict):
     other: str  # "type/slug"
+    title: str  # nom affichable de l'entité cible (fiche cible, sinon dé-slugifié)
+    link: str  # cible de lien markdown bundle-relative : "/Synthèse/{other}/fiche.md"
     co_mentions: int
     support_resumes: list[str]
 

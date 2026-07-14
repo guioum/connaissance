@@ -163,6 +163,28 @@ def aliases_candidates(entity: str) -> dict:
     }
 
 
+def _entity_link(other: str) -> str:
+    """Cible de lien markdown bundle-relative vers la fiche d'une entité 'type/slug'."""
+    return f"/Synthèse/{other}/fiche.md"
+
+
+def _entity_display_title(other: str) -> str:
+    """Nom affichable d'une entité 'type/slug' : titre de la fiche cible si elle
+    existe, sinon le slug dé-slugifié (repli — la fiche cible peut ne pas encore
+    exister ; OKF tolère les liens en avance de phase)."""
+    fiche = SYNTHESE / other / "fiche.md"
+    if fiche.exists():
+        try:
+            fm = _parse_frontmatter(fiche.read_text(encoding="utf-8"))
+        except OSError:
+            fm = None
+        if fm:
+            title = fm.get("title")
+            if isinstance(title, str) and title.strip():
+                return title.strip()
+    return other.split("/", 1)[-1].replace("-", " ")
+
+
 def relations_candidates(entity: str) -> dict:
     """Extraire les relations candidates via co-mentions (schema RelationsCandidates, NEW).
 
@@ -195,6 +217,8 @@ def relations_candidates(entity: str) -> dict:
     for other, supports in co_mentions.items():
         candidates.append({
             "other": other,
+            "title": _entity_display_title(other),
+            "link": _entity_link(other),
             "co_mentions": len(supports),
             "support_resumes": supports,
         })
