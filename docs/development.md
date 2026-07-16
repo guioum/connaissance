@@ -111,8 +111,10 @@ individuellement.
 
 - [`claude-api-mcp`](https://github.com/guioum/claude-api-mcp) — appels Claude
   (Batch API pour les résumés/synthèses).
-- Plugin cowork [`qmd`](https://github.com/guioum/cowork-plugins) — recherche
-  sémantique (`mcp__qmd__query`), enrichissement du classement.
-- Plugin cowork `connaissance` — shim de skills qui orchestre les workflows en
-  invoquant les outils `mcp__connaissance__*`.
+- [`qmd`](https://github.com/tobilu/qmd) — **serveur MCP** de recherche
+  sémantique (`mcp__qmd__query`), enrichissement du classement. Pas un plugin :
+  il se configure à part.
+- Plugin [`connaissance`](https://github.com/guioum/guioum-plugins/tree/main/connaissance)
+  (marketplace `guioum/guioum-plugins`) — shim de skills qui orchestre les
+  workflows en invoquant les outils `mcp__connaissance__*`.
 - Plugin `ocr` / `mistral-ocr` — OCR des documents.

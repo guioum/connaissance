@@ -110,7 +110,7 @@ Aujourd'hui qmd a une seule collection `connaissance` sur tout `~/Connaissance`.
 Le **triplet** fait apparaître la même source jusqu'à 3× → quasi-doublons en
 résultats. Cible (différée, quand `Mémoire/` aura du contenu) : découper par
 couche — `transcriptions` / `resumes` / `synthese` / `memoire` — chaque requête
-tapant au bon niveau. Touche aussi les skills du repo `cowork-plugins/connaissance`
+tapant au bon niveau. Touche aussi les skills du repo `guioum-plugins/connaissance`
 qui codent `["connaissance"]` en dur. Config : `~/.config/qmd/index.yml`,
 CLI `qmd collection add`, embeddings **locaux** (pas de coût API).
 

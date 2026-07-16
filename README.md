@@ -3,9 +3,11 @@
 CLI + MCP pour une base de connaissances personnelle en Markdown. Pipeline
 complet en 5 étapes : **transcrire → résumer → organiser → optimiser → synthétiser**.
 
-Successeur du serveur bundlé dans [`guioum/cowork-plugins/connaissance`](https://github.com/guioum/cowork-plugins/tree/main/connaissance) v2.0.0. À partir de v2.1.0 le
-CLI et le serveur MCP vivent dans ce repo indépendant, le plugin cowork
-devient un simple shim de skills qui consomme les outils MCP exposés ici.
+Successeur du serveur bundlé dans le plugin `connaissance` v2.0.0 (repo alors
+nommé `guioum/cowork-plugins`, aujourd'hui
+[`guioum/guioum-plugins`](https://github.com/guioum/guioum-plugins/tree/main/connaissance)).
+À partir de v2.1.0 le CLI et le serveur MCP vivent dans ce repo indépendant, et
+le plugin devient un simple shim de skills qui consomme les outils MCP exposés ici.
 
 ## Features
 

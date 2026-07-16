@@ -116,11 +116,11 @@ cd mcpb && npx @anthropic-ai/mcpb pack . connaissance-VERSION.mcpb
 
 - [`claude-api-mcp`](https://github.com/guioum/claude-api-mcp) — pour
   les appels `mcp__claude_api__*` (Anthropic Batch API pour les résumés)
-- Plugin cowork [`qmd`](../cowork-plugins/qmd) — pour la recherche
-  sémantique via `mcp__qmd__query`
-- Plugin cowork [`connaissance`](../cowork-plugins/connaissance) —
-  shim de skills qui orchestre les workflows du pipeline en invoquant
-  `mcp__connaissance__*`
+- [`qmd`](https://github.com/tobilu/qmd) — **serveur MCP** de recherche
+  sémantique (`mcp__qmd__query`), configuré à part. Ce n'est **pas** un plugin.
+- Plugin [`connaissance`](https://github.com/guioum/guioum-plugins/tree/main/connaissance)
+  (marketplace `guioum/guioum-plugins`) — shim de skills qui orchestre les
+  workflows du pipeline en invoquant `mcp__connaissance__*`
 
 ## Rollback
 
