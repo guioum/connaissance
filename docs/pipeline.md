@@ -28,6 +28,12 @@ Trois sources, trois commandes :
   les chemins calculés au scan, et **remonte bruyamment** les transcriptions
   manquantes (OCR écrit au mauvais endroit) au lieu de produire des orphelins.
   `documents suspects` repère les transcriptions OCR mal formées à reprendre.
+  En complément du flux Mistral : **OCR local Vision** gratuit (`documents
+  ocr-local` pour les PDF scannés, `ocr-images` pour les images-documents,
+  `ocr-review` pour lister les transcriptions à faible confiance), et **repasse
+  Mistral bornée** via `documents transcribe-plan --max-pages N` (worklist des
+  transcriptions `vision-local` à upgrader + scannés sans transcription, avec
+  estimation de coût).
 - **Courriels** (`emails extract`) : lit les archives mbox, **score** chaque
   courriel (multi-signaux), ne capture que ce qui dépasse le seuil, regroupe
   les fils. Voir [emails.md](emails.md).
@@ -41,7 +47,7 @@ prêtes pour `claude-api-mcp` à partir des templates de
 [`prompts/`](../src/connaissance/prompts/), puis **enregistre** les réponses.
 
 1. `summarize plan` — liste les transcriptions sans résumé (backlog).
-2. `summarize prepare --ids … --mode {direct|batch}` — écrit un manifeste de
+2. `summarize prepare --paths … --mode {direct|batch}` — écrit un manifeste de
    requêtes. Le mode `batch` passe par l'API Batch (−50 %, jusqu'à 24 h).
 3. (appel via `claude-api-mcp`, hors CLI)
 4. `summarize register` — post-traite les réponses, écrit les résumés au chemin

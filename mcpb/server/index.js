@@ -1,6 +1,6 @@
 // MCP server wrapper for the `connaissance` CLI.
 //
-// Exposes 74 tools (mcp__connaissance__*) that shell-out to the
+// Exposes 82 tools (mcp__connaissance__*) that shell-out to the
 // `connaissance` Python CLI installed via `uv tool install` or `pip`.
 // Each tool maps 1:1 to a CLI subcommand `connaissance <group> <verb>`.
 //

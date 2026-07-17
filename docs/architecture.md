@@ -5,7 +5,7 @@
 ```
 ┌─────────────────────────────────────────────────────────┐
 │  Claude Desktop / cowork                                 │
-│     └── mcpb/server/index.js  (48 outils MCP)            │
+│     └── mcpb/server/index.js  (82 outils MCP)            │
 │            │  shell-out + parse JSON                      │
 │            ▼                                              │
 │  binaire `connaissance`  (entry point cli.py)            │
@@ -31,9 +31,10 @@ Mettre à jour la logique = toucher le Python uniquement.
 
 Grammaire : `connaissance <groupe> <verbe> [--flags]`.
 
-- **13 groupes de commandes** : `pipeline`, `documents`, `emails`, `notes`,
-  `organize`, `optimize`, `summarize`, `synthesis`, `audit`, `actions`,
-  `scope`, `config`, `manifest`.
+- **20 groupes de commandes** : `documents`, `emails`, `notes`, `pipeline`,
+  `classify`, `organize`, `optimize`, `summarize`, `synthesis`, `audit`,
+  `actions`, `scope`, `config`, `manifest`, `ledger`, `sujet`, `snapshots`,
+  `duplicates`, `media`, `entities`.
 - Point d'entrée [`cli.py`](../src/connaissance/cli.py) : `build_parser()`
   déclare les sous-parsers, `main()` dispatche vers `_cmd_<groupe>`.
 - Chaque `_cmd_<groupe>` appelle une fonction publique du module
@@ -60,9 +61,13 @@ Toute mutation de la base passe par deux temps :
    (voir le groupe `manifest patch`).
 2. `apply` — consomme le manifeste et exécute. Supporte `--dry-run`.
 
-Concerné : `documents`, `organize`, `optimize`, `summarize`, `synthesis`,
-`emails`, `scope`, `config`. Les outils MCP exposent les deux temps, ce qui
-permet à Claude de présenter le plan à l'utilisateur avant d'appliquer.
+Concerné (flux à manifeste) : `documents`, `organize`, `optimize`, `classify`,
+`duplicates`, `media` — `summarize` et `synthesis` écrivent aussi des
+manifestes de préparation (requêtes IA), consommés par `register`. Les outils
+MCP exposent les deux temps, ce qui permet à Claude de présenter le plan à
+l'utilisateur avant d'appliquer. `scope` et `config` mutent quant à eux par
+**atomes typés** en dry-run → `--apply`, sans manifeste ; même convention
+dry-run → `--apply` pour `emails cleanup-obsolete`.
 
 ### 3. Les mutations de config passent par des atomes typés
 
@@ -78,12 +83,23 @@ n'est jamais réécrit avec du YAML composé par l'appelant. On passe par des
 |---|---|
 | [`paths.py`](../src/connaissance/core/paths.py) | Détection de la racine (Mac natif / VM cowork). Voir [environments.md](environments.md). |
 | [`tracking.py`](../src/connaissance/core/tracking.py) | `TrackingDB` : interface SQLite, cache JIT des hashes/SimHash, usage LLM. Voir [data-model.md](data-model.md). |
-| [`schemas.py`](../src/connaissance/core/schemas.py) | ~60 TypedDict — les contrats de sortie JSON. |
+| [`schemas.py`](../src/connaissance/core/schemas.py) | 88 TypedDict — les contrats de sortie JSON. |
 | [`filtres.py`](../src/connaissance/core/filtres.py) | Scoring des courriels, chargement des filtres YAML. Voir [emails.md](emails.md). |
 | [`resolution.py`](../src/connaissance/core/resolution.py) | Résolution d'une source vers son entité (personne/organisme/sujet). |
 | [`dedup.py`](../src/connaissance/core/dedup.py) | SimHash texte + clustering pour les quasi-doublons. Voir [pipeline.md](pipeline.md). |
 | [`model_selection.py`](../src/connaissance/core/model_selection.py) | Choix du modèle Claude (quality/economy) par type de tâche. |
 | [`output_file.py`](../src/connaissance/core/output_file.py) | Écriture atomique des fichiers de sortie. |
+| [`fsio.py`](../src/connaissance/core/fsio.py) | Écritures atomiques (fichiers texte/JSON). |
+| [`frontmatter.py`](../src/connaissance/core/frontmatter.py) | Découpe/parse/écriture unifiés du frontmatter YAML des `.md` (convention `\n---`). |
+| [`ledger.py`](../src/connaissance/core/ledger.py) | Déplacements réversibles (`safe_move`/`safe_trash`), corbeille, revert vérifié par hash. |
+| [`entities.py`](../src/connaissance/core/entities.py) | Registre canonique d'entités (table `entities`), résolution/fusion d'alias. |
+| [`classify.py`](../src/connaissance/core/classify.py) | Hint heuristique du pré-classement (date/entité/catégorie/titre). |
+| [`secrets.py`](../src/connaissance/core/secrets.py) | Détection de secrets (clés/mots de passe) pour la quarantaine. |
+| [`signals.py`](../src/connaissance/core/signals.py) | Extraction des signaux gratuits par document (Phase B, zéro OCR). |
+| [`ocr_local.py`](../src/connaissance/core/ocr_local.py) | OCR local macOS Vision (helper Swift compilé à la volée). |
+| [`relocate.py`](../src/connaissance/core/relocate.py) | `relocate_document` : déplace le graphe complet d'un document + met à jour les références. |
+| [`manifest_io.py`](../src/connaissance/core/manifest_io.py) | Lecture/écriture/patch des manifestes plan → apply. |
+| [`summarize_extractif.py`](../src/connaissance/core/summarize_extractif.py) | Résumé extractif maison (Luhn + mots-clés + entités), zéro dépendance. |
 
 ## Le MCPB
 
@@ -92,6 +108,7 @@ n'est jamais réécrit avec du YAML composé par l'appelant. On passe par des
 (`pushFlag`), shell-out vers le binaire (trouvé via la variable d'env
 `CONNAISSANCE_CLI` ou auto-détecté dans `~/.local/bin/`), et renvoie le JSON.
 Le manifeste [`mcpb/manifest.json`](../mcpb/manifest.json) porte la version et
-la liste — **source de vérité du décompte d'outils** (48).
+les métadonnées, mais ne liste aucun outil — la **source de vérité du décompte
+d'outils** est l'ensemble des `registerTool` d'`index.js` (82 aujourd'hui).
 
 Voir [development.md](development.md) pour ajouter un outil et packager.

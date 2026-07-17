@@ -14,7 +14,7 @@ en MCPB. Aucune duplication de logique métier entre les deux — le MCPB
 est un shell-out léger vers le CLI.
 
 ```
-src/connaissance/        → package Python, CLI avec 14 groupes de commandes
+src/connaissance/        → package Python, CLI avec 20 groupes de commandes
   ├── cli.py             → entry point, fonction main()
   ├── core/              → paths, tracking (SQLite), filtres, résolution, schemas
   ├── commands/          → un module par groupe de sous-commandes
@@ -35,10 +35,13 @@ mcpb/                    → MCPB Node.js, installé dans Claude Desktop
 - **Toute sortie CLI est JSON à stdout**. Les erreurs vont sur stderr
   avec exit code non-zéro. Le format JSON est typé via les TypedDicts
   de `core/schemas.py`.
-- **Les mutations passent par un pattern plan → apply** (documents,
-  organize, optimize, emails, scope, config). Le `plan` écrit un
-  manifeste JSON sur disque ; `apply` le consomme. Les outils MCP
-  exposent les deux.
+- **Les mutations à manifeste passent par un pattern plan → apply**
+  (documents, organize, optimize, classify, duplicates, media —
+  `summarize`/`synthesis` écrivent aussi des manifestes de préparation).
+  Le `plan` écrit un manifeste JSON sur disque ; `apply` le consomme.
+  Les outils MCP exposent les deux. `scope` et `config` mutent par
+  atomes typés en dry-run → `--apply`, sans manifeste ; idem
+  `emails cleanup-obsolete`.
 - **Les mutations de config YAML** (`scoring-courriels.yaml`) passent
   par des atomes typés (`add_domain_marketing`, `set_weight`, etc.)
   jamais par du YAML composé par l'appelant. `ruamel.yaml` préserve
@@ -91,7 +94,8 @@ immédiatement actives sans reinstall.
 3. Ajouter le sub-parser dans `build_parser()`
 4. Ajouter un wrapper MCP dans `mcpb/server/index.js` via
    `server.registerTool()`
-5. Mettre à jour README et le tableau des 74 outils
+5. Mettre à jour README et le tableau des outils (source de vérité du
+   décompte : les `registerTool` de `index.js`)
 
 ### Tests manuels
 

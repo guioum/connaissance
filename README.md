@@ -84,7 +84,7 @@ cd ..
 ./setup-claude-desktop.sh
 ```
 
-Redémarrer Claude Desktop pour activer les 75 outils
+Redémarrer Claude Desktop pour activer les 82 outils
 `mcp__connaissance__*`.
 
 ## Usage
@@ -114,7 +114,7 @@ connaissance organize apply manifest.json --dry-run
 
 # Summarize (prepare requests for claude-api-mcp)
 connaissance summarize plan
-connaissance summarize prepare --ids "Transcriptions/..." --mode direct
+connaissance summarize prepare --paths "Transcriptions/..." --mode direct
 
 # Audit
 connaissance audit check --steps all
@@ -126,12 +126,12 @@ connaissance config scoring-set --add-domain-marketing exemple.fr --dry-run
 
 ### MCP tools (via Claude Desktop / cowork)
 
-75 outils mappés 1:1 vers les sous-commandes CLI :
+82 outils mappés 1:1 vers les sous-commandes CLI :
 
 | Groupe | Outils |
 |---|---|
 | pipeline | `detect`, `costs` |
-| documents | `scan`, `register`, `register_existing`, `register_batch`, `transcribe_plan`, `category_view`, `triage`, `secrets`, `signals`, `suspects`, `verify_preserve`, `backlog_count` |
+| documents | `scan`, `register`, `register_existing`, `register_batch`, `transcribe_plan`, `category_view`, `triage`, `secrets`, `signals`, `suspects`, `verify_preserve`, `backlog_count`, `exclude`, `ocr_review` |
 | emails | `stats`, `extract`, `threads`, `calibrate`, `senders`, `cleanup_obsolete`, `backlog_count` |
 | notes | `scan`, `copy`, `backlog_count` |
 | classify | `prepare`, `register`, `apply`, `status` |
@@ -139,18 +139,22 @@ connaissance config scoring-set --add-domain-marketing exemple.fr --dry-run
 | optimize | `plan`, `apply` |
 | summarize | `plan`, `prepare`, `register` |
 | synthesis | `plan`, `prepare`, `register`, `aliases_candidates`, `relations_candidates`, `entity_paths`, `list_all` |
-| audit | `check`, `reindex_db`, `repair_attachments`, `archive_non_documents` |
+| audit | `check`, `reindex_db`, `repair_attachments`, `archive_non_documents`, `restore_journals` |
 | actions | `list` |
 | scope | `scan`, `check`, `include`, `exclude` |
 | config | `scoring_show`, `scoring_set`, `scoring_diff`, `scoring_validate` |
 | manifest | `patch` |
 | ledger | `list`, `show`, `verify`, `revert`, `purge`, `snapshot` |
 | sujet | `view`, `export`, `list` |
+| snapshots | `create`, `list`, `view`, `diff` |
 | duplicates | `scan`, `plan`, `apply` |
 | media | `plan`, `apply` |
 | entities | `candidates`, `merge`, `rename` |
 
-Total : **75 outils** sur **19 groupes**.
+Total : **82 outils** sur **20 groupes**.
+
+> Note : `documents ocr-local`/`ocr-images` (OCR Vision local, lié à la machine
+> hôte) et `entities seed`/`list` sont CLI-seulement, sans wrapper MCP.
 
 ## Architecture
 
@@ -163,7 +167,7 @@ Ce repo contient deux choses :
   `connaissance` (trouvé via `CONNAISSANCE_CLI` env ou auto-détection
   dans `~/.local/bin/`) et parse la sortie JSON.
 
-Les 75 outils MCP ne contiennent aucune logique métier : ils mappent
+Les 82 outils MCP ne contiennent aucune logique métier : ils mappent
 les sous-commandes CLI 1:1 et remontent le JSON tel quel.
 
 ## Prérequis
@@ -171,7 +175,8 @@ les sous-commandes CLI 1:1 et remontent le JSON tel quel.
 - Python ≥ 3.10 (pour le CLI)
 - Node.js ≥ 18 (pour le MCPB)
 - `mcp__claude_api__*` (via [`claude-api-mcp`](https://github.com/guioum/claude-api-mcp)) pour les appels API Claude
-- `mcp__qmd__*` (plugin cowork) pour la recherche sémantique
+- `mcp__qmd__*` (serveur MCP [`qmd`](https://github.com/tobilu/qmd), configuré
+  à part — ce n'est pas un plugin) pour la recherche sémantique
 
 ## Stack
 

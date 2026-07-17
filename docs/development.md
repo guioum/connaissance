@@ -50,24 +50,14 @@ purs et déterministes (portables, sans dépendre d'une vraie base
 uv run --extra test pytest
 ```
 
-- [`test_dedup.py`](../tests/test_dedup.py) — SimHash, distance de Hamming,
-  clustering (pur).
-- [`test_tracking_cache.py`](../tests/test_tracking_cache.py) — cache JIT
-  (hit/miss sur `size`/`mtime`), `read_path` (lecture miroir SSD / clé
-  canonique), SimHash. Via un fixture `tracking_db` (DB tmp, prérequis de
-  racine neutralisé — voir [`conftest.py`](../tests/conftest.py)).
-- [`test_filtres_scoring.py`](../tests/test_filtres_scoring.py) — scoring
-  courriels par signal, avec configs injectées (découplé du template).
-- [`test_register_batch.py`](../tests/test_register_batch.py) — register en
-  lot depuis un manifeste de scan (partition présent/manquant, fail-loud).
-- [`test_category_view.py`](../tests/test_category_view.py) — vue par catégorie
-  en raccourcis (répartition, symlinks vers l'original, clear non destructif).
-- [`test_ledger.py`](../tests/test_ledger.py) — ledger réversible : `safe_move`
-  journalisé, rollback vérifié par hash, skip si contenu modifié.
-- [`test_organize_ledger.py`](../tests/test_organize_ledger.py) — retrofit :
-  les déplacements d'organize passent par le ledger.
-- [`test_triage.py`](../tests/test_triage.py) — triage A/B/C/D : groupes,
-  conteneurs comptés en bloc, dossiers déjà classés ignorés.
+Un fichier `test_<module>.py` par brique testée (dedup, tracking, filtres,
+ledger, classify, secrets, signals, triage, entities, relocate, sujets…) —
+la liste vivante s'obtient par `ls tests/` (~28 fichiers aujourd'hui).
+
+La suite est **isolée du vrai `~/Connaissance/`** par une fixture `autouse`
+dans [`conftest.py`](../tests/conftest.py) (DB, journaux, backups et vues
+repointés sur un répertoire tmp) : aucun test ne touche la vraie base. Un
+workflow GitHub Actions (`.github/workflows/tests.yml`) exécute la suite en CI.
 
 Les modules couplés à l'environnement (`audit`, `resolution`, pipeline) ne sont
 pas encore testés — voir [roadmap.md](roadmap.md).

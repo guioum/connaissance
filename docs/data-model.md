@@ -10,6 +10,7 @@
 │   └── Notes/             {divers, personnes, organismes}
 ├── Résumés/               résumés IA (1 par source résumable)
 │   ├── Documents/         {divers, promus, personnes, organismes}
+│   ├── Courriels/         {personnes, organismes, …}
 │   └── Notes/             {divers, personnes, organismes}
 ├── Synthèse/              fiches & chronologies par entité
 │   ├── personnes/<slug>/  fiche.md, chronologie, …
@@ -17,6 +18,11 @@
 │   ├── sujets/<slug>/     projets / thèmes
 │   ├── divers/<slug>/
 │   └── inconnus/          entités non encore résolues
+├── Vues/                  vues symlink régénérables (Sujets, Catégories,
+│                          Historique, Snapshots) — hors iCloud
+├── Mémoire/               mémoire perso en Markdown (format OKF, voir memoire.md)
+├── .trash/                corbeille ledger (<run_id>/…), réversible,
+│                          vidée par `ledger purge`
 ├── .config/               tracking.db, scoring-courriels.yaml, filtres.yaml
 ├── CLAUDE.md              hot cache des entités actives (régénéré)
 └── dashboard.html         tableau de bord visuel (régénéré)
@@ -131,6 +137,7 @@ les bases existantes.
 | `entities` | `(type, slug)` | **registre canonique d'entités** (personnes/organismes), VIVANT : `name` + `aliases` (JSON) + `doc_count`. Seedé (`entities seed`) depuis les dossiers rangés + consolidations curées + backup, puis **enrichi de batch en batch** par `register` (ajout si nouvelle, sinon rattachement par alias via `resolve_entity`). Source de `known_entities()` injectée dans les prompts (canonique + aliases → le modèle rabat les variantes, anti-fragmentation). |
 | `doc_sujets` | `(rel_path, sujet)` (relatif à `~/Documents`) | **appartenances multi-sujet** avec **précédence par source** : `resume` (sujet de contenu, issu du résumé — **autorité**) supersède `classify` (provisoire, deviné du dossier, filtré du bruit) ; `dedup` (cross-filing) additif. Sujets normalisés `slugify` (accents conservés). Lecture via `sujet_memberships` pour la vue `- Sujets`. |
 | `file_ledger` | `run_id` + `old_path`/`new_path` | journal réversible des déplacements (`safe_move`) : `sha256` + `(size, mtime)` permettent un `revert` vérifié par hash. 1 `run_id` = 1 lot révertible. |
+| `image_ocr_log` | `rel_path` (relatif à `~/Documents`) | journal de la passe `documents ocr-images` (v2.60.0) : une ligne par image traitée (`is_document` 1/0, `chars`, `confidence` Vision) → reprise idempotente d'un balayage long sans re-OCRiser les photos déjà classées. |
 | `llm_usage` | — | tokens et coûts par appel (input/output, cache, `cost_usd`). |
 
 > ⚠️ Deux **univers de fichiers disjoints** partagent le nom de colonne

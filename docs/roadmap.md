@@ -77,27 +77,20 @@ validé 78 % auto) ; (4) grand déplacement `classify apply --apply` par lots +
   reste en `deferred`. Renvoie `estimated_pages`/`estimated_cost_usd`
   ($1/1000 p). Le skill `transcrire` consomme `worklist[].source`, OCRise via
   `mistral-ocr`, ré-enregistre avec `ocr_engine="mistral"`.
-- [ ] 🟡 **Exécuter la repasse Mistral** (≤50 p confirmé) : flux 100 % DB →
-  CLI → MCP, aucun JSON à la main :
-  1. `documents transcribe-plan --max-pages 50 --output-file M.json`
-     (911 docs distincts, 1 960 p, **~$1,96** ; born-digital exclus, doublons
-     de chemin dédupliqués).
-  2. `mistral-ocr ocr_batch_submit(files_from_json=M.json,
-     preserve_paths=~/Documents)` — **en lots** (~7×130 : un seul méga-upload
-     échoue) ; lit via `read_source` (SSD).
-  3. `mistral-ocr ocr_batch_results(output=Transcriptions/Documents)` — miroir.
-  4. `documents register-batch --from-scan M.json --ocr-engine mistral`.
-  Pilote 5 docs validé. (Le coût « tout », ≤∞ p, serait ~$17,6 ; les 44 longs
-  >50 p gardent Vision.)
-- [ ] 🟡 **Born-digital → Mistral aussi** (décision 2026-06, un seul moteur/
+- [x] **Exécuter la repasse Mistral — vague 1 (scannés + images) : TERMINÉE**
+  (2026-06, cf. bloc REPRISE en tête) : 2 780 docs Mistral, $3,83, flux 100 % DB
+  → CLI → MCP (`transcribe-plan --output-file` → `ocr_batch_submit` en lots →
+  `ocr_batch_results` → `register-batch --ocr-engine mistral`).
+- [ ] 🟡 **Vague 2 — Born-digital → Mistral aussi** (décision 2026-06, un seul moteur/
   format pour toute la base plutôt qu'un second flux d'extraction couche-texte) :
   `transcribe-plan --include-born-digital` (CLI + MCP, compte
   `born_digital_included`) les embarque dans le même flux. Mesuré sur la base :
   ≤50 p = **5 296 docs / ~22 756 p / ~$22,76** ; les ~317 longs >50 p restent
   en `deferred` (couche texte + signaux suffisent). Motivation : sans
   transcription `.md`, un born-digital n'a que ses 4 000 premiers caractères en
-  `doc_signals` → pas de résumé LLM complet possible. À lancer **après** la
-  repasse scannés/images en cours.
+  `doc_signals` → pas de résumé LLM complet possible. Manifeste PRÊT
+  (cf. bloc REPRISE) mais **bloquée sur le tri d'exclusion des gros docs**
+  (rapports `.config/longs-a-trier*.html`).
 - [ ] 🟢 **Formats hors PDF/images — décisions de couverture** (triage de
   valeur fait 2026-06, chemins + noms inspectés) :
   - **docx/pptx (397)** : supportés par Mistral et le wrapper (`.pdf/.docx/.pptx`)
@@ -532,12 +525,12 @@ grande réorg tant que ce n'est pas validé.
 
 ## Documentation (fait)
 
-- [x] **Décompte d'outils reconcilié** : README + `CLAUDE.md` à **72 outils /
-  15 groupes** (source de vérité : les `registerTool` de `index.js`). Le palier
-  intermédiaire « 48 / 13 » a été dépassé par les phases triage/secrets/signals
-  (+3), classify (+4), ledger (+4), manifest (+1) et les `backlog_count`.
-  Tableau README corrigé (`pipeline simulate` fantôme retiré, groupes `actions`,
-  `classify`, `ledger`, `manifest` ajoutés).
+- [x] **Décompte d'outils re-réconcilié (2026-07-17)** : README + `CLAUDE.md` +
+  `docs/` à **82 outils / 20 groupes** (source de vérité : les `registerTool` de
+  `index.js`). Les paliers « 48 / 13 » puis « 72 / 15 » ont été dépassés par les
+  groupes `sujet`, `snapshots`, `duplicates`, `media`, `entities` et les verbes
+  ajoutés au fil des phases. 4 verbes CLI restent sans wrapper MCP (volontaire) :
+  `documents ocr-local`/`ocr-images` (OCR Vision local) et `entities seed`/`list`.
 - [x] **Quick start** : version figée `connaissance-2.1.0.mcpb` → générique.
 - [x] **Pointeur `docs/`** ajouté en tête de `CLAUDE.md`.
 

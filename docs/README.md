@@ -50,6 +50,8 @@ pour Claude Desktop / cowork, sans dupliquer la moindre logique métier.
 
 Quand cette doc et le code divergent, **le code gagne**. Les contrats de sortie
 sont les TypedDict de [`core/schemas.py`](../src/connaissance/core/schemas.py) ;
-la liste des outils MCP est [`mcpb/manifest.json`](../mcpb/manifest.json) et
-[`mcpb/server/index.js`](../mcpb/server/index.js). Cette doc est mise à jour à
+la liste des outils MCP est l'ensemble des `registerTool` de
+[`mcpb/server/index.js`](../mcpb/server/index.js) — seul lui fait foi
+([`mcpb/manifest.json`](../mcpb/manifest.json) ne porte que version et
+métadonnées, aucun outil). Cette doc est mise à jour à
 la main — signaler toute dérive dans [roadmap.md](roadmap.md).
