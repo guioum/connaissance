@@ -13,6 +13,7 @@ Le ledger n'enregistre que les opérations **appliquées**. En ``dry_run``,
 ``safe_move`` retourne l'entrée prévue sans toucher ni au disque ni au ledger.
 """
 import json
+import os
 import shutil
 import uuid
 from pathlib import Path
@@ -69,12 +70,31 @@ def safe_move(db, old_path, new_path, reason: str, run_id: str,
         return entry
 
     new.parent.mkdir(parents=True, exist_ok=True)
+    # Garde anti-écrasement : un rename POSIX remplace silencieusement la
+    # cible (perte non journalisée du contenu écrasé). Les appelants gèrent
+    # les collisions AVANT d'appeler safe_move (unique_dest, skip) ; toute
+    # cible restante est une erreur. Exception : le renommage de casse sur
+    # APFS insensible à la casse (old et new désignent le même fichier).
+    if os.path.lexists(new):
+        same = False
+        try:
+            same = old.exists() and new.exists() and old.samefile(new)
+        except OSError:
+            pass
+        if not same:
+            raise FileExistsError(
+                f"safe_move : la destination existe déjà, refus d'écraser : {new}")
     shutil.move(str(old), str(new))
-    db.ledger_record(entry, commit=commit)
     entry["status"] = "applied"
-    # Journal disque append-only : la réversibilité (old→new + sha) survit à une
-    # perte de la DB. Best-effort, ne casse jamais le move déjà appliqué.
-    _append_jsonl(LEDGER_JOURNAL_DIR / f"{run_id}.jsonl", dict(entry))
+    # Journal disque append-only, écrit AVANT l'enregistrement DB : si la DB
+    # échoue (verrou, disque plein), la trace du déplacement survit sur disque
+    # (rejouable par `audit restore-journals`). Le journal reste best-effort :
+    # son échec n'empêche pas l'enregistrement DB.
+    try:
+        _append_jsonl(LEDGER_JOURNAL_DIR / f"{run_id}.jsonl", dict(entry))
+    except OSError:
+        pass
+    db.ledger_record(entry, commit=commit)
     return entry
 
 

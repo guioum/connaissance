@@ -578,7 +578,10 @@ class OrganizePlan(TypedDict):
 class OrganizeApply(TypedDict, total=False):
     moved: int
     skipped: int
-    errors: list[str]
+    errors: int
+    sync_warnings: list[dict]   # échecs post-move (frontmatter source: / DB) non fatals
+    manifest: str
+    dry_run: bool
     ledger_run: str   # run_id du ledger (présent si des fichiers ont bougé) — pour `ledger revert`
 
 

@@ -61,8 +61,64 @@ def construire_nom_fichier(date: str, title: str) -> str:
     return f"{date} {slug}"
 
 
+# Cache par dossier Synthèse : (aliases exacts {alias_lower: "type/slug"},
+# patterns domaine [(domain_lower, "type/slug")]). Le CLI est un process
+# court : relire et re-parser TOUTES les fiches à chaque appel (une fois par
+# document dans organize/classify) était le principal coût des gros lots.
+_ALIAS_CACHE: dict[str, tuple[dict[str, str], list[tuple[str, str]]]] = {}
+
+
+def _load_alias_index(synthese_dir: Path) -> tuple[dict[str, str],
+                                                   list[tuple[str, str]]]:
+    key = str(synthese_dir)
+    cached = _ALIAS_CACHE.get(key)
+    if cached is not None:
+        return cached
+    exact: dict[str, str] = {}
+    domains: list[tuple[str, str]] = []
+    for type_dir in ("personnes", "organismes"):
+        type_path = synthese_dir / type_dir
+        if not type_path.exists():
+            continue
+        for fiche in type_path.rglob("fiche.md"):
+            try:
+                content = fiche.read_text(encoding="utf-8")
+            except OSError:
+                continue
+            if not content.startswith("---"):
+                continue
+            try:
+                fm_text = content.split("---", 2)[1]
+                fm = yaml.safe_load(fm_text)
+            except (IndexError, yaml.YAMLError):
+                continue
+            # frontmatter vide -> None ; `aliases:` vide -> None (pas []).
+            if not isinstance(fm, dict):
+                continue
+            entity = f"{type_dir}/{fiche.parent.name}"
+            for alias in (fm.get("aliases") or []):
+                alias_str = str(alias)
+                if alias_str.startswith("*@"):
+                    domains.append((alias_str[2:].lower(), entity))
+                else:
+                    # Premier arrivé gagne (ordre de parcours stable), comme
+                    # le scan historique qui retournait le premier match.
+                    exact.setdefault(alias_str.lower(), entity)
+    _ALIAS_CACHE[key] = (exact, domains)
+    return exact, domains
+
+
+def invalidate_alias_cache() -> None:
+    """Vider le cache d'aliases (après une écriture de fiche dans le process)."""
+    _ALIAS_CACHE.clear()
+
+
 def chercher_alias(identifiant: str, synthese_dir: Path | None = None) -> str | None:
     """Chercher un identifiant dans les aliases des fiches existantes.
+
+    Les fiches sont lues UNE fois par process puis mises en cache (le CLI est
+    un process court) — appeler ``invalidate_alias_cache()`` si des fiches
+    sont modifiées dans le même process.
 
     Args:
         identifiant: nom, email ou domaine à chercher
@@ -78,32 +134,15 @@ def chercher_alias(identifiant: str, synthese_dir: Path | None = None) -> str | 
         return None
 
     identifiant_lower = identifiant.lower()
+    exact, domains = _load_alias_index(synthese_dir)
 
-    for type_dir in ("personnes", "organismes"):
-        type_path = synthese_dir / type_dir
-        if not type_path.exists():
-            continue
-        for fiche in type_path.rglob("fiche.md"):
-            content = fiche.read_text(encoding="utf-8")
-            if not content.startswith("---"):
-                continue
-            try:
-                fm_text = content.split("---", 2)[1]
-                fm = yaml.safe_load(fm_text)
-            except (IndexError, yaml.YAMLError):
-                continue
-            # frontmatter vide -> None ; `aliases:` vide -> None (pas []).
-            if not isinstance(fm, dict):
-                continue
-            for alias in (fm.get("aliases") or []):
-                alias_str = str(alias)
-                if alias_str.startswith("*@"):
-                    # Pattern domaine : *@orange.fr matche facturation@orange.fr
-                    domain = alias_str[2:].lower()
-                    if identifiant_lower.endswith(f"@{domain}"):
-                        return f"{type_dir}/{fiche.parent.name}"
-                elif alias_str.lower() == identifiant_lower:
-                    return f"{type_dir}/{fiche.parent.name}"
+    hit = exact.get(identifiant_lower)
+    if hit:
+        return hit
+    for domain, entity in domains:
+        # Pattern domaine : *@orange.fr matche facturation@orange.fr
+        if identifiant_lower.endswith(f"@{domain}"):
+            return entity
     return None
 
 

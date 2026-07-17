@@ -21,6 +21,9 @@ from pathlib import Path
 import yaml
 
 from connaissance.core import ledger as _ledger
+from connaissance.core.frontmatter import (parse_frontmatter,
+                                            split_frontmatter,
+                                            write_frontmatter)
 from connaissance.core.paths import CONNAISSANCE_ROOT, DOCUMENTS_DIR
 
 TRANSCR = CONNAISSANCE_ROOT / "Transcriptions" / "Documents"
@@ -41,23 +44,16 @@ def _read_fm(md: Path) -> dict | None:
         t = md.read_text(encoding="utf-8")
     except OSError:
         return None
-    if not t.startswith("---"):
-        return None
-    try:
-        fm = yaml.safe_load(t.split("---", 2)[1])
-        return fm if isinstance(fm, dict) else {}
-    except (IndexError, yaml.YAMLError):
-        return None
+    return parse_frontmatter(t)
 
 
 def _set_fm_source(md: Path, new_source: str) -> None:
     """Mettre à jour le champ ``source`` du frontmatter d'un résumé."""
     t = md.read_text(encoding="utf-8")
-    _, fm_text, body = t.split("---", 2)
+    fm_text, body = split_frontmatter(t)
     fm = yaml.safe_load(fm_text) or {}
     fm["source"] = new_source
-    new_fm = yaml.safe_dump(fm, allow_unicode=True, sort_keys=False).strip()
-    md.write_text(f"---\n{new_fm}\n---{body}", encoding="utf-8")
+    write_frontmatter(md, fm, body)
 
 
 def relocate_document(db, old_rel: str, new_rel: str, run_id: str,

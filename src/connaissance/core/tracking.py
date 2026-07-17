@@ -390,6 +390,7 @@ class TrackingDB:
 
     def __init__(self, db_path=None):
         self._db_path = db_path or DB_PATH
+        self._entity_idx = None   # cache resolve_entity (cf. _entity_index)
         # Prérequis strict : ~/Connaissance/ doit exister, jamais créée par le plugin
         require_connaissance_root()
         # OK de créer .config/ comme sous-dossier direct (parents=False : si
@@ -455,6 +456,14 @@ class TrackingDB:
         self._conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_doc_cls_entity "
             "ON doc_classification(entity_slug)")
+        # Normalisation des message_id hérités (frontmatter YAML replié qui
+        # produisait ` <id>` avec espace initial). Une fois la colonne propre,
+        # `has_message_id` peut comparer en égalité stricte et profiter de
+        # l'index — le `TRIM()` historique dans le WHERE forçait un full scan
+        # de `files` à CHAQUE message d'une extraction. Idempotent.
+        self._conn.execute(
+            "UPDATE files SET message_id = TRIM(message_id) "
+            "WHERE message_id IS NOT NULL AND message_id != TRIM(message_id)")
 
     def _cleanup_fuse_hidden(self):
         """Supprimer les fichiers .fuse_hidden* orphelins du dossier de la DB.
@@ -492,6 +501,15 @@ class TrackingDB:
             self._conn.rollback()
             raise
 
+    def commit(self):
+        """Committer la transaction implicite courante.
+
+        Pour les boucles d'ingestion : passer ``commit=False`` aux méthodes
+        d'écriture puis committer une fois le lot terminé (un fsync par lot
+        au lieu d'un par ligne). ``close()`` sans commit préalable abandonne
+        les écritures non committées — c'est voulu (pas de lot partiel)."""
+        self._conn.commit()
+
     def close(self):
         try:
             self._conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
@@ -509,7 +527,8 @@ class TrackingDB:
     # --- Operations (journal) ---
 
     def log(self, plugin, operation, source_type=None, source_path=None,
-            dest_path=None, status="success", details=None):
+            dest_path=None, status="success", details=None,
+            *, commit: bool = True):
         """Enregistrer une opération dans le journal."""
         details_json = json.dumps(details, ensure_ascii=False) if details else None
         self._conn.execute(
@@ -517,7 +536,8 @@ class TrackingDB:
                dest_path, status, details) VALUES (?, ?, ?, ?, ?, ?, ?)""",
             (plugin, operation, source_type, str(source_path) if source_path else None,
              str(dest_path) if dest_path else None, status, details_json))
-        self._conn.commit()
+        if commit:
+            self._conn.commit()
 
     def is_processed(self, identifier, operation):
         """Vérifier si un identifiant a déjà été traité pour une opération.
@@ -555,7 +575,7 @@ class TrackingDB:
     def register_file(self, path, file_type, source_type=None, source_path=None,
                       entity_type=None, entity_slug=None, created=None,
                       modified=None, message_id=None, hash=None, mtime=None,
-                      size=None):
+                      size=None, *, commit: bool = True):
         """Enregistrer ou mettre à jour un fichier suivi."""
         # Normalize message_id : strip whitespace au cas où le frontmatter YAML
         # aurait été parsé avec un header multi-ligne (RFC 5322 folded header).
@@ -581,7 +601,8 @@ class TrackingDB:
                updated_at=strftime('%Y-%m-%dT%H:%M:%S', 'now', 'localtime')""",
             (str(path), file_type, source_type, str(source_path) if source_path else None,
              entity_type, entity_slug, created, modified, message_id, hash, mtime, size))
-        self._conn.commit()
+        if commit:
+            self._conn.commit()
 
     def get_file(self, path):
         """Récupérer un fichier par son chemin."""
@@ -617,15 +638,15 @@ class TrackingDB:
     def has_message_id(self, message_id):
         """Vérifier si un message-id est déjà enregistré.
 
-        Normalize (strip) avant la comparaison pour être résilient aux anciennes
-        valeurs malformées en DB (frontmatter YAML multi-ligne qui foldait
-        `\\n<id>` en ` <id>` avec espace initial).
+        Comparaison en égalité stricte (indexable) : les valeurs en DB sont
+        normalisées à l'écriture (``register_file`` strip) et les valeurs
+        héritées malformées sont assainies par la migration ``_migrate``.
         """
         if not message_id:
             return False
         mid = message_id.strip()
         row = self._conn.execute(
-            "SELECT 1 FROM files WHERE TRIM(message_id) = ? LIMIT 1",
+            "SELECT 1 FROM files WHERE message_id = ? LIMIT 1",
             (mid,)).fetchone()
         return row is not None
 
@@ -968,7 +989,8 @@ class TrackingDB:
             (_nfc(rel_path), 1 if is_document else 0, chars, confidence))
         self._conn.commit()
 
-    def upsert_classification(self, rel_path, data: dict) -> None:
+    def upsert_classification(self, rel_path, data: dict,
+                              *, commit: bool = True) -> None:
         """Insérer/rafraîchir l'étage classement de la fiche d'un document."""
         import json as _json
         vals = {c: data.get(c) for c in self._CLS_COLS}
@@ -983,7 +1005,8 @@ class TrackingDB:
                 ON CONFLICT(rel_path) DO UPDATE SET {setexpr},
                   updated_at=strftime('%Y-%m-%dT%H:%M:%S', 'now', 'localtime')""",
             (_nfc(rel_path), *[vals[c] for c in self._CLS_COLS]))
-        self._conn.commit()
+        if commit:
+            self._conn.commit()
 
     def get_classification(self, rel_path):
         """Étage classement (dict) de la fiche d'un document, ou None."""
@@ -1076,6 +1099,7 @@ class TrackingDB:
             "UPDATE OR IGNORE entities SET slug=?, "
             "updated_at=strftime('%Y-%m-%dT%H:%M:%S','now','localtime') "
             "WHERE type=? AND slug=?", (new_slug, old_type, old_slug)).rowcount
+        self._invalidate_entity_index()
         if commit:
             self._conn.commit()
         return c
@@ -1186,6 +1210,7 @@ class TrackingDB:
                 "VALUES (?,?,?,?,?,?)",
                 (etype, slug, name, _json.dumps(al, ensure_ascii=False),
                  inc_count, status))
+        self._invalidate_entity_index()
         if commit:
             self._conn.commit()
 
@@ -1206,6 +1231,35 @@ class TrackingDB:
             out.append(d)
         return out[:limit] if limit else out
 
+    def _entity_index(self) -> dict:
+        """Index paresseux ``slug(nom ou alias) → {type, slug, name}``.
+
+        Le scan complet de ``entities`` (avec ``slugify`` de chaque alias) était
+        refait à CHAQUE appel de ``resolve_entity`` — donc une fois par document
+        dans ``classify register`` et ``organize plan``. Construit une fois,
+        invalidé par les mutations du registre (``upsert_entity``,
+        ``merge_entity_rows``…)."""
+        if self._entity_idx is None:
+            from connaissance.core.resolution import slugify
+            import json as _json
+            idx: dict = {}
+            for r in self._conn.execute(
+                    "SELECT type, slug, name, aliases FROM entities").fetchall():
+                hit = {"type": r["type"], "slug": r["slug"], "name": r["name"]}
+                # Le slug canonique gagne sur un alias homonyme d'une autre
+                # entité (ordre : aliases d'abord, slugs ensuite écrasent).
+                for a in _json.loads(r["aliases"] or "[]"):
+                    idx.setdefault(slugify(a), hit)
+            for r in self._conn.execute(
+                    "SELECT type, slug, name FROM entities").fetchall():
+                idx[r["slug"]] = {"type": r["type"], "slug": r["slug"],
+                                  "name": r["name"]}
+            self._entity_idx = idx
+        return self._entity_idx
+
+    def _invalidate_entity_index(self):
+        self._entity_idx = None
+
     def resolve_entity(self, name: str):
         """Rattacher un nom brut à une entité canonique existante par **slug du
         nom OU slug d'un alias** (accents conservés). Retourne {type, slug, name}
@@ -1216,15 +1270,7 @@ class TrackingDB:
         target = slugify(name)
         if not target:
             return None
-        import json as _json
-        for r in self._conn.execute(
-                "SELECT type, slug, name, aliases FROM entities").fetchall():
-            if r["slug"] == target:
-                return {"type": r["type"], "slug": r["slug"], "name": r["name"]}
-            for a in _json.loads(r["aliases"] or "[]"):
-                if slugify(a) == target:
-                    return {"type": r["type"], "slug": r["slug"], "name": r["name"]}
-        return None
+        return self._entity_index().get(target)
 
     def merge_entity_rows(self, etype: str, from_slug: str, into_slug: str,
                           *, commit: bool = True) -> bool:
@@ -1253,6 +1299,7 @@ class TrackingDB:
              etype, _nfc(into_slug)))
         self._conn.execute("DELETE FROM entities WHERE type=? AND slug=?",
                            (etype, _nfc(from_slug)))
+        self._invalidate_entity_index()
         if commit:
             self._conn.commit()
         return True
@@ -1422,14 +1469,6 @@ class TrackingDB:
             updated += 1
 
         return updated, unchanged, total
-
-    # Alias rétrocompatible : ancien nom, nouvelle sémantique stat-only JIT.
-    # Les hashes ne sont plus pré-calculés ici ; ils se matérialisent à la
-    # demande via ``get_or_compute_hash``.
-    def scan_and_register_hashes(self, directory, extensions=None, min_size=1024):
-        updated, _unchanged, total = self.scan_and_register_stats(
-            directory, extensions=extensions, min_size=min_size)
-        return updated, total
 
     def missing_resumes(self, source_type=None, since=None, until=None):
         """Trouver les transcriptions sans résumé correspondant.

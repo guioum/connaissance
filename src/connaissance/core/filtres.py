@@ -21,6 +21,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from connaissance.core import secrets as _secrets
+from connaissance.core.fsio import atomic_write_text
 from connaissance.core.paths import BASE_PATH, CONNAISSANCE_ROOT, require_connaissance_root
 
 PACKAGE_ROOT = Path(__file__).resolve().parents[1]
@@ -92,8 +93,7 @@ def write_quarantine_set(rels) -> Path:
         "# Géré par `connaissance documents secrets --quarantine` ; éditable.\n"
     )
     body = "\n".join(sorted(unicodedata.normalize("NFC", r) for r in rels))
-    SECRETS_QUARANTINE.write_text(header + body + ("\n" if body else ""),
-                                  encoding="utf-8")
+    atomic_write_text(SECRETS_QUARANTINE, header + body + ("\n" if body else ""))
     return SECRETS_QUARANTINE
 
 
@@ -132,8 +132,7 @@ def write_exclude_set(rels) -> Path:
         "# ligne, '#' = commentaire. Géré par `documents exclude` ou éditable.\n"
     )
     body = "\n".join(sorted(unicodedata.normalize("NFC", r) for r in rels))
-    PROCESSING_EXCLUDE.write_text(header + body + ("\n" if body else ""),
-                                  encoding="utf-8")
+    atomic_write_text(PROCESSING_EXCLUDE, header + body + ("\n" if body else ""))
     return PROCESSING_EXCLUDE
 
 
@@ -300,7 +299,6 @@ class Filtres:
         poids = cfg.get("poids", {})
 
         from_addr = (msg_dict.get("from", "") or "").lower()
-        from_display = (msg_dict.get("from_display", "") or "").lower()
         subject = (msg_dict.get("subject", "") or "")
         body = (msg_dict.get("body", "") or "")
         attachments = msg_dict.get("attachments") or []
@@ -358,8 +356,12 @@ class Filtres:
             score += w
             reasons.append(f"domaine personnel [{w:+d}]")
 
-        # Courriel envoyé (dossier Sent)
-        if folder in ("sent", "envoyés", "envoy&aoq-s"):
+        # Courriel envoyé (dossier Sent) — liste configurable `dossiers_envoyes`
+        dossiers_envoyes = {str(d).lower()
+                            for d in cfg.get("dossiers_envoyes",
+                                             ["sent", "envoyés"])}
+        dossiers_envoyes.add("envoy&aoq-s")   # « envoyés » en IMAP UTF-7 modifié
+        if folder in dossiers_envoyes:
             w = poids.get("courriel_envoye", 2)
             score += w
             reasons.append(f"envoyé [{w:+d}]")
@@ -372,17 +374,23 @@ class Filtres:
                 reasons.append(f"sujet actionnable [{w:+d}]")
                 break
 
-        # Pièces jointes documents
+        # Pièces jointes documents — extensions usuelles + types MIME
+        # configurés (`types_pieces_jointes`)
         doc_exts = {".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx"}
-        if any(Path(a.get("filename", "")).suffix.lower() in doc_exts for a in attachments):
+        doc_mimes = {str(t).lower() for t in cfg.get("types_pieces_jointes", [])}
+        if any(Path(a.get("filename", "")).suffix.lower() in doc_exts
+               or (a.get("content_type") or "").lower() in doc_mimes
+               for a in attachments):
             w = poids.get("piece_jointe_document", 2)
             score += w
             reasons.append(f"PJ document [{w:+d}]")
 
-        # Domaine gouvernemental
+        # Domaine gouvernemental — la clé YAML s'appelle `domaine_gouvernemental`
+        # (ancien nom `gouvernemental` accepté en repli)
         for suffix in cfg.get("suffixes_gouvernementaux", []):
             if domain.endswith(suffix.lower().lstrip(".")):
-                w = poids.get("gouvernemental", 2)
+                w = poids.get("domaine_gouvernemental",
+                              poids.get("gouvernemental", 2))
                 score += w
                 reasons.append(f"gouvernemental [{w:+d}]")
                 break

@@ -181,27 +181,3 @@ def choose_model(source_type: str,
             "reason": f"source_type inconnu ({source_type}) — Sonnet par défaut"}
 
 
-def summarize_batch(choices: list[dict]) -> dict:
-    """Agréger les choix d'un lot pour afficher un tradeoff à l'utilisateur.
-
-    Renvoie ``{total, sonnet: {n, share}, haiku: {n, share}, reasons: {...}}``
-    où ``share`` est une proportion dans [0, 1]. Utilisé par la skill resumer
-    pour formuler une phrase du genre :
-
-        « 42 résumés à faire : 8 en Sonnet (documents récents), 34 en
-          Haiku (courriels courts et notes anciennes). »
-    """
-    if not choices:
-        return {"total": 0}
-    n_sonnet = sum(1 for c in choices if c.get("tier") == "sonnet")
-    n_haiku = sum(1 for c in choices if c.get("tier") == "haiku")
-    total = len(choices)
-    reasons: dict[str, int] = {}
-    for c in choices:
-        reasons[c.get("reason", "?")] = reasons.get(c.get("reason", "?"), 0) + 1
-    return {
-        "total": total,
-        "sonnet": {"n": n_sonnet, "share": round(n_sonnet / total, 3)},
-        "haiku": {"n": n_haiku, "share": round(n_haiku / total, 3)},
-        "reasons": reasons,
-    }
