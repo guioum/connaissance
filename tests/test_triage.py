@@ -88,8 +88,10 @@ def test_small_doc_poor_folder_is_not_archived(tmp_path, monkeypatch):
 
 
 def test_marker_dir_claude_detects_project(tmp_path, monkeypatch):
+    # NB : sous « Classer » car « - Protégés » est désormais un SPECIAL_TOP_DIR
+    # exclu du scan (v2.64.0) — l'objet du test est le marqueur .claude.
     root = tmp_path / "Documents"
-    proj = root / "- Protégés" / "monach-budget"
+    proj = root / "Classer" / "monach-budget"
     (proj / ".claude").mkdir(parents=True)
     (proj / "README.md").write_text("x", encoding="utf-8")
     (proj / "exports").mkdir()

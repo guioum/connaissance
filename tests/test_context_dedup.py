@@ -81,8 +81,9 @@ def test_dedup_preserves_cross_filing_in_sujet_view(tmp_path, monkeypatch,
     assert "bdc" in sujets and "impôts-2025" in sujets
 
     # la vue éventaille : le fichier gardé apparaît sous bdc/ ET impôts-2025/
+    # (la vue vit sous VIEWS_ROOT depuis v2.64.0)
     S.view(apply=True, db=tracking_db)
-    sv = docs / S.SUJETS_VIEW_NAME
+    sv = S.VIEWS_ROOT / S.SUJETS_VIEW_NAME
     assert (sv / "bdc" / "avis.pdf").is_symlink()
     assert (sv / "impôts-2025" / "avis.pdf").is_symlink()
     # les deux pointent le même fichier physique (gardé)

@@ -37,7 +37,8 @@ def test_partitions_present_and_missing(tmp_path, tracking_db):
 def test_empty_manifest(tmp_path, tracking_db):
     res = documents.register_batch(_manifest(tmp_path, []), dry_run=True,
                                    db=tracking_db)
-    assert res == {"registered": 0, "missing": [], "total": 0, "dry_run": True}
+    assert res == {"registered": 0, "missing": [], "total": 0, "dry_run": True,
+                   "content_dupes_propagated": 0, "content_dupes_missing": []}
 
 
 def test_unreadable_manifest_raises(tmp_path, tracking_db):

@@ -46,7 +46,8 @@ def test_view_dry_run_lists_without_writing(tmp_path, monkeypatch, tracking_db):
     res = S.view(apply=False, db=tracking_db)
     assert res["sujets"] == {"impots": 2} and res["total"] == 2
     assert res["links_created"] == 0
-    assert not (docs / S.SUJETS_VIEW_NAME).exists()      # rien écrit en dry-run
+    # rien écrit en dry-run (la vue vit sous VIEWS_ROOT depuis v2.64.0)
+    assert not (S.VIEWS_ROOT / S.SUJETS_VIEW_NAME).exists()
 
 
 def test_view_apply_creates_symlinks(tmp_path, monkeypatch, tracking_db):
@@ -55,7 +56,7 @@ def test_view_apply_creates_symlinks(tmp_path, monkeypatch, tracking_db):
     _add(tracking_db, "a.pdf", "impots 2024")
     res = S.view(apply=True, db=tracking_db)
     assert res["applied"] and res["links_created"] == 1
-    view = docs / S.SUJETS_VIEW_NAME / "impots 2024"
+    view = S.VIEWS_ROOT / S.SUJETS_VIEW_NAME / "impots 2024"
     links = list(view.iterdir())
     assert len(links) == 1 and links[0].is_symlink()
     assert links[0].resolve() == (docs / "a.pdf").resolve()
@@ -73,10 +74,10 @@ def test_view_clear_removes_view(tmp_path, monkeypatch, tracking_db):
     (docs / "a.pdf").write_bytes(b"a")
     _add(tracking_db, "a.pdf", "impots")
     S.view(apply=True, db=tracking_db)
-    assert (docs / S.SUJETS_VIEW_NAME).exists()
+    assert (S.VIEWS_ROOT / S.SUJETS_VIEW_NAME).exists()
     res = S.view(clear=True, db=tracking_db)
     assert res["cleared"] and res["existed"]
-    assert not (docs / S.SUJETS_VIEW_NAME).exists()
+    assert not (S.VIEWS_ROOT / S.SUJETS_VIEW_NAME).exists()
 
 
 def test_list_sujets_counts(tmp_path, monkeypatch, tracking_db):

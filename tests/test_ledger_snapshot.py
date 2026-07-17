@@ -26,7 +26,8 @@ def test_snapshot_chains_to_current_location(tmp_path, monkeypatch, tracking_db)
 
     res = CL.snapshot(apply=True, db=tracking_db)
     assert res["linked"] == 1          # SEULE l'origine (a), pas l'intermédiaire (b)
-    view = docs / CL.SNAPSHOT_VIEW
+    # la vue vit sous VIEWS_ROOT depuis v2.64.0 (hors ~/Documents)
+    view = CL.VIEWS_ROOT / CL.SNAPSHOT_VIEW
     links = [l for l in view.rglob("doc.pdf") if l.is_symlink()]
     assert len(links) == 1
     assert "vieux" in links[0].parts                 # à l'emplacement d'ORIGINE
@@ -39,12 +40,13 @@ def test_snapshot_dry_run_and_clear(tmp_path, monkeypatch, tracking_db):
     (docs / "a" / "x.pdf").write_bytes(b"x")
     safe_move(tracking_db, docs / "a" / "x.pdf", docs / "b" / "x.pdf",
               "m", new_run_id("organize"))
+    view = CL.VIEWS_ROOT / CL.SNAPSHOT_VIEW
     dry = CL.snapshot(apply=False, db=tracking_db)
-    assert dry["would_link"] >= 1 and not (docs / CL.SNAPSHOT_VIEW).exists()
+    assert dry["would_link"] >= 1 and not view.exists()
     CL.snapshot(apply=True, db=tracking_db)
-    assert (docs / CL.SNAPSHOT_VIEW).exists()
+    assert view.exists()
     res = CL.snapshot(clear=True, db=tracking_db)
-    assert res["cleared"] and not (docs / CL.SNAPSHOT_VIEW).exists()
+    assert res["cleared"] and not view.exists()
 
 
 def test_snapshot_gone_file_marker(tmp_path, monkeypatch, tracking_db):
@@ -56,5 +58,5 @@ def test_snapshot_gone_file_marker(tmp_path, monkeypatch, tracking_db):
     (docs / "b" / "x.pdf").unlink()           # simuler fichier disparu (purgé)
     res = CL.snapshot(apply=True, db=tracking_db)
     assert res["gone"] >= 1
-    markers = list((docs / CL.SNAPSHOT_VIEW).rglob("*.disparu"))
+    markers = list((CL.VIEWS_ROOT / CL.SNAPSHOT_VIEW).rglob("*.disparu"))
     assert markers

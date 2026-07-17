@@ -34,7 +34,9 @@ def test_apply_creates_symlink_to_real_source(tmp_path, monkeypatch):
     docs_root, src = _setup(tmp_path, monkeypatch)
     res = doc.category_view(apply=True)
     assert res["links_created"] == 1
-    link = docs_root / "- Par catégorie" / "banque" / "[banque-nationale] 2025-01-10 releve.pdf"
+    # la vue vit sous VIEWS_ROOT depuis v2.64.0 (hors ~/Documents)
+    link = (doc.VIEWS_ROOT / doc.CATEGORY_VIEW_NAME / "banque"
+            / "[banque-nationale] 2025-01-10 releve.pdf")
     assert link.is_symlink()
     assert link.resolve() == src.resolve()   # le raccourci pointe le vrai fichier
 
@@ -44,7 +46,7 @@ def test_clear_removes_view_only(tmp_path, monkeypatch):
     doc.category_view(apply=True)
     res = doc.category_view(clear=True)
     assert res["cleared"] is True and res["existed"] is True
-    assert not (docs_root / "- Par catégorie").exists()
+    assert not (doc.VIEWS_ROOT / doc.CATEGORY_VIEW_NAME).exists()
     assert src.exists()   # l'original est intact
 
 
