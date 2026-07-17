@@ -27,7 +27,6 @@ poids:
   courriel_html_only: -2      # NOUVEAU : pas de part text/plain (newsletters HTML pures)
   noreply: -1                 # adresse noreply/no-reply
   sous_domaine_marketing: -1
-  expediteur_frequent: -1     # > seuil_frequence messages
   corps_quasi_vide: -1        # < seuil_corps_min caractères
   noreply_sans_actionnable: -1  # noreply sans contenu actionnable dans le corps
   notification_banale: -1     # NOUVEAU : OTP, alerte connexion, vérification email
@@ -45,13 +44,13 @@ poids:
   expediteur_personnel: 1
   reponse_conversation: 1       # Re:/Fwd:/TR: dans le sujet
   corps_actionnable_simple: 1    # 1 signal dans le corps
-  corps_substantiel: 0           # DÉSACTIVÉ : se déclenchait sur 94% des messages
+  # (retirés 2026-07-17 : `expediteur_frequent`/`frequence_expediteur` — signal
+  # jamais implémenté dans le code ; `corps_substantiel` — désactivé, il se
+  # déclenchait sur 94 % des messages)
 
 # --- Seuils numériques ---
 seuils_numeriques:
-  frequence_expediteur: 100     # au-delà = signal négatif (relevé de 20 à 100)
   corps_min: 50                 # en dessous = corps quasi-vide
-  corps_substantiel: 200        # au-dessus = signal positif (désactivé, poids=0)
   corps_preview: 1000           # nb de caractères analysés pour le scoring du corps
 
 # --- Dossiers ignorés ---
@@ -201,9 +200,8 @@ patterns_generiques:
   - "^(info|hello|contact|support|admin|sales|news|notification|alert|update|digest|pipe\\d)@"
   - "^(team|hey|updates?|alerts?|system|automated?|do-not-reply|bounce|mailer|postmaster|webmaster|devops|no_reply)@"
 
-# Sous-domaines marketing (exclues du signal expediteur_personnel, et ajoutent un malus)
-patterns_sous_domaine_marketing:
-  - "@(?:email|mail|message|send|e|campaigns?|comms?|notifications?)\\."
+# (retiré 2026-07-17 : `patterns_sous_domaine_marketing` — jamais chargé par le
+# code ; le malus `sous_domaine_marketing` est appliqué via `patterns_marketing`)
 
 # Pattern qui identifie un expéditeur personnel (prenom.nom@ ou prenom-nom@)
 pattern_expediteur_personnel: "^[a-z]+[.\\-][a-z]+@"

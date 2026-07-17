@@ -1097,6 +1097,15 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         result = handler(args)
+    except SystemExit as exc:
+        # Les gardes des handlers (`raise SystemExit("message")`) doivent
+        # produire la même enveloppe JSON que toute autre erreur — SystemExit
+        # hérite de BaseException et échapperait au `except Exception`.
+        if exc.code is None or isinstance(exc.code, int):
+            raise   # sortie volontaire avec code numérique (ex. argparse)
+        err = {"error": {"type": "UsageError", "message": str(exc.code)}}
+        print(json.dumps(err, indent=2, ensure_ascii=False), file=sys.stderr)
+        return 2
     except Exception as exc:
         err = {"error": {"type": type(exc).__name__, "message": str(exc)}}
         print(json.dumps(err, indent=2, ensure_ascii=False), file=sys.stderr)

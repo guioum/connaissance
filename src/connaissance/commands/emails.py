@@ -653,30 +653,6 @@ def extract_messages_from_mbox(mbox_path: Path,
     return messages
 
 
-# --- Détection incrémentale ---
-
-def scan_existing_message_ids(output_dir: Path) -> set[str]:
-    """Scanner les message-id déjà extraits dans le répertoire de sortie."""
-    existing = set()
-    if not output_dir.exists():
-        return existing
-    for md_file in output_dir.rglob("*.md"):
-        try:
-            content = md_file.read_text(encoding="utf-8")
-            if not content.startswith("---"):
-                continue
-            end = content.find("---", 3)
-            if end < 0:
-                continue
-            fm = content[3:end]
-            match = re.search(r'^message-id:\s*"?(<[^>]+>)"?', fm, re.MULTILINE)
-            if match:
-                existing.add(match.group(1))
-        except Exception:
-            continue
-    return existing
-
-
 # --- Formatage de sortie ---
 
 def format_email(msg: dict) -> str:
@@ -1170,6 +1146,7 @@ def extract(account=None, folder=None, since=None, until=None,
     """Extraire les courriels en markdown (schema EmailsExtract)."""
     since, until = _parse_dates(since, until)
     mbox_files = _collect_mbox_files(account, folder)
+    owns_db = db is None
     if db is None:
         db = TrackingDB()
     filtres = Filtres()
@@ -1179,53 +1156,63 @@ def extract(account=None, folder=None, since=None, until=None,
     filtered: dict[str, int] = {}
     written_paths: list[str] = []
 
-    for mbox_path in mbox_files:
-        if "_extraction" in str(mbox_path):
-            continue
-        if filtres.is_courriel_folder_ignored(mbox_path.stem):
-            continue
-        messages = extract_messages_from_mbox(
-            mbox_path, filtres=filtres, include_images=not no_images,
-            since=since, until=until,
-        )
-        output_dir = mbox_to_output_dir(mbox_path)
-        attachments_dir = output_dir / "Attachments"
-        for msg in messages:
-            mid = msg["message_id"]
-            if mid and db.has_message_id(mid):
-                dedup_skipped += 1
+    try:
+        for mbox_path in mbox_files:
+            if "_extraction" in str(mbox_path):
                 continue
-            ok, reason = filtres.filter_courriel(msg)
-            if not ok:
-                reason_key = (reason or "filtre").split(":", 1)[0]
-                filtered[reason_key] = filtered.get(reason_key, 0) + 1
+            if filtres.is_courriel_folder_ignored(mbox_path.stem):
                 continue
-            if dry_run:
-                extracted += 1
-                continue
+            messages = extract_messages_from_mbox(
+                mbox_path, filtres=filtres, include_images=not no_images,
+                since=since, until=until,
+            )
+            output_dir = mbox_to_output_dir(mbox_path)
+            attachments_dir = output_dir / "Attachments"
+            for msg in messages:
+                mid = msg["message_id"]
+                if mid and db.has_message_id(mid):
+                    dedup_skipped += 1
+                    continue
+                ok, reason = filtres.filter_courriel(msg)
+                if not ok:
+                    reason_key = (reason or "filtre").split(":", 1)[0]
+                    filtered[reason_key] = filtered.get(reason_key, 0) + 1
+                    continue
+                if dry_run:
+                    extracted += 1
+                    continue
 
-            save_attachments(msg["attachments"], attachments_dir)
-            content = format_email(msg)
-            output_dir.mkdir(parents=True, exist_ok=True)
-            output_path = output_dir / f"{msg['msg_hash']}.md"
-            if output_path.exists():
-                dedup_skipped += 1
-                continue
-            output_path.write_text(content, encoding="utf-8")
-            extracted += 1
-            rel_path = str(output_path.relative_to(BASE_PATH / "Connaissance"))
-            written_paths.append(rel_path)
-            date_str = msg["date"].strftime("%Y-%m-%dT%H:%M:%S") if msg["date"] else None
-            db.register_file(rel_path, "transcription",
-                             source_type="courriel",
-                             source_path=str(mbox_path),
-                             message_id=mid,
-                             created=date_str, modified=date_str)
-            db.log("transcription", "extract_email",
-                   source_type="courriel",
-                   source_path=str(mbox_path),
-                   dest_path=rel_path,
-                   details={"message_id": mid, "folder": msg["folder"]})
+                save_attachments(msg["attachments"], attachments_dir)
+                content = format_email(msg)
+                output_dir.mkdir(parents=True, exist_ok=True)
+                output_path = output_dir / f"{msg['msg_hash']}.md"
+                if output_path.exists():
+                    dedup_skipped += 1
+                    continue
+                output_path.write_text(content, encoding="utf-8")
+                extracted += 1
+                rel_path = str(output_path.relative_to(BASE_PATH / "Connaissance"))
+                written_paths.append(rel_path)
+                date_str = msg["date"].strftime("%Y-%m-%dT%H:%M:%S") if msg["date"] else None
+                db.register_file(rel_path, "transcription",
+                                 source_type="courriel",
+                                 source_path=str(mbox_path),
+                                 message_id=mid,
+                                 created=date_str, modified=date_str,
+                                 commit=False)
+                db.log("transcription", "extract_email",
+                       source_type="courriel",
+                       source_path=str(mbox_path),
+                       dest_path=rel_path,
+                       details={"message_id": mid, "folder": msg["folder"]},
+                       commit=False)
+
+            # Commit par mbox : un fsync par dossier traité plutôt que
+            # deux par message (register_file/log passent commit=False).
+            db.commit()
+    finally:
+        if owns_db:
+            db.close()
 
     return {
         "extracted": extracted,

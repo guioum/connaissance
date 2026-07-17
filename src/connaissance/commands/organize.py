@@ -16,6 +16,7 @@ from pathlib import Path
 
 import yaml
 
+from connaissance.core.fsio import atomic_write_text
 from connaissance.core.paths import BASE_PATH
 from connaissance.core import ledger as _ledger
 from connaissance.core.manifest_io import load_entries
@@ -179,7 +180,8 @@ def _apply_manifest(manifest_path, dry_run=False) -> dict:
     - Enveloppe produite par `--generer-manifeste` :
       `{total, auto, alias_match, a_confirmer, entrees: [...]}`
     """
-    empty_result = {"moved": 0, "skipped": 0, "errors": 0}
+    empty_result = {"moved": 0, "skipped": 0, "errors": 0,
+                    "sync_warnings": []}
     envelope, entries = load_entries(manifest_path, list_keys=("entrees",))
     if envelope is not None and "entrees" not in envelope:
         raise ValueError(
@@ -222,6 +224,7 @@ def _apply_manifest_impl(entries: list, dry_run: bool, db: TrackingDB) -> dict:
     moved = 0
     skipped = 0
     errors = 0
+    sync_warnings: list[dict] = []   # échecs post-move (frontmatter/DB) — visibles
     # Un run ledger par lot d'apply : tous les déplacements ci-dessous sont
     # journalisés sous ce run_id et révertibles ensemble (`ledger revert`).
     run_id = _ledger.new_run_id("organize")
@@ -317,18 +320,25 @@ def _apply_manifest_impl(entries: list, dry_run: bool, db: TrackingDB) -> dict:
 
             moved += 1
 
-            # Mettre à jour le champ source: dans le résumé (pointe vers la transcription déplacée)
+            # Mettre à jour le champ source: dans le résumé (pointe vers la
+            # transcription déplacée). Un échec ici casse le lien
+            # résumé→transcription : il doit être VISIBLE, pas avalé.
             try:
                 new_trans_rel = str(dest_trans.relative_to(CONNAISSANCE))
                 content = dest_resume.read_text(encoding="utf-8")
                 if "source:" in content:
                     content = re.sub(r'^source: .*$', f'source: {new_trans_rel}',
                                      content, count=1, flags=re.MULTILINE)
-                    dest_resume.write_text(content, encoding="utf-8")
-            except Exception:
-                pass
+                    atomic_write_text(dest_resume, content)
+            except Exception as e:
+                print(f"    ⚠ frontmatter source: non mis à jour : {e}",
+                      file=sys.stderr)
+                sync_warnings.append({"step": "frontmatter_source",
+                                      "resume": str(dest_resume), "error": str(e)})
 
-            # Tracking — mettre à jour résumé ET transcription dans la DB
+            # Tracking — mettre à jour résumé ET transcription dans la DB.
+            # Un échec silencieux laisserait la table `files` pointer sur des
+            # chemins morts (la dérive que core/relocate.py répare a posteriori).
             try:
                 old_resume_rel = str(resume_path.relative_to(CONNAISSANCE))
                 new_resume_rel = str(dest_resume.relative_to(CONNAISSANCE))
@@ -346,8 +356,10 @@ def _apply_manifest_impl(entries: list, dry_run: bool, db: TrackingDB) -> dict:
                                 "entity_slug": entity_slug,
                                 "new_name": new_name,
                                 "confidence": confidence})
-            except Exception:
-                pass
+            except Exception as e:
+                print(f"    ⚠ tracking DB non mis à jour : {e}", file=sys.stderr)
+                sync_warnings.append({"step": "tracking_db",
+                                      "resume": str(dest_resume), "error": str(e)})
 
         except Exception as e:
             print(f"    ✗ Erreur : {e}", file=sys.stderr)
@@ -365,7 +377,8 @@ def _apply_manifest_impl(entries: list, dry_run: bool, db: TrackingDB) -> dict:
     if errors:
         print(f"  ✗ {errors} erreurs", file=sys.stderr)
 
-    result = {"moved": moved, "skipped": skipped, "errors": errors}
+    result = {"moved": moved, "skipped": skipped, "errors": errors,
+              "sync_warnings": sync_warnings}
     # run_id du ledger : permet `ledger revert <run_id>` si un classement déçoit.
     if not dry_run and moved:
         result["ledger_run"] = run_id
@@ -387,96 +400,98 @@ def generer_manifeste():
     entity_dirs = {"personnes", "organismes", "divers", "inconnus"}
     manifeste = []
     _db = TrackingDB()   # lecture seule : aligner les entités sur le registre
+    try:
 
-    for source_label in ("Documents", "Courriels", "Notes"):
-        source_dir = RESUMES / source_label
-        if not source_dir.exists():
-            continue
-        for md_file in source_dir.rglob("*.md"):
-            # Vérifier si déjà dans un dossier entité
-            rel = md_file.relative_to(source_dir)
-            parts = rel.parts
-            if len(parts) >= 2 and parts[0] in entity_dirs:
-                continue  # Déjà organisé
-
-            # Lire le frontmatter
-            try:
-                content = md_file.read_text(encoding="utf-8")
-            except (OSError, UnicodeDecodeError):
+        for source_label in ("Documents", "Courriels", "Notes"):
+            source_dir = RESUMES / source_label
+            if not source_dir.exists():
                 continue
-            if not content.startswith("---"):
-                continue
-            try:
-                fm_text = content.split("---", 2)[1]
-                fm = yaml.safe_load(fm_text)
-            except (IndexError, yaml.YAMLError, ValueError):
-                continue
-            if not fm or not isinstance(fm, dict):
-                continue
+            for md_file in source_dir.rglob("*.md"):
+                # Vérifier si déjà dans un dossier entité
+                rel = md_file.relative_to(source_dir)
+                parts = rel.parts
+                if len(parts) >= 2 and parts[0] in entity_dirs:
+                    continue  # Déjà organisé
 
-            entity_type = fm.get("entity_type", "inconnus")
-            entity_name = fm.get("entity_name", "")
-            # Aligner sur le REGISTRE `entities` : si le nom (ou un alias) matche
-            # une entité connue, réutiliser SON canonique (type/slug) → placement
-            # cohérent avec le pré-classement, anti-fragmentation.
-            _reg = _db.resolve_entity(entity_name) if entity_name else None
-            if _reg:
-                entity_type, entity_slug = _reg["type"], _reg["slug"]
-            else:
-                # Sinon le slug ne vient JAMAIS du LLM : recalcul depuis le nom
-                # via resolution.py (accents conservés). Repli sur le frontmatter.
-                entity_slug = construire_slug(entity_name or fm.get("entity_slug", ""))
-            confidence = fm.get("confidence", "low")
-            date_val = str(fm.get("date", "")) if fm.get("date") else ""
-            title = fm.get("title", "")
+                # Lire le frontmatter
+                try:
+                    content = md_file.read_text(encoding="utf-8")
+                except (OSError, UnicodeDecodeError):
+                    continue
+                if not content.startswith("---"):
+                    continue
+                try:
+                    fm_text = content.split("---", 2)[1]
+                    fm = yaml.safe_load(fm_text)
+                except (IndexError, yaml.YAMLError, ValueError):
+                    continue
+                if not fm or not isinstance(fm, dict):
+                    continue
 
-            # Construire le new_name
-            if date_val and title:
-                new_name = construire_nom_fichier(date_val, title)
-            else:
-                new_name = md_file.stem
-
-            # Déterminer le statut. "auto" exige que TOUS les champs de
-            # routage soient présents : sinon `apply` planterait au
-            # `RESUMES / entity_type / entity_slug / ...` (Path ne concatène
-            # pas None/"").
-            if (confidence == "high"
-                    and entity_type
-                    and entity_type != "inconnus"
-                    and entity_slug):
-                status = "auto"
-            else:
-                # Chercher un alias
-                from_field = fm.get("from", "")
-                identifiants = [entity_name, from_field] if from_field else [entity_name]
-                alias_found = None
-                for ident in identifiants:
-                    if ident:
-                        alias_found = chercher_alias(ident)
-                        if alias_found:
-                            break
-                if alias_found:
-                    # L'alias résout l'entité
-                    parts = alias_found.split("/", 1)
-                    if len(parts) == 2:
-                        entity_type = parts[0]
-                        entity_slug = parts[1]
-                    status = "alias_match"
+                entity_type = fm.get("entity_type", "inconnus")
+                entity_name = fm.get("entity_name", "")
+                # Aligner sur le REGISTRE `entities` : si le nom (ou un alias) matche
+                # une entité connue, réutiliser SON canonique (type/slug) → placement
+                # cohérent avec le pré-classement, anti-fragmentation.
+                _reg = _db.resolve_entity(entity_name) if entity_name else None
+                if _reg:
+                    entity_type, entity_slug = _reg["type"], _reg["slug"]
                 else:
-                    status = "a_confirmer"
+                    # Sinon le slug ne vient JAMAIS du LLM : recalcul depuis le nom
+                    # via resolution.py (accents conservés). Repli sur le frontmatter.
+                    entity_slug = construire_slug(entity_name or fm.get("entity_slug", ""))
+                confidence = fm.get("confidence", "low")
+                date_val = str(fm.get("date", "")) if fm.get("date") else ""
+                title = fm.get("title", "")
 
-            manifeste.append({
-                "source": source_label.lower(),
-                "resume_path": str(md_file),
-                "entity_type": entity_type,
-                "entity_slug": entity_slug,
-                "entity_name": entity_name,
-                "new_name": new_name,
-                "confidence": confidence,
-                "status": status,
-            })
+                # Construire le new_name
+                if date_val and title:
+                    new_name = construire_nom_fichier(date_val, title)
+                else:
+                    new_name = md_file.stem
 
-    _db.close()
+                # Déterminer le statut. "auto" exige que TOUS les champs de
+                # routage soient présents : sinon `apply` planterait au
+                # `RESUMES / entity_type / entity_slug / ...` (Path ne concatène
+                # pas None/"").
+                if (confidence == "high"
+                        and entity_type
+                        and entity_type != "inconnus"
+                        and entity_slug):
+                    status = "auto"
+                else:
+                    # Chercher un alias
+                    from_field = fm.get("from", "")
+                    identifiants = [entity_name, from_field] if from_field else [entity_name]
+                    alias_found = None
+                    for ident in identifiants:
+                        if ident:
+                            alias_found = chercher_alias(ident)
+                            if alias_found:
+                                break
+                    if alias_found:
+                        # L'alias résout l'entité
+                        parts = alias_found.split("/", 1)
+                        if len(parts) == 2:
+                            entity_type = parts[0]
+                            entity_slug = parts[1]
+                        status = "alias_match"
+                    else:
+                        status = "a_confirmer"
+
+                manifeste.append({
+                    "source": source_label.lower(),
+                    "resume_path": str(md_file),
+                    "entity_type": entity_type,
+                    "entity_slug": entity_slug,
+                    "entity_name": entity_name,
+                    "new_name": new_name,
+                    "confidence": confidence,
+                    "status": status,
+                })
+
+    finally:
+        _db.close()
     return manifeste
 
 
@@ -558,13 +573,17 @@ def enrich(manifest_path: str, qmd_results: list[dict]) -> dict:
 def apply(manifest: str, dry_run: bool = True) -> dict:
     """Appliquer un manifeste (schema OrganizeApply). Dry-run par défaut."""
     result = _apply_manifest(manifest, dry_run=dry_run)
-    return {
+    out = {
         "moved": result.get("moved", 0),
         "skipped": result.get("skipped", 0),
         "errors": result.get("errors", 0),
+        "sync_warnings": result.get("sync_warnings", []),
         "manifest": str(manifest),
         "dry_run": dry_run,
     }
+    if "ledger_run" in result:
+        out["ledger_run"] = result["ledger_run"]
+    return out
 
 
 def resolve(name: str | None = None, date: str | None = None,

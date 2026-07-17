@@ -12,6 +12,7 @@ import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 
+from connaissance.core.frontmatter import split_frontmatter
 from connaissance.core.paths import BASE_PATH, require_paths
 from connaissance.core.tracking import TrackingDB
 from connaissance.core.filtres import Filtres
@@ -23,13 +24,10 @@ TRANSCRIPTIONS_DIR = BASE_PATH / "Connaissance" / "Transcriptions" / "Notes"
 def _parse_frontmatter_dates(content: str) -> dict[str, str]:
     """Extraire created/modified du frontmatter YAML."""
     dates = {}
-    if not content.startswith("---"):
+    parts = split_frontmatter(content)
+    if parts is None:
         return dates
-    # Chercher `\n---` pour éviter de matcher un `---` dans une valeur YAML.
-    end = content.find("\n---", 4)
-    if end < 0:
-        return dates
-    fm_text = content[4:end]
+    fm_text = parts[0]
     for field in ("created", "modified"):
         match = re.search(rf'^{field}:\s*(\d{{4}}-\d{{2}}-\d{{2}})', fm_text, re.MULTILINE)
         if match:

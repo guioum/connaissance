@@ -18,13 +18,14 @@ import hashlib
 import json
 import re
 import unicodedata
-from datetime import datetime
 from pathlib import Path
 
 import yaml
 
 from connaissance.core import filtres as _filtres
-from connaissance.core.paths import BASE_PATH, CONNAISSANCE_ROOT
+from connaissance.core.frontmatter import split_frontmatter
+from connaissance.core.fsio import atomic_write_text
+from connaissance.core.paths import CONNAISSANCE_ROOT
 from connaissance.core.resolution import slugify
 from connaissance.core.tracking import TrackingDB
 
@@ -116,12 +117,10 @@ def _fallback_parse_frontmatter(fm_text: str) -> dict:
 def _read_transcription(path: Path) -> tuple[dict, str]:
     """Lire une transcription et séparer frontmatter / body."""
     content = path.read_text(encoding="utf-8")
-    if not content.startswith("---"):
+    parts = split_frontmatter(content)
+    if parts is None:
         return {}, content
-    end = content.find("\n---", 4)
-    if end < 0:
-        return {}, content
-    fm_text = content[4:end]
+    fm_text, body = parts
     try:
         fm = yaml.safe_load(fm_text) or {}
         if not isinstance(fm, dict):
@@ -129,8 +128,7 @@ def _read_transcription(path: Path) -> tuple[dict, str]:
     except yaml.YAMLError:
         # Ancien format (courriels extraits avant _clean) : fallback ligne-à-ligne.
         fm = _fallback_parse_frontmatter(fm_text)
-    body = content[end + 4:].lstrip("\n")
-    return fm, body
+    return fm, body.lstrip("\n")
 
 
 def _custom_id(rel_path: str) -> str:
@@ -445,9 +443,18 @@ def register(custom_id: str, content: str,
     transcription d'origine — on dérive le chemin de destination du résumé
     depuis ce champ (miroir dans `Résumés/{Source}/`).
     """
+    owns_db = db is None
     if db is None:
         db = TrackingDB()
+    try:
+        return _register_impl(custom_id, content, source_path, db)
+    finally:
+        if owns_db:
+            db.close()
 
+
+def _register_impl(custom_id: str, content: str,
+                   source_path: str | None, db: TrackingDB) -> dict:
     # Défense : certains modèles encapsulent leur réponse dans une fence
     # ```markdown ... ```. On déballe avant parsing du frontmatter.
     content = _strip_code_fence(content)
@@ -455,14 +462,13 @@ def register(custom_id: str, content: str,
     # Parser le frontmatter pour extraire `source` et `type`
     fm: dict = {}
     body = content
-    if content.startswith("---"):
-        end = content.find("\n---", 4)
-        if end > 0:
-            try:
-                fm = yaml.safe_load(content[4:end]) or {}
-            except yaml.YAMLError:
-                fm = {}
-            body = content[end + 4:].lstrip("\n")
+    parts = split_frontmatter(content)
+    if parts is not None:
+        try:
+            fm = yaml.safe_load(parts[0]) or {}
+        except yaml.YAMLError:
+            fm = {}
+        body = parts[1].lstrip("\n")
 
     source_rel = fm.get("source") or source_path
     if not source_rel:
@@ -536,7 +542,7 @@ def register(custom_id: str, content: str,
 
     resume_abs = CONNAISSANCE_ROOT / resume_rel
     resume_abs.parent.mkdir(parents=True, exist_ok=True)
-    resume_abs.write_text(content, encoding="utf-8")
+    atomic_write_text(resume_abs, content)
 
     # Back-propagation : écrire le `date` (sémantique, déduit par le LLM)
     # dans le frontmatter de la transcription pour que la chaîne
@@ -575,14 +581,14 @@ def register(custom_id: str, content: str,
     resume_date = resume_fm_after_merge.get("date")
     if resume_date is not None and trans_abs.exists():
         if hasattr(resume_date, "strftime"):
-            resume_date_str = resume_date.strftime("%Y-%m-%d") if not hasattr(resume_date, "hour") else resume_date.strftime("%Y-%m-%d")
+            resume_date_str = resume_date.strftime("%Y-%m-%d")
         else:
             resume_date_str = str(resume_date)[:10]  # tronquer à YYYY-MM-DD
         existing_trans_date = trans_fm.get("date")
         existing_str = ""
         if existing_trans_date is not None:
             if hasattr(existing_trans_date, "strftime"):
-                existing_str = existing_trans_date.strftime("%Y-%m-%d") if not hasattr(existing_trans_date, "hour") else existing_trans_date.strftime("%Y-%m-%d")
+                existing_str = existing_trans_date.strftime("%Y-%m-%d")
             else:
                 existing_str = str(existing_trans_date)[:10]
         if resume_date_str and resume_date_str != existing_str:
@@ -591,7 +597,7 @@ def register(custom_id: str, content: str,
                 trans_content = trans_abs.read_text(encoding="utf-8")
                 new_trans = _merge_frontmatter(trans_content, {"date": resume_date_str})
                 if new_trans != trans_content:
-                    trans_abs.write_text(new_trans, encoding="utf-8")
+                    atomic_write_text(trans_abs, new_trans)
             except OSError:
                 pass
 
@@ -665,12 +671,25 @@ def register_from_results_file(results_file: str,
     Le Claude appelant ne voit jamais les contenus : ils ne transitent
     pas par son contexte.
     """
+    owns_db = db is None
     if db is None:
         db = TrackingDB()
+    try:
+        return _register_from_results_impl(results_file, requests_file,
+                                           cleanup, batch, db)
+    finally:
+        if owns_db:
+            db.close()
 
-    # Mapping custom_id → source_path depuis le fichier de prep, quand
-    # fourni. Ça sert de filet de sécurité si le LLM a oublié `source:`.
+
+def _register_from_results_impl(results_file: str, requests_file: str | None,
+                                cleanup: bool, batch: bool,
+                                db: TrackingDB) -> dict:
+    # Mappings depuis le fichier de prep, quand fourni (une seule lecture) :
+    # - custom_id → source_path : filet de sécurité si le LLM a oublié `source:`
+    # - custom_id → métadonnées (modèle, source_type) pour le journal de coûts
     source_path_by_id: dict[str, str] = {}
+    meta_by_id: dict[str, dict] = {}
     if requests_file:
         req_path = Path(requests_file).expanduser()
         if req_path.exists():
@@ -680,9 +699,15 @@ def register_from_results_file(results_file: str,
                              else req_data.get("requests", []))
                 for r in req_items:
                     cid = r.get("custom_id")
-                    sp = r.get("source_path")
-                    if cid and sp:
-                        source_path_by_id[cid] = sp
+                    if not cid:
+                        continue
+                    if r.get("source_path"):
+                        source_path_by_id[cid] = r["source_path"]
+                    meta_by_id[cid] = {
+                        "model": r.get("model"),
+                        "source_type": r.get("source_type"),
+                        "source_path": r.get("source_path"),
+                    }
             except (OSError, json.JSONDecodeError):
                 pass  # on continuera sans mapping, c'est juste un fallback
 
@@ -709,25 +734,6 @@ def register_from_results_file(results_file: str,
             "errors": [{"error": "format attendu : [...] ou {results: [...]}"}],
             "paths": [],
         }
-
-    # Métadonnées de requête par custom_id (modèle, source_type) pour alimenter
-    # le journal de coûts. Le requests_file les connaît ; les résultats API non.
-    meta_by_id: dict[str, dict] = {}
-    if requests_file:
-        try:
-            req_p = Path(requests_file).expanduser()
-            if req_p.exists():
-                rd = json.loads(req_p.read_text(encoding="utf-8"))
-                for r in (rd if isinstance(rd, list) else rd.get("requests", [])):
-                    cid = r.get("custom_id")
-                    if cid:
-                        meta_by_id[cid] = {
-                            "model": r.get("model"),
-                            "source_type": r.get("source_type"),
-                            "source_path": r.get("source_path"),
-                        }
-        except (OSError, json.JSONDecodeError):
-            pass
 
     registered = 0
     errors: list[dict] = []

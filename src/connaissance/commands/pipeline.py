@@ -7,8 +7,8 @@ Expose :
    resumes_perimes, stats, estimer_couts` (helpers)
 """
 
-import yaml
 
+from connaissance.core.frontmatter import parse_frontmatter
 from connaissance.core.paths import BASE_PATH
 from connaissance.core.tracking import TrackingDB
 
@@ -88,12 +88,8 @@ def moc_perimes(threshold: int = MOC_STALE_THRESHOLD):
             continue
         if not content.startswith("---"):
             continue
-        try:
-            fm_text = content.split("---", 2)[1]
-            fm = yaml.safe_load(fm_text)
-        except (IndexError, yaml.YAMLError, ValueError):
-            continue
-        if not fm or not isinstance(fm, dict):
+        fm = parse_frontmatter(content)
+        if not fm:
             continue
         cat = fm.get("category")
         if not cat:

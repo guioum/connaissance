@@ -22,6 +22,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from connaissance.core.frontmatter import split_frontmatter
 from connaissance.core.paths import BASE_PATH, documents_read_path
 from connaissance.core.tracking import TrackingDB
 
@@ -53,12 +54,10 @@ def _fm_source_hash_str(raw) -> str | None:
 
 def parse_frontmatter(md_text: str) -> dict:
     """Extraire le frontmatter YAML d'un .md. Retourne {} si absent ou cassé."""
-    if not md_text.startswith("---"):
+    parts = split_frontmatter(md_text)
+    if parts is None:
         return {}
-    end = md_text.find("\n---", 4)
-    if end < 0:
-        return {}
-    raw = md_text[4:end].lstrip("\n")
+    raw = parts[0].lstrip("\n")
     if _yaml_safe_load is not None:
         try:
             data = _yaml_safe_load(raw)

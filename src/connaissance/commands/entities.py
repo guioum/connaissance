@@ -16,6 +16,8 @@ import yaml
 
 from connaissance.core import entities as _ent
 from connaissance.core import ledger as _ledger
+from connaissance.core import frontmatter as _frontmatter
+from connaissance.core import resolution as _resolution
 from connaissance.core import relocate as _reloc
 from connaissance.core.paths import (CONNAISSANCE_ROOT, DOCUMENTS_DIR,
                                       require_connaissance_root)
@@ -102,12 +104,11 @@ def _fiche_frontmatter(etype: str, slug: str) -> dict | None:
         return None
     try:
         content = fiche.read_text(encoding="utf-8")
-        if not content.startswith("---"):
-            return {}
-        fm = yaml.safe_load(content.split("---", 2)[1])
-        return fm if isinstance(fm, dict) else {}
-    except (OSError, IndexError, yaml.YAMLError):
+    except OSError:
         return None
+    if not content.startswith("---"):
+        return {}
+    return _frontmatter.parse_frontmatter(content) or {}
 
 
 def _inventory(db: TrackingDB) -> list[dict]:
@@ -180,12 +181,10 @@ def _add_aliases(etype: str, slug: str, new_aliases: list[str]) -> list[str]:
     if not fiche.is_file():
         return []
     content = fiche.read_text(encoding="utf-8")
-    if not content.startswith("---"):
+    parts = _frontmatter.split_frontmatter(content)
+    if parts is None:
         return []
-    try:
-        _, fm_text, body = content.split("---", 2)
-    except ValueError:
-        return []
+    fm_text, body = parts
     fm = yaml.safe_load(fm_text) or {}
     if not isinstance(fm, dict):
         return []
@@ -201,8 +200,8 @@ def _add_aliases(etype: str, slug: str, new_aliases: list[str]) -> list[str]:
     if not added:
         return []
     fm["aliases"] = existing
-    new_fm = yaml.safe_dump(fm, allow_unicode=True, sort_keys=False).strip()
-    fiche.write_text(f"---\n{new_fm}\n---{body}", encoding="utf-8")
+    _frontmatter.write_frontmatter(fiche, fm, body)
+    _resolution.invalidate_alias_cache()
     return added
 
 
@@ -212,18 +211,16 @@ def _set_fiche_slug(etype: str, slug: str) -> bool:
     if not fiche.is_file():
         return False
     content = fiche.read_text(encoding="utf-8")
-    if not content.startswith("---"):
+    parts = _frontmatter.split_frontmatter(content)
+    if parts is None:
         return False
-    try:
-        _, fm_text, body = content.split("---", 2)
-    except ValueError:
-        return False
+    fm_text, body = parts
     fm = yaml.safe_load(fm_text) or {}
     if not isinstance(fm, dict):
         return False
     fm["slug"] = slug
-    new_fm = yaml.safe_dump(fm, allow_unicode=True, sort_keys=False).strip()
-    fiche.write_text(f"---\n{new_fm}\n---{body}", encoding="utf-8")
+    _frontmatter.write_frontmatter(fiche, fm, body)
+    _resolution.invalidate_alias_cache()
     return True
 
 

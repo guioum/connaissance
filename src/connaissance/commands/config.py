@@ -18,6 +18,7 @@ import re
 from pathlib import Path
 from typing import Any
 
+from connaissance.core.fsio import atomic_write_text
 from connaissance.core.paths import CONNAISSANCE_ROOT
 
 PACKAGE_ROOT = Path(__file__).resolve().parents[1]
@@ -44,15 +45,21 @@ def _load_yaml_preserve_comments(path: Path):
 
 
 def _dump_yaml_preserve_comments(data, path: Path, yaml_inst) -> None:
-    """Écrire un YAML en préservant les commentaires si ruamel est disponible."""
+    """Écrire un YAML en préservant les commentaires si ruamel est disponible.
+
+    Écriture atomique : un crash mi-dump ne doit pas tronquer la config
+    utilisateur (elle porte des réglages calibrés à la main).
+    """
     if yaml_inst is not None:
-        with open(path, "w", encoding="utf-8") as f:
-            yaml_inst.dump(data, f)
+        import io
+        buf = io.StringIO()
+        yaml_inst.dump(data, buf)
+        atomic_write_text(path, buf.getvalue())
         return
     import yaml
-    path.write_text(
+    atomic_write_text(
+        path,
         yaml.dump(data, allow_unicode=True, sort_keys=False, default_flow_style=False),
-        encoding="utf-8",
     )
 
 

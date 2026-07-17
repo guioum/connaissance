@@ -8,18 +8,16 @@ automatiquement : les chemins exclus qui ont été déplacés sont retirés.
 
 API publique : `archive(dry_run, category)`.
 """
-import sys
 import json
-import os
 import shutil
 import unicodedata
-from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
 
 import yaml
 
 from connaissance.core import ledger as _ledger
+from connaissance.core.fsio import atomic_write_text
 from connaissance.core.paths import BASE_PATH, require_paths, require_connaissance_root
 from connaissance.core.tracking import TrackingDB
 
@@ -68,9 +66,10 @@ def save_config(config):
     """Sauvegarder la config de périmètre."""
     require_connaissance_root()
     CONFIG_DIR.mkdir(parents=False, exist_ok=True)
-    with open(PERIMETRE_CONFIG, "w") as f:
-        yaml.dump(config, f, default_flow_style=False, allow_unicode=True,
-                  sort_keys=False)
+    atomic_write_text(
+        PERIMETRE_CONFIG,
+        yaml.dump(config, default_flow_style=False, allow_unicode=True,
+                  sort_keys=False))
 
 
 def load_rapport():
@@ -337,54 +336,6 @@ def update_config_after_moves(config, moved):
         config["historique"] = hist
 
     return config, removed_count
-
-
-# ── Affichage ───────────────────────────────────────────────────────────────
-
-def print_plan(moves):
-    """Afficher le plan de déplacement."""
-    by_subdir = defaultdict(list)
-    for m in moves:
-        by_subdir[m["subdir"]].append(m)
-
-    total = len(moves)
-    print(f"\n{'='*60}", file=sys.stderr)
-
-    print(f"  Plan d'archivage — {total} dossiers", file=sys.stderr)
-
-    print(f"{'='*60}", file=sys.stderr)
-
-
-    for subdir in ["Applications", "Code", "Photos", "Divers"]:
-        items = by_subdir.get(subdir, [])
-        if not items:
-            continue
-        print(f"\n  - Archives/{subdir}/ ({len(items)} dossiers)", file=sys.stderr)
-
-        print(f"  {'─'*50}", file=sys.stderr)
-
-        for m in items:
-            name = Path(m["rel_path"]).name
-            print(f"    {name}", file=sys.stderr)
-
-            print(f"      ← {m['rel_path'][:70]}", file=sys.stderr)
-
-
-
-def print_results(moved, errors, cleaned_dirs, dry_run=False):
-    """Afficher les résultats."""
-    prefix = "[DRY-RUN] " if dry_run else ""
-    print(f"\n  {prefix}{len(moved)} dossiers {'à déplacer' if dry_run else 'déplacés'}", file=sys.stderr)
-
-    if cleaned_dirs:
-        print(f"  {len(cleaned_dirs)} dossiers vides nettoyés", file=sys.stderr)
-
-    if errors:
-        print(f"\n  ⚠ {len(errors)} erreurs :", file=sys.stderr)
-
-        for e in errors:
-            print(f"    {Path(e['rel_path']).name} : {e.get('error', '?')}", file=sys.stderr)
-
 
 
 # --- API publique ---

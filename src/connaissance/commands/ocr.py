@@ -16,7 +16,6 @@ from pathlib import Path
 
 import json
 
-import yaml
 
 from connaissance.core import filtres as _filtres
 from connaissance.core import ledger as _ledger
@@ -25,6 +24,7 @@ from connaissance.commands.documents import (TRANSCRIPTIONS_DIR,
                                              _merge_frontmatter, register_document)
 from connaissance.commands.triage import (BUNDLE_SUFFIXES, CODE_MARKERS,
                                           MARKER_DIRS)
+from connaissance.core.frontmatter import parse_frontmatter
 from connaissance.core.output_file import write_or_inline
 from connaissance.core.paths import (DOCUMENTS_DIR, SPECIAL_TOP_DIRS,
                                      documents_read_path, require_paths)
@@ -37,16 +37,7 @@ _VIEW_TOP = set(SPECIAL_TOP_DIRS)   # source unique (était une liste divergente
 
 def _read_frontmatter(content: str) -> dict:
     """Frontmatter YAML d'une transcription (dict vide si absent/invalide)."""
-    if not content.startswith("---"):
-        return {}
-    end = content.find("\n---", 4)
-    if end < 0:
-        return {}
-    try:
-        fm = yaml.safe_load(content[4:end])
-        return fm if isinstance(fm, dict) else {}
-    except yaml.YAMLError:
-        return {}
+    return parse_frontmatter(content) or {}
 
 
 def ocr_local(limit: int | None = None, force: bool = False,

@@ -16,6 +16,8 @@ from pathlib import Path
 
 import yaml
 
+from connaissance.core.frontmatter import read_frontmatter
+from connaissance.core.fsio import atomic_write_text
 from connaissance.core.paths import (BASE_PATH, VIEWS_ROOT, documents_read_path,
                                       require_paths)
 from connaissance.core.tracking import TrackingDB
@@ -32,15 +34,6 @@ _VIEW_SOURCE_EXTS = [".pdf", ".png", ".jpg", ".jpeg", ".docx", ".doc",
 
 # Champs canoniques du frontmatter de transcription de document.
 # Les autres champs présents dans un frontmatter existant sont préservés.
-# `created`/`modified` sont dérivés du filesystem de la source (birthtime,
-# mtime) et injectés pour que le pipeline puisse filtrer par date métier
-# sans avoir à inventer de fallback sur le nom de fichier.
-TRANSCRIPTION_FRONTMATTER_FIELDS = (
-    "source", "source_hash", "source_size", "source_mtime", "transcribed_at",
-    "created", "modified",
-)
-
-
 def _date_from_filename(name_or_path: str) -> str | None:
     """Extraire une date ``YYYY-MM-DD`` d'un nom de fichier s'il en contient une.
 
@@ -229,7 +222,7 @@ def _upsert_transcription_frontmatter(trans_path: Path, source_path: Path,
     new_content = _merge_frontmatter(content, new_fields)
     if new_content != content:
         try:
-            trans_path.write_text(new_content, encoding="utf-8")
+            atomic_write_text(trans_path, new_content)
         except OSError:
             pass
 
@@ -306,20 +299,7 @@ def backlog_count(since=None, until=None) -> dict:
 
 def _read_transcription_frontmatter(trans_path: Path) -> dict | None:
     """Lire et parser le frontmatter YAML d'une transcription. None sinon."""
-    try:
-        content = trans_path.read_text(encoding="utf-8")
-    except OSError:
-        return None
-    if not content.startswith("---"):
-        return None
-    end = content.find("\n---", 4)
-    if end <= 0:
-        return None
-    try:
-        fm = yaml.safe_load(content[4:end])
-    except yaml.YAMLError:
-        return None
-    return fm if isinstance(fm, dict) else None
+    return read_frontmatter(trans_path)
 
 
 def _fm_source_hash(fm: dict) -> str | None:

@@ -12,38 +12,26 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from collections import Counter, defaultdict
+from collections import defaultdict
 from pathlib import Path
 from typing import cast
 
 import yaml
 
+from connaissance.core.frontmatter import parse_frontmatter as _parse_fm
+from connaissance.core.fsio import atomic_write_text
 from connaissance.core.paths import CONNAISSANCE_ROOT
 from connaissance.core.tracking import TrackingDB
-from connaissance.core.resolution import construire_slug
 
 RESUMES = CONNAISSANCE_ROOT / "Résumés"
 SYNTHESE = CONNAISSANCE_ROOT / "Synthèse"
 PROMPTS_DIR = Path(__file__).resolve().parent.parent / "prompts"
 
-# Tarif par défaut des requêtes de synthèse. Les fiches sont long-form
-# narratif — Sonnet reste le bon défaut ; Haiku est utilisé pour digest/moc
-# via l'heuristique centrale.
-DEFAULT_SYNTHESIS_MODEL = "claude-sonnet-4-6"
 DEFAULT_SYNTHESIS_MAX_TOKENS = 6144
 
 
 def _parse_frontmatter(content: str) -> dict | None:
-    if not content.startswith("---"):
-        return None
-    end = content.find("\n---", 4)
-    if end < 0:
-        return None
-    try:
-        fm = yaml.safe_load(content[4:end]) or {}
-    except yaml.YAMLError:
-        return None
-    return fm if isinstance(fm, dict) else None
+    return _parse_fm(content)
 
 
 def _iter_entity_resumes(entity: str) -> list[tuple[Path, dict]]:
@@ -831,7 +819,7 @@ def register(content: str | None = None,
 
     abs_path = CONNAISSANCE_ROOT / dest_rel
     abs_path.parent.mkdir(parents=True, exist_ok=True)
-    abs_path.write_text(content, encoding="utf-8")
+    atomic_write_text(abs_path, content)
 
     db.register_file(str(dest_rel), kind,
                      source_type=source_type,

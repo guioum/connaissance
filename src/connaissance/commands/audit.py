@@ -8,8 +8,8 @@ restent disponibles comme helpers.
 import re
 from pathlib import Path
 
-import yaml
 
+from connaissance.core.frontmatter import read_frontmatter
 from connaissance.core.paths import BASE_PATH
 from connaissance.core.tracking import TrackingDB
 
@@ -34,26 +34,8 @@ CHAMPS_REQUIS = {
 
 
 def _lire_frontmatter(path: Path) -> dict | None:
-    """Lire le frontmatter YAML d'un fichier Markdown.
-
-    Cherche la fin du frontmatter via ``\\n---`` (newline + tirets) pour
-    ne pas se faire tromper par des ``---`` présents dans des valeurs de
-    champs (ex: chemins de résumés organisés de la forme
-    ``date---entité---titre.md``).
-    """
-    try:
-        content = path.read_text(encoding="utf-8")
-    except (OSError, UnicodeDecodeError):
-        return None
-    if not content.startswith("---"):
-        return None
-    end = content.find("\n---", 4)
-    if end < 0:
-        return None
-    try:
-        return yaml.safe_load(content[4:end]) or {}
-    except yaml.YAMLError:
-        return None
+    """Frontmatter YAML d'un ``.md`` (délègue à ``core.frontmatter``)."""
+    return read_frontmatter(path)
 
 
 # --- Vérification 1 : Liens cassés ---

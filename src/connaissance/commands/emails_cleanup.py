@@ -14,6 +14,7 @@ from pathlib import Path
 import yaml
 
 from connaissance.core import ledger as _ledger
+from connaissance.core import frontmatter as _fm
 from connaissance.core.paths import CONNAISSANCE_ROOT, require_connaissance_root
 from connaissance.core.tracking import TrackingDB
 from connaissance.core.filtres import Filtres
@@ -35,23 +36,14 @@ def is_trackable(path: Path) -> bool:
 def parse_frontmatter(content: str) -> tuple[dict, str] | None:
     """Extraire frontmatter YAML + body d'un fichier markdown.
 
-    Retourne (frontmatter_dict, body_str) ou None si pas de frontmatter.
+    Retourne (frontmatter_dict, body_str) ou None si pas de frontmatter
+    exploitable. Délègue à ``core.frontmatter``.
     """
-    if not content.startswith("---"):
+    fm = _fm.parse_frontmatter(content)
+    if fm is None:
         return None
-    end = content.find("\n---", 4)
-    if end < 0:
-        return None
-    raw = content[4:end].lstrip("\n")
-    try:
-        fm = yaml.safe_load(raw) or {}
-    except yaml.YAMLError:
-        return None
-    if not isinstance(fm, dict):
-        return None
-    # Sauter le "\n---" fermant + un éventuel saut de ligne
-    body = content[end + 4:].lstrip("\n")
-    return fm, body
+    parts = _fm.split_frontmatter(content)
+    return fm, parts[1].lstrip("\n")
 
 
 def extract_attachments_from_body(body: str) -> list[dict]:

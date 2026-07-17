@@ -12,6 +12,7 @@ from pathlib import Path
 
 import yaml
 
+from connaissance.core.fsio import atomic_write_text
 from connaissance.core.paths import BASE_PATH, require_paths, require_connaissance_root
 
 # ── Chemins ──────────────────────────────────────────────────────────────────
@@ -139,7 +140,6 @@ def scan_directories(docs_dir, max_depth: int | None = 3):
                             file_counts, depth
     """
     results = []
-    docs_str = str(docs_dir)
 
     # SKIP_DIRS techniques
     skip_dirs = {".git", "node_modules", "__pycache__", ".venv", "venv",
@@ -242,9 +242,10 @@ def save_config(config):
         with open(FILTRES_CONFIG) as f:
             full_config = yaml.safe_load(f) or {}
     full_config["documents"] = config
-    with open(FILTRES_CONFIG, "w") as f:
-        yaml.dump(full_config, f, default_flow_style=False, allow_unicode=True,
-                  sort_keys=False)
+    atomic_write_text(
+        FILTRES_CONFIG,
+        yaml.dump(full_config, default_flow_style=False, allow_unicode=True,
+                  sort_keys=False))
 
 
 def init_config_if_needed():
@@ -381,58 +382,6 @@ CATEGORY_ORDER = [
     "bundle_app", "code_repo",
     "photos_perso", "documents_mixtes",
 ]
-
-
-def print_stats(results, config):
-    """Afficher un résumé rapide du scan."""
-    print(f"\n{'='*60}", file=sys.stderr)
-
-    print(f"  Scan du périmètre — {DOCUMENTS_DIR}", file=sys.stderr)
-
-    print(f"{'='*60}", file=sys.stderr)
-
-
-    total = len(results)
-    by_cat = Counter(r["category"] for r in results)
-    by_status = Counter()
-    for r in results:
-        if is_excluded(r["rel_path"], config):
-            by_status["exclu"] += 1
-        elif _is_explicitly_included(r["rel_path"], config):
-            by_status["inclus"] += 1
-        elif r["category"] in ("documents", "vide", "autre"):
-            by_status["inclus"] += 1
-        else:
-            by_status["a_decider"] += 1
-
-    print(f"\n  {total} dossiers analysés\n", file=sys.stderr)
-
-    print(f"  {'Catégorie':<30} {'Dossiers':>8}", file=sys.stderr)
-
-    print(f"  {'─'*30} {'─'*8}", file=sys.stderr)
-
-    for cat in CATEGORY_ORDER:
-        if cat in by_cat:
-            label = CATEGORY_LABELS.get(cat, cat)
-            print(f"  {label:<30} {by_cat[cat]:>8}", file=sys.stderr)
-
-    for cat in sorted(by_cat):
-        if cat not in CATEGORY_ORDER:
-            label = CATEGORY_LABELS.get(cat, cat)
-            print(f"  {label:<30} {by_cat[cat]:>8}", file=sys.stderr)
-
-
-    print(f"\n  Statut :", file=sys.stderr)
-
-    print(f"    Déjà exclus (config)  : {by_status.get('exclu', 0)}", file=sys.stderr)
-
-    print(f"    Inclus (documents)    : {by_status.get('inclus', 0)}", file=sys.stderr)
-
-    print(f"    À décider             : {by_status.get('a_decider', 0)}", file=sys.stderr)
-
-
-
-# ── Main ─────────────────────────────────────────────────────────────────────
 
 
 # --- API publique ---

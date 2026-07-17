@@ -13,6 +13,8 @@ import shutil
 from pathlib import Path
 
 from connaissance.core import ledger as _ledger
+from connaissance.core.fsio import atomic_write_text
+from connaissance.core.manifest_io import unique_dest
 from connaissance.core.paths import BASE_PATH
 from connaissance.core.tracking import TrackingDB
 
@@ -85,6 +87,11 @@ def promote(db, dry_run=False):
         if db.has_size(item["size"]):
             file_hash = db.get_or_compute_hash(src)
             existing = db.has_hash(file_hash) if file_hash else None
+            # get_or_compute_hash vient d'enregistrer le hash de la PJ sous
+            # son PROPRE chemin : se retrouver soi-même n'est pas un doublon
+            # (même garde que scan_duplicates).
+            if existing and Path(existing) == Path(src):
+                existing = None
         if existing:
             print(f"  ○ {src.name} — déjà connu ({Path(existing).name})", file=sys.stderr)
 
@@ -99,8 +106,12 @@ def promote(db, dry_run=False):
             continue
 
         PROMOTED_DIR.mkdir(parents=True, exist_ok=True)
-        if not dest.exists():
-            shutil.copy2(str(src), str(dest))
+        # Anti-collision : deux PJ distinctes peuvent porter le même nom.
+        # Sauter la copie tout en enregistrant le hash de la source sous ce
+        # chemin casserait l'invariant « hash ↔ contenu du chemin » (et la
+        # dédup pourrait ensuite corbeiller un non-doublon).
+        dest = unique_dest(dest)
+        shutil.copy2(str(src), str(dest))
 
         # Hash calculé à l'enregistrement (pour la dest), paresseux :
         # get_or_compute_hash bénéficie du cache (path, size, mtime) sur la
@@ -233,7 +244,7 @@ def dedup(db, dry_run=False, run_id=None):
                 new_ref = f"{dup_path.stem}{dup_path.suffix} (SHA256: {dup['hash'][:12]}...) → voir {keeper}"
                 content = content.replace(f"[{dup_path.stem}{dup_path.suffix}]({old_link})", new_ref)
                 content = content.replace(f"({old_link})", f"— {new_ref}")
-                md_path.write_text(content, encoding="utf-8")
+                atomic_write_text(md_path, content)
                 updated += 1
                 db.log("connaissance", "dedup_reference",
                        source_path=str(md_path),
@@ -487,11 +498,7 @@ def apply(dry_run: bool = True, promote_docs: bool = True,
         if promote_docs:
             promoted = promote(db, dry_run=dry_run) or 0
         if dedup_attachments:
-            dedup_result = dedup(db, dry_run=dry_run, run_id=run_id)
-            if isinstance(dedup_result, tuple):
-                deduped, freed = dedup_result
-            elif isinstance(dedup_result, int):
-                deduped = dedup_result
+            deduped = dedup(db, dry_run=dry_run, run_id=run_id)
         if cleanup_orphans_flag:
             orphans_removed, orphans_freed = cleanup_orphans(
                 db, dry_run=dry_run, run_id=run_id)

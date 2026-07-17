@@ -470,119 +470,125 @@ def register(results_file: str, from_prepare: str,
         db = TrackingDB()
 
     entries: list[dict] = []
-    for res in results:
-        cid = res.get("custom_id", "")
-        req = by_id.get(cid, {})
-        source = req.get("_rel", "")
-        hint = req.get("_hint", {})
-        ext = ("." + source.rsplit(".", 1)[-1]) if "." in source.split("/")[-1] else ""
-        j = _parse_result_content(res.get("content", "")) or {}
+    try:
+        for res in results:
+            cid = res.get("custom_id", "")
+            req = by_id.get(cid, {})
+            source = req.get("_rel", "")
+            hint = req.get("_hint", {})
+            ext = ("." + source.rsplit(".", 1)[-1]) if "." in source.split("/")[-1] else ""
+            j = _parse_result_content(res.get("content", "")) or {}
 
-        entity = (j.get("entity") or "").strip()
-        etype_raw = j.get("entity_type") or "divers"
-        category = canonicalize_category(j.get("category"))
-        date = j.get("date") if isinstance(j.get("date"), str) and _DATE_OK.match(j.get("date") or "") else None
-        # Repli date (levier taux auto) : si Haiku n'émet pas de date, retomber
-        # sur la date des SIGNAUX — mais seulement les sources FIABLES (nom de
-        # fichier, métadonnée PDF). On EXCLUT `filesystem` (date d'import, pas
-        # date du doc : daterait p.ex. un reçu OIQ 2015 à son année de scan).
-        # Tracé `date_approx` pour rester réversible/auditable. Haiku reçoit déjà
-        # ces dates et choisit prudemment de ne pas les émettre → décision de
-        # politique assumée ici, le déplacement restant réversible (ledger).
-        date_approx = False
-        if not date:
-            hd, hsrc = hint.get("date"), hint.get("date_source")
-            if hd and _DATE_OK.match(hd or "") and hsrc in ("name", "metadata"):
-                date, date_approx = hd, True
-        title = (j.get("title") or "").strip()
-        # Sujet normalisé en slug (minuscules-tirets, ACCENTS CONSERVÉS — même
-        # règle que les slugs d'entité) pour éviter les variantes café/cafes.
-        sujet = slugify(j.get("sujet") or "") or None
-        confidence = j.get("confidence") if j.get("confidence") in ("high", "low") else "low"
+            entity = (j.get("entity") or "").strip()
+            etype_raw = j.get("entity_type") or "divers"
+            category = canonicalize_category(j.get("category"))
+            date = j.get("date") if isinstance(j.get("date"), str) and _DATE_OK.match(j.get("date") or "") else None
+            # Repli date (levier taux auto) : si Haiku n'émet pas de date, retomber
+            # sur la date des SIGNAUX — mais seulement les sources FIABLES (nom de
+            # fichier, métadonnée PDF). On EXCLUT `filesystem` (date d'import, pas
+            # date du doc : daterait p.ex. un reçu OIQ 2015 à son année de scan).
+            # Tracé `date_approx` pour rester réversible/auditable. Haiku reçoit déjà
+            # ces dates et choisit prudemment de ne pas les émettre → décision de
+            # politique assumée ici, le déplacement restant réversible (ledger).
+            date_approx = False
+            if not date:
+                hd, hsrc = hint.get("date"), hint.get("date_source")
+                if hd and _DATE_OK.match(hd or "") and hsrc in ("name", "metadata"):
+                    date, date_approx = hd, True
+            title = (j.get("title") or "").strip()
+            # Sujet normalisé en slug (minuscules-tirets, ACCENTS CONSERVÉS — même
+            # règle que les slugs d'entité) pour éviter les variantes café/cafes.
+            sujet = slugify(j.get("sujet") or "") or None
+            confidence = j.get("confidence") if j.get("confidence") in ("high", "low") else "low"
 
-        reasons = []
-        if not j:
-            reasons.append("parse_échoué")
-        if not entity:
-            reasons.append("entité_absente")
-        if not category:
-            reasons.append("catégorie_invalide")
-        if not date:
-            reasons.append("date_absente")
-        elif date_approx:
-            reasons.append("date_repli")
+            reasons = []
+            if not j:
+                reasons.append("parse_échoué")
+            if not entity:
+                reasons.append("entité_absente")
+            if not category:
+                reasons.append("catégorie_invalide")
+            if not date:
+                reasons.append("date_absente")
+            elif date_approx:
+                reasons.append("date_repli")
 
-        # Aligner sur le registre `entities` : si le nom (ou son slug) matche une
-        # entité connue / un alias, réutiliser SON canonique (anti-fragmentation
-        # forte) ; sinon réconcilier normalement (nouvelle entité).
-        reg = db.resolve_entity(entity) if entity else None
-        if reg:
-            etype, slug, entity = reg["type"], reg["slug"], reg["name"]
-        else:
-            etype, slug = _reconcile_entity(entity, etype_raw)
-        namefile = construire_nom_fichier(date or "0000-00-00", title or "sans-titre")
+            # Aligner sur le registre `entities` : si le nom (ou son slug) matche une
+            # entité connue / un alias, réutiliser SON canonique (anti-fragmentation
+            # forte) ; sinon réconcilier normalement (nouvelle entité).
+            reg = db.resolve_entity(entity) if entity else None
+            if reg:
+                etype, slug, entity = reg["type"], reg["slug"], reg["name"]
+            else:
+                etype, slug = _reconcile_entity(entity, etype_raw)
+            namefile = construire_nom_fichier(date or "0000-00-00", title or "sans-titre")
 
-        # Statut : auto dès que la fiche est structurellement COMPLÈTE — type
-        # d'entité exploitable (ni divers ni inconnus) ET entité ET catégorie ET
-        # date ET slug. La confiance basse de Haiku ne bloque PLUS le passage en
-        # auto : le déplacement passe par le ledger (réversible), et le modèle se
-        # déclare souvent « low » par prudence sur des docs pourtant complets. On
-        # garde en attente uniquement ce qui MANQUE une donnée (entité divers/
-        # inconnue, sans catégorie ou sans date) ou dont le parsing a échoué.
-        auto = (date and entity and category
-                and etype not in ("divers", "inconnus") and slug)
-        if auto:
-            dest = f"{etype}/{slug}/{namefile}{ext}"
-            status = "auto"
-        else:
-            dest = None
-            status = "attente"
-            if etype in ("divers", "inconnus"):
-                reasons.append(f"entité_{etype}")
-        # Trace informative : la confiance basse est consignée (dans `reasons` et
-        # dans la fiche) mais n'est plus un motif de mise en attente à elle seule.
-        if confidence != "high" and "confiance_basse" not in reasons:
-            reasons.append("confiance_basse")
+            # Statut : auto dès que la fiche est structurellement COMPLÈTE — type
+            # d'entité exploitable (ni divers ni inconnus) ET entité ET catégorie ET
+            # date ET slug. La confiance basse de Haiku ne bloque PLUS le passage en
+            # auto : le déplacement passe par le ledger (réversible), et le modèle se
+            # déclare souvent « low » par prudence sur des docs pourtant complets. On
+            # garde en attente uniquement ce qui MANQUE une donnée (entité divers/
+            # inconnue, sans catégorie ou sans date) ou dont le parsing a échoué.
+            auto = (date and entity and category
+                    and etype not in ("divers", "inconnus") and slug)
+            if auto:
+                dest = f"{etype}/{slug}/{namefile}{ext}"
+                status = "auto"
+            else:
+                dest = None
+                status = "attente"
+                if etype in ("divers", "inconnus"):
+                    reasons.append(f"entité_{etype}")
+            # Trace informative : la confiance basse est consignée (dans `reasons` et
+            # dans la fiche) mais n'est plus un motif de mise en attente à elle seule.
+            if confidence != "high" and "confiance_basse" not in reasons:
+                reasons.append("confiance_basse")
 
-        entry = {
-            "custom_id": cid, "source": source, "status": status, "dest": dest,
-            "entity": entity or hint.get("entity"), "entity_type": etype,
-            "entity_slug": slug, "category": category, "date": date,
-            "date_approx": date_approx,
-            "title": title, "sujet": sujet, "confidence": confidence,
-            "reasons": reasons,
-        }
-        entries.append(entry)
+            entry = {
+                "custom_id": cid, "source": source, "status": status, "dest": dest,
+                "entity": entity or hint.get("entity"), "entity_type": etype,
+                "entity_slug": slug, "category": category, "date": date,
+                "date_approx": date_approx,
+                "title": title, "sujet": sujet, "confidence": confidence,
+                "reasons": reasons,
+            }
+            entries.append(entry)
 
-        # Journaliser le coût réel du pré-classement (batch Haiku) si l'API a
-        # retourné un usage — sinon le coût récurrent de la classification
-        # échappe à `pipeline costs --real`. mode/batch = Batch API (−50 %).
-        usage = res.get("usage")
-        if isinstance(usage, dict):
-            db.log_usage(operation="classify", usage=usage,
-                         source_type=etype, source_path=source,
-                         custom_id=cid, model=req.get("model"),
-                         mode="batch", batch=True)
+            # Journaliser le coût réel du pré-classement (batch Haiku) si l'API a
+            # retourné un usage — sinon le coût récurrent de la classification
+            # échappe à `pipeline costs --real`. mode/batch = Batch API (−50 %).
+            usage = res.get("usage")
+            if isinstance(usage, dict):
+                db.log_usage(operation="classify", usage=usage,
+                             source_type=etype, source_path=source,
+                             custom_id=cid, model=req.get("model"),
+                             mode="batch", batch=True)
 
-        # Persister l'étage classement de la fiche (résumable, interrogeable).
-        try:
-            st = (DOCUMENTS_DIR / source).stat()
-            size, mtime = st.st_size, st.st_mtime
-        except OSError:
-            size = mtime = None
-        db.upsert_classification(source, {
-            **entry, "model": req.get("model"), "size": size, "mtime": mtime})
-        # Registre VIVANT : enrichir `entities` avec l'entité retenue (nouvelle ou
-        # +1 compteur). Les batches/tranches suivants s'aligneront dessus.
-        if entity and etype in ("organismes", "personnes") and slug:
-            db.upsert_entity(etype, slug, entity, inc_count=1)
-        # Sujet primaire → table multi-sujet (source 'classify'), pour que la
-        # vue « - Sujets » lise une source unique (cf. dédup consciente).
-        if sujet:
-            db.add_doc_sujets(source, [sujet], "classify")
+            # Persister l'étage classement de la fiche (résumable, interrogeable).
+            try:
+                st = (DOCUMENTS_DIR / source).stat()
+                size, mtime = st.st_size, st.st_mtime
+            except OSError:
+                size = mtime = None
+            db.upsert_classification(source, {
+                **entry, "model": req.get("model"), "size": size,
+                "mtime": mtime}, commit=False)
+            # Registre VIVANT : enrichir `entities` avec l'entité retenue (nouvelle ou
+            # +1 compteur). Les batches/tranches suivants s'aligneront dessus.
+            if entity and etype in ("organismes", "personnes") and slug:
+                db.upsert_entity(etype, slug, entity, inc_count=1, commit=False)
+            # Sujet primaire → table multi-sujet (source 'classify'), pour que la
+            # vue « - Sujets » lise une source unique (cf. dédup consciente).
+            if sujet:
+                db.add_doc_sujets(source, [sujet], "classify", commit=False)
 
-    if owns_db:
-        db.close()
+        # Commit unique du lot (les upserts passent commit=False) : un
+        # fsync par run au lieu de 3-4 par document.
+        db.commit()
+    finally:
+        if owns_db:
+            db.close()
 
     transit = transit_file("classify-manifest")
     transit.write_text(json.dumps({"entries": entries}, ensure_ascii=False),

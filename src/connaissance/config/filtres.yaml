@@ -48,11 +48,9 @@ documents:
     - .fseventsd
     - .TemporaryItems
 
-  # Images trop petites (sprites, icônes) — pixels dans chaque dimension
-  min_image_px: 300
-
-  # PDFs nécessitant confirmation manuelle
-  max_pages_auto: 30
+  # (retirés 2026-07-17 : `min_image_px` et `max_pages_auto` — jamais lus par
+  # le code ; le seuil de taille des images PJ vit dans
+  # `courriels.min_attachment_size`)
 
 courriels:
   # Dossiers IMAP à ignorer (comparaison case-insensitive sur le nom du mbox)
@@ -66,8 +64,9 @@ courriels:
 
   # Scoring multi-signaux (utilise scoring-courriels.yaml pour les règles)
   scoring: true
-  scoring_seuil_capturer: 0      # score >= seuil → transcrire
-  scoring_seuil_ignorer: -1      # score <= seuil → ignorer
+  scoring_seuil_ignorer: -1      # score <= seuil → ignorer (sinon : transcrit)
+  # (retiré 2026-07-17 : `scoring_seuil_capturer` — jamais lu ; le seuil de
+  # capture pour calibrate/cleanup vit dans scoring-courriels.yaml `seuils`)
 
   # Taille minimale des PJ images (en octets, < seuil = signature/logo)
   min_attachment_size: 50000
