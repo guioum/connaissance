@@ -218,7 +218,9 @@ def repass(max_confidence: float = 0.6, apply: bool = False,
             db.close()
 
 
-_MISTRAL_PAGE_COST = 0.001   # $1 / 1000 pages (Mistral OCR, batch).
+# $2 / 1000 pages : Mistral OCR 4 en batch (migration 2026-07-19 ; OCR 3
+# était à $1/1000). Doit suivre le modèle épinglé dans mistral-ocr/cli.py.
+_MISTRAL_PAGE_COST = 0.002
 # Types OCRisables côté image (sans le point), pour la cible de la repasse.
 _OCR_IMAGE_TYPES = {e.lstrip(".") for e in _IMG_EXTS}
 

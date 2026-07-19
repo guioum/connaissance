@@ -120,7 +120,9 @@ def test_transcribe_plan_worklist(tmp_path, monkeypatch, tracking_db):
     assert res["counts"]["already_mistral"] == 1
     assert res["deferred_count"] == 1
     assert res["estimated_pages"] == 8        # 3 + 5
-    assert res["estimated_cost_usd"] == round(8 * 0.001, 2)
+    # Référence la constante (pas le tarif en dur) : le prix par page suit le
+    # modèle Mistral épinglé (OCR 4 depuis 2026-07-19).
+    assert res["estimated_cost_usd"] == round(8 * O._MISTRAL_PAGE_COST, 2)
 
 
 def test_transcribe_plan_manifest_fields_and_dedup(tmp_path, monkeypatch, tracking_db):
