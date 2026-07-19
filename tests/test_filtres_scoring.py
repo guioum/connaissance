@@ -69,3 +69,35 @@ def test_signals_accumulate():
     })
     score, _ = f.score_courriel({"from": "x@promo.test"})
     assert score == 1  # -2 + 3
+
+
+def test_filter_courriel_seuil_unifie_depuis_scoring_config():
+    """Le seuil « ignorer » de filter_courriel vient de scoring-courriels.yaml
+    (`seuils.ignorer`), la même source que calibrate/cleanup-obsolete —
+    unifié le 2026-07-17 (avant : clé distincte dans filtres.yaml, divergence
+    silencieuse possible)."""
+    f = make_filtres({"poids": {"adresse_marketing": -2},
+                      "domaines_marketing": ["promo.test"],
+                      "seuils": {"ignorer": -1}})
+    f.courriels_config["scoring"] = True
+    msg = {"from": "news@promo.test", "subject": "promo", "body": "x",
+           "date": None, "attachments": []}
+    ok, reason = f.filter_courriel(msg)
+    assert not ok and reason.startswith("scoring:")
+    # Seuil plus permissif dans la MÊME source → le courriel passe.
+    f._scoring_config["seuils"]["ignorer"] = -5
+    ok, _ = f.filter_courriel(msg)
+    assert ok
+
+
+def test_filter_courriel_seuil_repli_ancienne_cle():
+    """Compat : sans `seuils.ignorer`, l'ancienne clé filtres.yaml
+    `scoring_seuil_ignorer` est encore honorée."""
+    f = make_filtres({"poids": {"adresse_marketing": -2},
+                      "domaines_marketing": ["promo.test"]})
+    f.courriels_config["scoring"] = True
+    f.courriels_config["scoring_seuil_ignorer"] = -1
+    msg = {"from": "news@promo.test", "subject": "promo", "body": "x",
+           "date": None, "attachments": []}
+    ok, reason = f.filter_courriel(msg)
+    assert not ok and reason.startswith("scoring:")

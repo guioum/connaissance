@@ -64,9 +64,10 @@ courriels:
 
   # Scoring multi-signaux (utilise scoring-courriels.yaml pour les règles)
   scoring: true
-  scoring_seuil_ignorer: -1      # score <= seuil → ignorer (sinon : transcrit)
-  # (retiré 2026-07-17 : `scoring_seuil_capturer` — jamais lu ; le seuil de
-  # capture pour calibrate/cleanup vit dans scoring-courriels.yaml `seuils`)
+  # (retirés 2026-07-17 : `scoring_seuil_capturer` et `scoring_seuil_ignorer` —
+  # les seuils vivent dans scoring-courriels.yaml `seuils` [source unique,
+  # partagée avec calibrate/cleanup-obsolete] ; l'ancienne clé reste lue en
+  # repli si présente dans une config utilisateur antérieure)
 
   # Taille minimale des PJ images (en octets, < seuil = signature/logo)
   min_attachment_size: 50000

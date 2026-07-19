@@ -1273,17 +1273,22 @@ class TrackingDB:
         return self._entity_index().get(target)
 
     def merge_entity_rows(self, etype: str, from_slug: str, into_slug: str,
-                          *, commit: bool = True) -> bool:
+                          *, into_type: str | None = None,
+                          commit: bool = True) -> bool:
         """Fusionner deux lignes du registre `entities` : nom + aliases du perdant
         → aliases du gardé, ``doc_count`` additionné, ligne perdante supprimée.
-        Pour `entities merge`. Retourne True si la fusion a eu lieu."""
+        Pour `entities merge`. ``into_type`` : type de l'entité gardée si la
+        fusion traverse les types (personnes→organismes…) — sans lui, la ligne
+        gardée était cherchée avec le type du PERDANT et la fusion inter-type
+        échouait silencieusement. Retourne True si la fusion a eu lieu."""
         import json as _json
+        itype = into_type or etype
         fr = self._conn.execute(
             "SELECT name, aliases, doc_count FROM entities WHERE type=? AND slug=?",
             (etype, _nfc(from_slug))).fetchone()
         to = self._conn.execute(
             "SELECT name, aliases, doc_count FROM entities WHERE type=? AND slug=?",
-            (etype, _nfc(into_slug))).fetchone()
+            (itype, _nfc(into_slug))).fetchone()
         if fr is None or to is None:
             return False
         merged = list(_json.loads(to["aliases"] or "[]"))
@@ -1296,7 +1301,7 @@ class TrackingDB:
             "updated_at=strftime('%Y-%m-%dT%H:%M:%S','now','localtime') "
             "WHERE type=? AND slug=?",
             (_json.dumps(merged, ensure_ascii=False), fr["doc_count"],
-             etype, _nfc(into_slug)))
+             itype, _nfc(into_slug)))
         self._conn.execute("DELETE FROM entities WHERE type=? AND slug=?",
                            (etype, _nfc(from_slug)))
         self._invalidate_entity_index()

@@ -184,3 +184,26 @@ def test_rename_dry_run_changes_nothing(tmp_path, monkeypatch, tracking_db):
     out = CE2.rename("organismes/cafe-x", "café-x", dry_run=True, db=tracking_db)
     assert out["dry_run"] and out["documents"] == 1
     assert (docs / "organismes" / "cafe-x").exists()        # rien bougé
+
+
+def test_merge_entity_rows_inter_type(tracking_db):
+    """Régression 2026-07-17 : la ligne gardée était cherchée avec le type du
+    PERDANT → une fusion personnes→organismes échouait silencieusement."""
+    tracking_db.upsert_entity("personnes", "acme", "Acme", aliases=["ACME inc"])
+    tracking_db.upsert_entity("organismes", "acme-corp", "Acme Corp",
+                              inc_count=3)
+    ok = tracking_db.merge_entity_rows("personnes", "acme", "acme-corp",
+                                       into_type="organismes")
+    assert ok is True
+    kept = tracking_db._conn.execute(
+        "SELECT name, aliases, doc_count FROM entities "
+        "WHERE type='organismes' AND slug='acme-corp'").fetchone()
+    assert kept is not None and kept["doc_count"] == 3
+    assert "Acme" in kept["aliases"] and "ACME inc" in kept["aliases"]
+    gone = tracking_db._conn.execute(
+        "SELECT 1 FROM entities WHERE type='personnes' AND slug='acme'"
+    ).fetchone()
+    assert gone is None
+    # même type : comportement inchangé sans into_type
+    tracking_db.upsert_entity("organismes", "acme2", "Acme 2")
+    assert tracking_db.merge_entity_rows("organismes", "acme2", "acme-corp")

@@ -19,6 +19,8 @@ from connaissance.core import ledger as _ledger
 from connaissance.core import frontmatter as _frontmatter
 from connaissance.core import resolution as _resolution
 from connaissance.core import relocate as _reloc
+from connaissance.core.schemas import (EntitiesCandidates, EntitiesMerge,
+                                       EntitiesRename)
 from connaissance.core.paths import (CONNAISSANCE_ROOT, DOCUMENTS_DIR,
                                       require_connaissance_root)
 from connaissance.core.tracking import TrackingDB
@@ -150,7 +152,7 @@ def _inventory(db: TrackingDB) -> list[dict]:
     return list(inv.values())
 
 
-def candidates(db: TrackingDB | None = None) -> dict:
+def candidates(db: TrackingDB | None = None) -> EntitiesCandidates:
     """Paires d'entités candidates à la fusion (schema EntitiesCandidates).
 
     Lecture seule. Combine signaux lexicaux (containment, Jaccard, edit
@@ -225,7 +227,7 @@ def _set_fiche_slug(etype: str, slug: str) -> bool:
 
 
 def rename(from_entity: str, new_slug: str, dry_run: bool = True,
-           db: TrackingDB | None = None) -> dict:
+           db: TrackingDB | None = None) -> EntitiesRename:
     """Renommer le slug d'une entité (même type) — ré-accentuation, correction.
 
     Déplace les dossiers (``~/Documents``, ``Synthèse``, ``Résumés``) via le
@@ -274,7 +276,7 @@ def rename(from_entity: str, new_slug: str, dry_run: bool = True,
 
 
 def merge(from_entity: str, into_entity: str, dry_run: bool = True,
-          db: TrackingDB | None = None) -> dict:
+          db: TrackingDB | None = None) -> EntitiesMerge:
     """Fusionner ``from_entity`` → ``into_entity`` (schema EntitiesMerge).
 
     ``from_entity``/``into_entity`` au format ``type/slug``. **Dry-run par
@@ -328,7 +330,8 @@ def merge(from_entity: str, into_entity: str, dry_run: bool = True,
                                             into_name, commit=False)
             # Registre `entities` : fusionner les lignes (nom+aliases du perdant
             # → gardé, doc_count additionné, perdant supprimé).
-            db.merge_entity_rows(f_type, f_slug, i_slug, commit=False)
+            db.merge_entity_rows(f_type, f_slug, i_slug, into_type=i_type,
+                                 commit=False)
         added = _add_aliases(i_type, i_slug, alias_payload)
         # Documents → relocate_document vers l'entité gardée (graphe + refs).
         docs_moved = _relocate_entity_docs(db, f_type, f_slug, i_type, i_slug, run_id)

@@ -277,7 +277,13 @@ class Filtres:
         # Scoring
         if cfg.get("scoring", False):
             score, reasons = self.score_courriel(msg_dict)
-            seuil_ignorer = cfg.get("scoring_seuil_ignorer", -1)
+            # Source unique du seuil : scoring-courriels.yaml `seuils.ignorer`
+            # — la même valeur que calibrate/cleanup-obsolete, pour que le
+            # calibrage et l'extraction ne divergent jamais. Repli sur
+            # l'ancienne clé filtres.yaml `scoring_seuil_ignorer` (configs
+            # utilisateur antérieures à 2026-07-17).
+            seuil_ignorer = (self.scoring_config.get("seuils") or {}).get(
+                "ignorer", cfg.get("scoring_seuil_ignorer", -1))
             if score <= seuil_ignorer:
                 return False, f"scoring:{score} ({', '.join(reasons[:3])})"
 
