@@ -17,6 +17,7 @@ from __future__ import annotations
 import os
 import unicodedata
 from pathlib import Path
+from typing import cast
 
 from connaissance.commands.triage import (BUNDLE_SUFFIXES, CODE_MARKERS,
                                            DOC_EXTS, MARKER_DIRS)
@@ -27,6 +28,7 @@ from connaissance.core.output_file import write_or_inline
 from connaissance.core.paths import (CONNAISSANCE_ROOT, DOCUMENTS_DIR,
                                       SPECIAL_TOP_DIRS, documents_read_path,
                                       is_dataless)
+from connaissance.core.schemas import DocumentSignals, DocumentsSignals
 from connaissance.core.tracking import TrackingDB
 
 TRANSCRIPTIONS_DIR = CONNAISSANCE_ROOT / "Transcriptions" / "Documents"
@@ -64,11 +66,11 @@ def _ocr_cache_text(rel: str) -> str | None:
 
 
 def scan(scope: str | None = None, output_file: str | None = None,
-         db: TrackingDB | None = None) -> dict:
+         db: TrackingDB | None = None) -> DocumentsSignals:
     """Extraire les signaux des documents du groupe A (schema DocumentsSignals)."""
     base = DOCUMENTS_DIR if scope is None else (DOCUMENTS_DIR / scope)
     quarantine = _filtres.load_quarantine_set()
-    packets: list[dict] = []
+    packets: list[DocumentSignals] = []
     skipped = {"dataless": 0, "secret": 0, "image_non_document": 0}
     seen = 0
 
@@ -145,12 +147,13 @@ def scan(scope: str | None = None, output_file: str | None = None,
                 else:
                     packet = db.get_or_compute_signals(fpath, rel, _compute)
                 if packet is not None:
-                    packets.append(packet)
+                    # Cast : le paquet vient du cache DB (JSON) ou du calcul brut.
+                    packets.append(cast(DocumentSignals, packet))
     finally:
         if owns_db:
             db.close()
 
-    payload = {
+    payload: DocumentsSignals = {
         "total": len(packets),
         "scanned": seen,
         "documents": packets,

@@ -19,6 +19,7 @@ import yaml
 from connaissance.core import ledger as _ledger
 from connaissance.core.fsio import atomic_write_text
 from connaissance.core.paths import BASE_PATH, require_paths, require_connaissance_root
+from connaissance.core.schemas import AuditArchiveNonDocuments
 from connaissance.core.tracking import TrackingDB
 
 # ── Chemins ──────────────────────────────────────────────────────────────────
@@ -341,7 +342,8 @@ def update_config_after_moves(config, moved):
 # --- API publique ---
 
 
-def archive(dry_run: bool = True, category: str | None = None) -> dict:
+def archive(dry_run: bool = True,
+            category: str | None = None) -> AuditArchiveNonDocuments:
     """Archiver les non-documents (schema AuditArchiveNonDocuments).
 
     Appel sans confirmation — le caller (skill, utilisateur) valide avant
@@ -376,7 +378,7 @@ def archive(dry_run: bool = True, category: str | None = None) -> dict:
         if removed_count > 0:
             save_config(config)
 
-    result = {
+    result: AuditArchiveNonDocuments = {
         "archived": len(moved),
         "list": [{"source": str(m.get("source")), "dest": str(m.get("dest"))}
                  for m in moved],

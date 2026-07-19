@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import re
 import unicodedata
+from collections.abc import Mapping
 
 # Catégories par mots-clés (FR/EN). L'ordre = priorité. Termes de NOM + de
 # CONTENU (minés du corpus : debit/credit/ytd, cotisation, cumul…) pour attraper
@@ -98,7 +99,7 @@ def _to_iso_date(raw: str | None) -> str | None:
     return f"{m.group(1)}-{m.group(2)}-{m.group(3)}" if m else None
 
 
-def pick_date(signals: dict) -> tuple[str | None, str]:
+def pick_date(signals: Mapping) -> tuple[str | None, str]:
     """(date AAAA-MM-JJ, provenance). Priorité : nom > métadonnée > filesystem."""
     dates = signals.get("dates", {}) or {}
     for key, label in (("from_name", "name"), ("metadata", "metadata"),
@@ -125,7 +126,7 @@ def _name_segments(stem: str) -> list[str]:
     return out
 
 
-def guess_category(signals: dict, segments: list[str]) -> str | None:
+def guess_category(signals: Mapping, segments: list[str]) -> str | None:
     hay = " ".join([signals.get("type_hint") or "",
                     " ".join(signals.get("name_keywords") or []),
                     " ".join(segments),
@@ -228,7 +229,7 @@ def _strip_type_words(text: str) -> str:
     return re.sub(r"\s+", " ", " ".join(kept)).strip(" -—–_·")
 
 
-def guess_entity(signals: dict, segments: list[str],
+def guess_entity(signals: Mapping, segments: list[str],
                  known_entities: list[str] | None = None) -> tuple[str | None, str, bool]:
     """(nom d'entité, entity_type, matché_connu).
 
@@ -269,7 +270,8 @@ def guess_title(stem: str, segments: list[str], entity: str | None) -> str:
     return title or stem
 
 
-def classify(signals: dict, known_entities: list[str] | None = None) -> dict:
+def classify(signals: Mapping,
+             known_entities: list[str] | None = None) -> dict:
     """Proposition de rangement heuristique (le « hint ») pour un paquet de signaux."""
     rel = signals.get("rel", "")
     stem = re.sub(r"\.[^.]+$", "", rel.split("/")[-1]) if rel else ""

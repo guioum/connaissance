@@ -7,40 +7,44 @@ en arrière de façon vérifiée (par hash).
 import os
 import shutil
 from pathlib import Path
+from typing import cast
 
 from connaissance.core import ledger as _ledger
 from connaissance.core.paths import DOCUMENTS_DIR, VIEWS_ROOT
+from connaissance.core.schemas import (LedgerPurge, LedgerRevert, LedgerRun,
+                                       LedgerRuns, LedgerShow, LedgerSnapshot,
+                                       LedgerVerify)
 from connaissance.core.tracking import TrackingDB
 
 SNAPSHOT_VIEW = "Historique"   # sous VIEWS_ROOT (hors ~/Documents/iCloud)
 
 
-def list_runs(limit: int = 20) -> dict:
+def list_runs(limit: int = 20) -> LedgerRuns:
     """Lister les runs récents (schema LedgerRuns)."""
     with TrackingDB() as db:
-        return {"runs": db.ledger_runs(limit)}
+        return {"runs": cast(list[LedgerRun], db.ledger_runs(limit))}
 
 
-def show(run_id: str) -> dict:
+def show(run_id: str) -> LedgerShow:
     """Détail des opérations d'un run (schema LedgerShow)."""
     with TrackingDB() as db:
         return {"run_id": run_id, "operations": db.ledger_ops(run_id)}
 
 
-def revert(run_id: str, dry_run: bool = False) -> dict:
+def revert(run_id: str, dry_run: bool = False) -> LedgerRevert:
     """Annuler un run (rollback vérifié par hash) (schema LedgerRevert)."""
     with TrackingDB() as db:
         return _ledger.revert_run(db, run_id, dry_run=dry_run)
 
 
-def verify(run_id: str) -> dict:
+def verify(run_id: str) -> LedgerVerify:
     """Vérifier la cohérence ledger ↔ disque d'un run (schema LedgerVerify)."""
     with TrackingDB() as db:
         return _ledger.verify_run(db, run_id)
 
 
 def snapshot(run_id: str | None = None, apply: bool = False,
-             clear: bool = False, db: TrackingDB | None = None) -> dict:
+             clear: bool = False, db: TrackingDB | None = None) -> LedgerSnapshot:
     """Vue ``- Historique`` : snapshots datés de l'arborescence AVANT
     déplacements (schema LedgerSnapshot).
 
@@ -112,7 +116,7 @@ def snapshot(run_id: str | None = None, apply: bool = False,
 
 
 def purge(run_id: str | None = None, older_than_days: int | None = None,
-          dry_run: bool = True) -> dict:
+          dry_run: bool = True) -> LedgerPurge:
     """Vider la corbeille ledger (schema LedgerPurge).
 
     Suppression **définitive** des fichiers en corbeille (``op='trash'``),

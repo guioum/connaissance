@@ -20,6 +20,10 @@ from connaissance.core.frontmatter import read_frontmatter
 from connaissance.core.fsio import atomic_write_text
 from connaissance.core.paths import (BASE_PATH, VIEWS_ROOT, documents_read_path,
                                       require_paths)
+from connaissance.core.schemas import (CategoryView, DocumentsScan,
+                                       DocumentsSuspects, DocumentSuspect,
+                                       DocumentToTranscribe, RegisterBatch,
+                                       VerifyPreserve)
 from connaissance.core.tracking import TrackingDB
 from connaissance.core.filtres import Filtres
 
@@ -311,7 +315,8 @@ def _fm_source_hash(fm: dict) -> str | None:
     return h[len("sha256:"):] if h.startswith("sha256:") else h
 
 
-def scan_documents(since=None, until=None, db=None):
+def scan_documents(since=None, until=None,
+                   db=None) -> tuple[list[DocumentToTranscribe], dict]:
     """Scanner ~/Documents/ en mode JIT : zéro hash tant qu'il n'est pas requis.
 
     Règles :
@@ -332,8 +337,8 @@ def scan_documents(since=None, until=None, db=None):
     filtres = Filtres()
     if db is None:
         db = TrackingDB()
-    to_process = []
-    skipped = {}
+    to_process: list[DocumentToTranscribe] = []
+    skipped: dict = {}
 
     for f in sorted(DOCUMENTS_DIR.rglob("*")):
         if not f.is_file():
@@ -577,7 +582,7 @@ def _find_orphan_pipe_blocks(content: str, tables: list[dict]) -> list[int]:
     return orphans
 
 
-def detect_suspicious_transcriptions() -> list[dict]:
+def detect_suspicious_transcriptions() -> list[DocumentSuspect]:
     """Scanner Transcriptions/Documents/ pour les transcriptions avec patterns suspects.
 
     Flags les fichiers où :
@@ -589,7 +594,7 @@ def detect_suspicious_transcriptions() -> list[dict]:
 
     Retourne une liste de dicts : [{path, rel, tables, score, reasons}].
     """
-    suspects: list[dict] = []
+    suspects: list[DocumentSuspect] = []
     if not TRANSCRIPTIONS_DIR.exists():
         return suspects
 
@@ -699,7 +704,8 @@ def register_existing(db):
 # --- API publique (appelée par le dispatcher CLI et les outils MCP) ---
 
 
-def scan(since=None, until=None, output_file: str | None = None, db=None) -> dict:
+def scan(since=None, until=None, output_file: str | None = None,
+         db=None) -> DocumentsScan:
     """Scanner ~/Documents/ et retourner les fichiers à transcrire (schema DocumentsScan).
 
     Si ``output_file`` est fourni, le payload complet (qui peut dépasser le Mo
@@ -716,7 +722,7 @@ def scan(since=None, until=None, output_file: str | None = None, db=None) -> dic
 
     to_process, skipped = scan_documents(since, until, db=db)
     skipped_list = [{"reason": k, "count": v} for k, v in sorted(skipped.items())]
-    payload = {
+    payload: DocumentsScan = {
         "to_transcribe": to_process,
         "registered_existing": [],
         "skipped": skipped_list,
@@ -788,7 +794,7 @@ def register_existing_all(db: TrackingDB | None = None) -> dict:
 
 def register_batch(scan_file: str, dry_run: bool = False,
                    ocr_engine: str | None = None,
-                   db: TrackingDB | None = None) -> dict:
+                   db: TrackingDB | None = None) -> RegisterBatch:
     """Enregistrer en lot les documents d'un manifeste de `documents scan`.
 
     Relit le fichier produit par ``documents scan --output-file`` (clé
@@ -887,7 +893,7 @@ def _find_source_for_resume(rel_no_ext: Path) -> Path | None:
     return None
 
 
-def category_view(apply: bool = False, clear: bool = False) -> dict:
+def category_view(apply: bool = False, clear: bool = False) -> CategoryView:
     """Vue navigable de ~/Documents/ par CATÉGORIE, en raccourcis (symlinks).
 
     L'arborescence canonique reste par ENTITÉ ; cette vue ajoute une navigation
@@ -996,7 +1002,7 @@ def exclude(add: list[str] | None = None, remove: list[str] | None = None,
             "sample": sorted(cur)[:20]}
 
 
-def suspects() -> dict:
+def suspects() -> DocumentsSuspects:
     """Détecter les transcriptions avec patterns de tableaux suspects (schema DocumentsSuspects)."""
     s = detect_suspicious_transcriptions()
     return {"count": len(s), "suspects": s}
@@ -1036,7 +1042,7 @@ def tokenize_content(md: str) -> list[str]:
     return tokens
 
 
-def verify_preserve(before: str, after: str) -> dict:
+def verify_preserve(before: str, after: str) -> VerifyPreserve:
     """Vérifier que le contenu textuel est préservé entre deux markdowns.
 
     `before` et `after` peuvent être des chemins de fichiers ou le contenu

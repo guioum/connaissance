@@ -14,6 +14,8 @@ import sys
 from pathlib import Path
 from typing import Any, Callable
 
+from connaissance.core.schemas import ErrorEnvelope
+
 
 def _json_print(data: Any, human: bool = False) -> None:
     if human:
@@ -1103,12 +1105,14 @@ def main(argv: list[str] | None = None) -> int:
         # hérite de BaseException et échapperait au `except Exception`.
         if exc.code is None or isinstance(exc.code, int):
             raise   # sortie volontaire avec code numérique (ex. argparse)
-        err = {"error": {"type": "UsageError", "message": str(exc.code)}}
+        err: ErrorEnvelope = {"error": {"type": "UsageError",
+                                        "message": str(exc.code)}}
         print(json.dumps(err, indent=2, ensure_ascii=False), file=sys.stderr)
         return 2
     except Exception as exc:
-        err = {"error": {"type": type(exc).__name__, "message": str(exc)}}
-        print(json.dumps(err, indent=2, ensure_ascii=False), file=sys.stderr)
+        err2: ErrorEnvelope = {"error": {"type": type(exc).__name__,
+                                         "message": str(exc)}}
+        print(json.dumps(err2, indent=2, ensure_ascii=False), file=sys.stderr)
         return 1
 
     _json_print(result, human=getattr(args, "human", False))

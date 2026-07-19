@@ -22,6 +22,7 @@ import unicodedata
 from pathlib import Path
 
 from connaissance.core.paths import DOCUMENTS_DIR, VIEWS_ROOT, require_paths
+from connaissance.core.schemas import SujetExport, SujetList, SujetView
 from connaissance.core.tracking import TrackingDB
 
 SUJETS_VIEW_NAME = "Sujets"   # sous VIEWS_ROOT (hors ~/Documents/iCloud)
@@ -38,7 +39,7 @@ def _resolve_source(rel_path: str) -> Path | None:
     return p if p.exists() else None
 
 
-def list_sujets(db: TrackingDB | None = None) -> dict:
+def list_sujets(db: TrackingDB | None = None) -> SujetList:
     """Lister les sujets et le nombre de documents (schema SujetList)."""
     owns = db is None
     if db is None:
@@ -57,7 +58,7 @@ def list_sujets(db: TrackingDB | None = None) -> dict:
 
 
 def view(apply: bool = False, clear: bool = False,
-         db: TrackingDB | None = None) -> dict:
+         db: TrackingDB | None = None) -> SujetView:
     """Vue navigable par SUJET en raccourcis (symlinks), depuis les
     appartenances **multi-sujet** ``doc_sujets`` + ``doc_classification.sujet``
     (schema SujetView).
@@ -136,7 +137,7 @@ def view(apply: bool = False, clear: bool = False,
 
 
 def export(name: str, dest: str | None = None, as_zip: bool = False,
-           db: TrackingDB | None = None) -> dict:
+           db: TrackingDB | None = None) -> SujetExport:
     """Matérialiser un sujet : **copier** (ou zipper) ses documents vers un
     dossier réel, à la demande (schema SujetExport).
 
@@ -185,8 +186,9 @@ def export(name: str, dest: str | None = None, as_zip: bool = False,
         shutil.copy2(str(src), str(target))
         copied += 1
 
-    result = {"sujet": name, "exported": copied, "missing_source": missing,
-              "dest": str(staging), "zip": False}
+    result: SujetExport = {"sujet": name, "exported": copied,
+                           "missing_source": missing,
+                           "dest": str(staging), "zip": False}
     if as_zip:
         archive = shutil.make_archive(str(out_base), "zip", root_dir=str(staging))
         shutil.rmtree(staging)

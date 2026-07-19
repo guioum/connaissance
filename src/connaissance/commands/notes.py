@@ -14,6 +14,7 @@ from pathlib import Path
 
 from connaissance.core.frontmatter import split_frontmatter
 from connaissance.core.paths import BASE_PATH, require_paths
+from connaissance.core.schemas import NotesCopy
 from connaissance.core.tracking import TrackingDB
 from connaissance.core.filtres import Filtres
 
@@ -328,7 +329,7 @@ def scan(since=None, until=None, output_file: str | None = None) -> dict:
 
 
 def copy(dry_run: bool = False, since=None, until=None,
-         db: TrackingDB | None = None) -> dict:
+         db: TrackingDB | None = None) -> NotesCopy:
     """Copier les notes (schema NotesCopy)."""
     require_paths(NOTES_DIR, context="notes copy")
     since, until = _parse_dates(since, until)

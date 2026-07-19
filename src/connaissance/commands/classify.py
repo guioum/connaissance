@@ -14,6 +14,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Mapping
+from typing import Literal, cast
 import re
 import unicodedata
 from pathlib import Path
@@ -24,6 +26,9 @@ from connaissance.core import ledger as _ledger
 from connaissance.core.manifest_io import load_entries, unique_dest, unwrap
 from connaissance.core.output_file import write_or_inline
 from connaissance.core.paths import DOCUMENTS_DIR, require_paths, transit_file
+from connaissance.core.schemas import (ClassifyApply, ClassifyEntry,
+                                       ClassifyPrepare, ClassifyRegister,
+                                       ClassifyStatus)
 from connaissance.core.resolution import (chercher_alias, construire_nom_fichier,
                                           construire_slug, slugify)
 from connaissance.core.tracking import TrackingDB, snapshot_db
@@ -169,7 +174,7 @@ def _custom_id(rel: str) -> str:
     return "cls_" + hashlib.sha1(rel.encode("utf-8")).hexdigest()[:16]
 
 
-def _build_request(sig: dict, system: str, user_tpl: str, model: str,
+def _build_request(sig: Mapping, system: str, user_tpl: str, model: str,
                    known: list[str]) -> dict:
     hint = _heur.classify(sig, known_entities=known)
     summ = sig.get("summary") or {}
@@ -210,7 +215,8 @@ def _build_request(sig: dict, system: str, user_tpl: str, model: str,
 
 def prepare(scope: str | None = None, from_signals: str | None = None,
             model: str = DEFAULT_MODEL, limit: int | None = None,
-            output_file: str | None = None, db: TrackingDB | None = None) -> dict:
+            output_file: str | None = None,
+            db: TrackingDB | None = None) -> ClassifyPrepare:
     """Construire les requêtes Batch de classement (schema ClassifyPrepare).
 
     Source des signaux : ``from_signals`` (fichier JSON de `documents signals
@@ -243,7 +249,7 @@ def prepare(scope: str | None = None, from_signals: str | None = None,
     transit.write_text(json.dumps({"requests": requests}, ensure_ascii=False),
                        encoding="utf-8")
 
-    payload = {
+    payload: ClassifyPrepare = {
         "total": len(requests),
         "model": model,
         "transit_file": str(transit),
@@ -268,7 +274,8 @@ def prepare(scope: str | None = None, from_signals: str | None = None,
 
 # --- Fiche d'identité : vue unifiée (status) --------------------------------
 
-def status(path: str | None = None, db: TrackingDB | None = None) -> dict:
+def status(path: str | None = None,
+           db: TrackingDB | None = None) -> ClassifyStatus:
     """Fiche d'identité d'un document (``--path``) ou résumé corpus.
 
     Avec ``path`` : assemble les étages de la fiche (signaux Phase B +
@@ -280,7 +287,8 @@ def status(path: str | None = None, db: TrackingDB | None = None) -> dict:
         db = TrackingDB()
     try:
         if not path:
-            return db.classification_summary()
+            # Cast : compteurs agrégés dynamiquement côté DB.
+            return cast(ClassifyStatus, db.classification_summary())
         # Normaliser en chemin relatif à ~/Documents.
         p = Path(path)
         try:
@@ -306,7 +314,7 @@ def status(path: str | None = None, db: TrackingDB | None = None) -> dict:
 # --- Brique 5 : apply (manifeste → déplacements ledger, dry-run par défaut) --
 
 def apply(manifest_file: str, dry_run: bool = True,
-          db: TrackingDB | None = None) -> dict:
+          db: TrackingDB | None = None) -> ClassifyApply:
     """Appliquer le manifeste de pré-classement (schema ClassifyApply).
 
     Déplace chaque entrée ``status=auto`` vers sa destination **via le ledger**
@@ -356,7 +364,7 @@ def apply(manifest_file: str, dry_run: bool = True,
         if owns_db:
             db.close()
 
-    result = {
+    result: ClassifyApply = {
         "dry_run": dry_run,
         "auto_total": len(autos),
         "moved": 0 if dry_run else len(planned),
@@ -442,7 +450,8 @@ def _reconcile_entity(name: str, entity_type: str) -> tuple[str, str]:
 
 
 def register(results_file: str, from_prepare: str,
-             output_file: str | None = None, db: TrackingDB | None = None) -> dict:
+             output_file: str | None = None,
+             db: TrackingDB | None = None) -> ClassifyRegister:
     """Construire le manifeste de pré-classement (schema ClassifyRegister).
 
     Consomme les résultats Batch (``results_file`` : ``{results:[{custom_id,
@@ -469,7 +478,7 @@ def register(results_file: str, from_prepare: str,
     if db is None:
         db = TrackingDB()
 
-    entries: list[dict] = []
+    entries: list[ClassifyEntry] = []
     try:
         for res in results:
             cid = res.get("custom_id", "")
@@ -499,7 +508,10 @@ def register(results_file: str, from_prepare: str,
             # Sujet normalisé en slug (minuscules-tirets, ACCENTS CONSERVÉS — même
             # règle que les slugs d'entité) pour éviter les variantes café/cafes.
             sujet = slugify(j.get("sujet") or "") or None
-            confidence = j.get("confidence") if j.get("confidence") in ("high", "low") else "low"
+            # Cast : le `in ("high", "low")` garantit la valeur, pyright ne le voit pas.
+            confidence = cast(Literal["high", "low"],
+                              j.get("confidence")
+                              if j.get("confidence") in ("high", "low") else "low")
 
             reasons = []
             if not j:
@@ -545,7 +557,7 @@ def register(results_file: str, from_prepare: str,
             if confidence != "high" and "confiance_basse" not in reasons:
                 reasons.append("confiance_basse")
 
-            entry = {
+            entry: ClassifyEntry = {
                 "custom_id": cid, "source": source, "status": status, "dest": dest,
                 "entity": entity or hint.get("entity"), "entity_type": etype,
                 "entity_slug": slug, "category": category, "date": date,
@@ -595,7 +607,7 @@ def register(results_file: str, from_prepare: str,
                        encoding="utf-8")
 
     auto_n = sum(1 for e in entries if e["status"] == "auto")
-    payload = {
+    payload: ClassifyRegister = {
         "total": len(entries),
         "auto": auto_n,
         "attente": len(entries) - auto_n,

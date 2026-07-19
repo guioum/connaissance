@@ -24,6 +24,7 @@ from pathlib import Path
 
 from connaissance.core.frontmatter import split_frontmatter
 from connaissance.core.paths import BASE_PATH, documents_read_path
+from connaissance.core.schemas import AuditReindex
 from connaissance.core.tracking import TrackingDB
 
 try:
@@ -527,7 +528,7 @@ def prune_orphans(db: TrackingDB, dry_run: bool) -> dict:
 
 
 def reindex(dry_run: bool = False, skip_hashes: bool = False,
-            db: TrackingDB | None = None) -> dict:
+            db: TrackingDB | None = None) -> AuditReindex:
     """Repopuler tracking.db depuis les fichiers existants (schema AuditReindex)."""
     owns_db = db is None
     if db is None:

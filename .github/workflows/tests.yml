@@ -22,3 +22,21 @@ jobs:
         run: mkdir -p ~/Connaissance
       - name: Run test suite
         run: python -m pytest tests/ -q
+
+  pyright:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # pyrightconfig.json résout l'environnement via venvPath/venv=.venv :
+      # on installe le package dans un venv local du même nom qu'en dev.
+      - name: Install package in .venv
+        run: |
+          python -m venv .venv
+          .venv/bin/pip install -e .
+      - name: Run pyright (contrat schemas ↔ commandes)
+        run: |
+          pip install pyright
+          pyright

@@ -16,6 +16,7 @@ from connaissance.core import ledger as _ledger
 from connaissance.core.fsio import atomic_write_text
 from connaissance.core.manifest_io import unique_dest
 from connaissance.core.paths import BASE_PATH
+from connaissance.core.schemas import OptimizeApply, OptimizePlan
 from connaissance.core.tracking import TrackingDB
 
 CONNAISSANCE = BASE_PATH / "Connaissance"
@@ -460,7 +461,7 @@ def _serialize_entry(entry: dict) -> dict:
     return out
 
 
-def plan(db: TrackingDB | None = None) -> dict:
+def plan(db: TrackingDB | None = None) -> OptimizePlan:
     """Lister les PJ à promouvoir, les doublons et les orphelins (schema OptimizePlan)."""
     owns_db = db is None
     if db is None:
@@ -481,7 +482,7 @@ def plan(db: TrackingDB | None = None) -> dict:
 
 def apply(dry_run: bool = True, promote_docs: bool = True,
           dedup_attachments: bool = True, cleanup_orphans_flag: bool = True,
-          db: TrackingDB | None = None) -> dict:
+          db: TrackingDB | None = None) -> OptimizeApply:
     """Appliquer promotion + déduplication + nettoyage orphelins (schema OptimizeApply)."""
     owns_db = db is None
     if db is None:
@@ -511,7 +512,7 @@ def apply(dry_run: bool = True, promote_docs: bool = True,
             if empty_dirs_removed:
                 print(f"  ✓ {empty_dirs_removed} dossier(s) vide(s) supprimé(s)",
                       file=sys.stderr)
-        result = {
+        result: OptimizeApply = {
             "promoted": promoted,
             "deduped": deduped,
             "freed_bytes": freed + orphans_freed,

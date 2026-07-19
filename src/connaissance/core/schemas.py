@@ -3,14 +3,27 @@
 Toute fonction de `connaissance.commands.*` retourne un dict conforme à
 l'un de ces TypedDict. Les outils MCP `kb_*` exposent ces mêmes structures.
 
-Les types sont volontairement permissifs (NotRequired) sur les champs qui
-dépendent des flags passés — on teste la forme à l'appel, pas au typage.
+Contrat VÉRIFIÉ : les fonctions publiques des modules `commands/*` sont
+annotées avec ces types et pyright (mode basic, `pyrightconfig.json`)
+vérifie la conformité des dicts retournés. Les types restent volontairement
+permissifs (NotRequired) sur les champs qui dépendent des flags passés.
+
+Convention `--output-file` : les commandes qui passent par
+``core.output_file.write_or_inline`` retournent SOIT le payload complet,
+SOIT un récap compact (clés ``output_file``/``total_bytes`` + résumé).
+Les deux variantes vivent dans le MÊME TypedDict (total=False).
 """
 
 from __future__ import annotations
 
 from typing import Literal, NotRequired, TypedDict
 
+from connaissance.core.secrets import SecretFinding
+
+# Réexport délibéré : SecretFinding est défini dans core.secrets (source
+# unique de la détection) mais fait partie du contrat de sortie
+# (SecretFile.findings). L'ancienne définition dupliquée ici a été retirée.
+_REEXPORTS = (SecretFinding,)
 
 # --- Primitives partagées ---
 
@@ -22,7 +35,7 @@ Confidence = Literal["high", "low"]
 
 
 class ErrorEnvelope(TypedDict):
-    """Enveloppe d'erreur retournée par les wrappers MCP."""
+    """Enveloppe d'erreur (stderr du CLI + wrappers MCP)."""
     error: dict  # {type: str, message: str}
 
 
@@ -59,19 +72,33 @@ class SynthesePerimee(TypedDict):
 class StaleMoc(TypedDict):
     category: str
     status: Literal["manquant", "périmé"]
+    nouveaux_resumes: NotRequired[int]
+    seuil: NotRequired[int]        # présent seulement pour status "périmé"
 
 
 class MocPerimes(TypedDict):
     total: int
     categories: list[StaleMoc]
+    seuil: NotRequired[int]        # absent quand Résumés/ n'existe pas
 
 
 class Couts(TypedDict):
-    mode: Literal["batch", "interactif"]
+    mode: str                      # "batch" | "interactif" (non contraint par le CLI)
     resumes: dict
     synthese: dict
     moc: dict
     total: float
+    date_range: NotRequired[dict]  # {since, until} si une plage est passée
+
+
+class CoutsReels(TypedDict):
+    """Sortie de `pipeline costs --real` (agrégats du journal llm_usage)."""
+    total: dict
+    par_operation: list[dict]
+    par_source_type: list[dict]
+    par_model: list[dict]
+    source: str                    # "llm_usage"
+    date_range: NotRequired[dict]
 
 
 class Stats(TypedDict):
@@ -92,6 +119,7 @@ class PipelineDetection(TypedDict, total=False):
     moc_perimes: MocPerimes
     couts: Couts
     stats: Stats
+    date_range: dict               # {since, until} si une plage est passée
 
 
 # --- documents ---
@@ -106,10 +134,17 @@ class DocumentToTranscribe(TypedDict, total=False):
     reason: str          # ex. "source_changed"
 
 
-class DocumentsScan(TypedDict):
+class DocumentsScan(TypedDict, total=False):
     to_transcribe: list[DocumentToTranscribe]
     registered_existing: list[str]
-    skipped: list[dict]  # [{path, reason}]
+    skipped: list[dict]  # [{reason, count}]
+    # variante --output-file
+    output_file: str
+    total_bytes: int
+    total_to_transcribe: int
+    total_skipped: int
+    by_year: dict
+    sample_to_transcribe: list
 
 
 class DocumentSuspect(TypedDict):
@@ -145,6 +180,7 @@ class DocumentsSignals(TypedDict, total=False):
     scanned: int
     documents: list[DocumentSignals]
     skipped: dict
+    pdf_text_layer: bool
     note: str
     # variante --output-file
     output_file: str
@@ -160,11 +196,15 @@ class VerifyPreserve(TypedDict):
     ok: bool
     missing_tokens: list[str]
     added_tokens: list[str]
+    total_tokens_old: int
+    total_tokens_new: int
 
 
 class RegisterBatch(TypedDict):
     registered: int
     missing: list[dict]   # [{source, transcription, rel}] — transcription absente du disque
+    content_dupes_propagated: int
+    content_dupes_missing: list[dict]  # [{rel, same_as}]
     total: int
     dry_run: bool
 
@@ -187,6 +227,8 @@ class LedgerRun(TypedDict):
     total: int
     applied: int
     reverted: int
+    purged: int
+    trashed: int
     reason: str | None
 
 
@@ -278,6 +320,10 @@ class DuplicatesPlan(TypedDict, total=False):
     scanned: int
     manifest_file: str
     entries: list[dict]          # [{trash, keeper, kind, hash}]
+    # variante --output-file
+    output_file: str
+    total_bytes: int
+    sample: list[dict]
 
 
 class EntitiesCandidates(TypedDict):
@@ -286,36 +332,42 @@ class EntitiesCandidates(TypedDict):
     count: int
 
 
-class EntitiesMerge(TypedDict, total=False):
-    dry_run: bool
-    from_: str
-    into: str
-    docs_to_reassign: int
-    resumes_to_move: int
-    documents_to_move: int
-    aliases_to_add: list[str]
-    from_fiche_exists: bool
-    reassigned: int
-    resumes_moved: int
-    documents_moved: int
-    aliases_added: list[str]
-    from_fiche_trashed: bool
-    ledger_run: str
-    error: str
+# Clé JSON réelle "from" (mot réservé) → syntaxe fonctionnelle obligatoire.
+EntitiesMerge = TypedDict("EntitiesMerge", {
+    "dry_run": bool,
+    "from": str,
+    "into": str,
+    # dry-run
+    "docs_to_reassign": int,
+    "documents_to_move": int,
+    "aliases_to_add": list[str],
+    "from_fiche_exists": bool,
+    # apply
+    "reassigned": int,
+    "resumes_moved": int,
+    "documents_moved": int,
+    "aliases_added": list[str],
+    "from_fiche_trashed": bool,
+    "ledger_run": str,
+    "error": str,
+}, total=False)
 
 
-class EntitiesRename(TypedDict, total=False):
-    dry_run: bool
-    from_: str
-    new_slug: str
-    files_to_move: int
-    docs_entity: int
-    sujet_refs: int
-    files_moved: int
-    db: dict
-    fiche_updated: bool
-    ledger_run: str
-    error: str
+EntitiesRename = TypedDict("EntitiesRename", {
+    "dry_run": bool,
+    "from": str,
+    "new_slug": str,
+    # dry-run
+    "documents": int,
+    "sujet_refs": int,
+    # apply
+    "documents_relocated": int,
+    "files_moved": int,
+    "db": dict,
+    "fiche_updated": bool,
+    "ledger_run": str,
+    "error": str,
+}, total=False)
 
 
 class MediaPlan(TypedDict, total=False):
@@ -323,6 +375,10 @@ class MediaPlan(TypedDict, total=False):
     by_year: dict
     manifest_file: str
     entries: list[dict]          # [{source, dest}]
+    # variante --output-file
+    output_file: str
+    total_bytes: int
+    sample: list[dict]
 
 
 class MediaApply(TypedDict, total=False):
@@ -352,8 +408,9 @@ class Triage(TypedDict, total=False):
     total_files: int        # vrac + groupés + conteneurs
     loose_files: int        # fichiers en vrac, à classer
     grouped_files: int      # fichiers dans les dossiers thématiques groupés
-    grouped_folders: list   # [{path, theme, docs, files}] — collections à garder unies
-    grouped_candidates: list  # [{path, docs, files}] — collections cohérentes SANS thème (suggestions, informatif)
+    # payload : listes détaillées ; récap --output-file : compteurs (int).
+    grouped_folders: list | int   # [{path, theme, docs, files}] — collections à garder unies
+    grouped_candidates: list | int  # [{path, docs, files}] — collections cohérentes SANS thème
     groups: dict            # décompte EN VRAC : {A_documents, B_exports, C_media, D_code, autre}
     containers: dict        # {files_total, repos_code, bundles, archives}.
     # archives : [{path, files, docs_extracted, archived}] — une archive met de
@@ -367,13 +424,6 @@ class Triage(TypedDict, total=False):
     repos_code: int
     bundles: int
     archives: int
-
-
-class SecretFinding(TypedDict):
-    kind: str
-    severity: Literal["high", "medium"]
-    line: int
-    evidence: str   # toujours caviardé
 
 
 class SecretFile(TypedDict):
@@ -442,6 +492,7 @@ class ClassifyEntry(TypedDict, total=False):
     entity_slug: str
     category: str | None
     date: str | None
+    date_approx: bool
     title: str
     sujet: str | None
     confidence: Literal["high", "low"]
@@ -460,6 +511,7 @@ class ClassifyRegister(TypedDict, total=False):
     by_entity_type: dict
     by_category: dict
     attente_reasons: dict
+    auto_low_confidence: int
     sample_auto: list[dict]
 
 
@@ -487,7 +539,9 @@ class ClassifyApply(TypedDict, total=False):
     skipped: list[dict]
     errors: list[dict]
     moves: list[dict]
+    db_snapshot: str  # snapshot DB pris avant un apply réel
     ledger_run: str   # présent si des fichiers ont bougé (pour `ledger revert`)
+    ledger_report: str  # vue Markdown du run, à côté du JSONL
 
 
 # --- emails ---
@@ -502,12 +556,13 @@ class EmailsExtract(TypedDict):
     dedup_skipped: int
     filtered: list[dict]  # [{reason, count}]
     written: list[str]
+    dry_run: bool
 
 
 class EmailThread(TypedDict):
     message_ids: list[str]
     paths: list[str]
-    latest_date: str
+    latest_date: str | None
 
 
 class EmailsThreads(TypedDict):
@@ -532,6 +587,7 @@ class EmailsCalibrate(TypedDict):
     repartition: dict
     candidats: dict  # {whitelist, blacklist, revue}
     proposed_mutations: ScoringMutation
+    rapport_path: str
 
 
 class EmailsCleanupObsolete(TypedDict):
@@ -549,6 +605,8 @@ class NotesCopy(TypedDict):
     copied: int
     skipped: int
     errors: list[str]
+    attachments_copied: NotRequired[int]
+    dry_run: NotRequired[bool]
 
 
 # --- organize ---
@@ -557,7 +615,7 @@ class OrganizeEntry(TypedDict, total=False):
     id: str
     source: str  # documents|courriels|notes
     resume_path: str
-    entity_type: EntityType
+    entity_type: str  # EntityType attendu, mais lu du frontmatter (non garanti)
     entity_slug: str
     entity_name: str
     new_name: str
@@ -596,12 +654,18 @@ class OrganizeResolve(TypedDict):
 class OptimizePlan(TypedDict):
     promotable: list[dict]
     duplicates: list[dict]
+    orphan_attachments: list[dict]
 
 
 class OptimizeApply(TypedDict):
     promoted: int
     deduped: int
     freed_bytes: int
+    orphans_removed: int
+    empty_dirs_removed: int
+    dry_run: bool
+    ledger_run: NotRequired[str]
+    trashed_recoverable: NotRequired[int]
 
 
 # --- summarize ---
@@ -612,20 +676,32 @@ class SummarizeRequest(TypedDict):
     user: str
     model: str
     max_tokens: int
+    source_type: str
+    source_path: str
+    model_tier: str
+    model_reason: str
 
 
-class SummarizePrepare(TypedDict):
+class SummarizePrepare(TypedDict, total=False):
     requests: list[SummarizeRequest]
     total: int
+    user_excluded: int
     estimated_input_tokens: int
+    mode: str
+    preference: str
+    # variante --output-file
+    output_file: str
+    total_bytes: int
+    source_types: dict
+    model_tiers: dict
 
 
 class SummarizeRegister(TypedDict):
     path: str
     file_type: FileType
-    entity_type: NotRequired[str | None]
-    entity_slug: NotRequired[str | None]
+    source_type: NotRequired[str]
     frontmatter_injected: bool
+    error: NotRequired[str]
 
 
 class SummarizePlan(TypedDict):
@@ -664,9 +740,15 @@ class SynthesisPlan(TypedDict):
     stale_mocs: list[StaleMoc]
 
 
-class SynthesisRegister(TypedDict):
+class SynthesisRegister(TypedDict, total=False):
     registered: int
-    file_type: FileType
+    file_type: str      # mode hérité : fiche|chronologie|moc|digest|synthese|resume
+    kind: str           # mode moderne : fiche|chronologie|moc|digest|index
+    entity: str | None
+    path: str
+    abs_path: str
+    bytes: int
+    error: str
 
 
 # --- audit ---
@@ -680,36 +762,42 @@ class AuditCheck(TypedDict):
 class AuditResult(TypedDict):
     checks: list[AuditCheck]
     status: Literal["ok", "issues"]
+    total_issues: int
 
 
 class AuditReindex(TypedDict):
     rescanned: int
     reinserted: int
+    details: dict   # {transcriptions, resumes, synthese, orphans, hashes}
+    dry_run: bool
 
 
 class AuditRepairAttachments(TypedDict):
-    broken_refs: int
-    fixed: int
-    still_broken: list[str]
+    scanned: int
+    repaired: int
+    missing: int
+    already_ok: int
 
 
 class AuditArchiveNonDocuments(TypedDict):
     archived: int
-    list: list[str]
+    list: list  # dry-run/apply : [{source, dest}]
+    dry_run: bool
+    errors: NotRequired[list]
+    ledger_run: NotRequired[str]
+    error: NotRequired[str]
 
 
 # --- scope ---
 
-class ScopeFolder(TypedDict):
-    name: str
-    file_count: int
-    size: int
-    status: Literal["included", "excluded", "unknown"]
-
-
 class ScopeScan(TypedDict):
     root: str
-    folders: list[ScopeFolder]
+    total_dirs_scanned: int
+    already_decided: int
+    to_present: int
+    by_category: dict   # {categorie: {count, total_files, items}}
+    summary: dict       # {categorie: nombre de dossiers}
+    report_path: str
 
 
 class ScopeMutate(TypedDict):
@@ -735,6 +823,8 @@ class ScoringSet(TypedDict):
     written: bool
     regex_errors: list[str]
     post_validation_ok: bool
+    dry_run: NotRequired[bool]
+    error: NotRequired[str]
 
 
 class ScoringValidate(TypedDict):
@@ -748,6 +838,8 @@ class ManifestPatchItem(TypedDict, total=False):
     id: str
     set: dict
     delete: bool
+    filter: dict   # patchs en masse : prédicats appliqués
+    count: int     # suppression en masse : nb d'entrées retirées
 
 
 class ManifestPatchNotFound(TypedDict, total=False):
@@ -761,3 +853,4 @@ class ManifestPatchResult(TypedDict, total=False):
     patches: list[ManifestPatchItem]
     updated: int
     not_found: list[ManifestPatchNotFound]
+    error: str

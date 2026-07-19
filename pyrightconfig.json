@@ -1,0 +1,15 @@
+{
+  // Contrat vérifié : les fonctions publiques de commands/* sont annotées avec
+  // les TypedDict de core/schemas.py ; pyright (mode basic) garde le contrat.
+  "include": ["src"],
+  "typeCheckingMode": "basic",
+  "venvPath": ".",
+  "venv": ".venv",
+  "pythonVersion": "3.11",
+
+  // Les schemas déclarent massivement des clés NotRequired (total=False) car
+  // leur présence dépend des flags CLI. Le code interne accède à ces clés dans
+  // des branches où elles sont garanties présentes — ce diagnostic ne
+  // produirait que du bruit ici.
+  "reportTypedDictNotRequiredAccess": false
+}

@@ -18,6 +18,7 @@ import shutil
 from pathlib import Path
 
 from connaissance.core.paths import BASE_PATH
+from connaissance.core.schemas import AuditRepairAttachments
 
 TRANSCRIPTIONS_DOCS = BASE_PATH / "Connaissance" / "Transcriptions" / "Documents"
 CENTRAL_ATT = TRANSCRIPTIONS_DOCS / "Attachments"
@@ -43,8 +44,9 @@ def _find_attachment(fname: str) -> Path | None:
     return None
 
 
-def repair(dry_run: bool = False) -> dict:
-    stats = {"scanned": 0, "repaired": 0, "missing": 0, "already_ok": 0}
+def repair(dry_run: bool = False) -> AuditRepairAttachments:
+    stats: AuditRepairAttachments = {"scanned": 0, "repaired": 0,
+                                     "missing": 0, "already_ok": 0}
     if not TRANSCRIPTIONS_DOCS.exists():
         print(f"✗ Pas de dossier {TRANSCRIPTIONS_DOCS}", file=sys.stderr)
 

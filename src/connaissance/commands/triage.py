@@ -41,6 +41,7 @@ from pathlib import Path
 
 from connaissance.core.output_file import write_or_inline
 from connaissance.core.paths import DOCUMENTS_DIR, SPECIAL_TOP_DIRS
+from connaissance.core.schemas import Triage
 
 # Marqueurs FICHIERS : si un dossier en contient un, c'est un repo de code.
 CODE_MARKERS = {
@@ -173,7 +174,7 @@ def _subtree_stats(root: Path) -> tuple[dict, dict]:
     return total, docs
 
 
-def triage(output_file: str | None = None) -> dict:
+def triage(output_file: str | None = None) -> Triage:
     """Cartographier ~/Documents en groupes A/B/C/D (lecture seule)."""
     root = DOCUMENTS_DIR
     sub_total, sub_docs = _subtree_stats(root)
@@ -284,7 +285,7 @@ def triage(output_file: str | None = None) -> dict:
     ]
     loose = sum(groups.values())
     grouped_files = sum(g["files"] for g in grouped)
-    payload = {
+    payload: Triage = {
         "total_files": loose + grouped_files + container_files,
         "loose_files": loose,            # fichiers en vrac, à classer
         "grouped_files": grouped_files,  # fichiers dans les dossiers groupés

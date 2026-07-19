@@ -19,6 +19,8 @@ from pathlib import Path
 
 from connaissance.core.manifest_io import load_entries
 from connaissance.core.paths import BASE_PATH
+from connaissance.core.schemas import (ManifestPatchItem, ManifestPatchNotFound,
+                                       ManifestPatchResult)
 
 
 CONNAISSANCE_ROOT = BASE_PATH / "Connaissance"
@@ -102,7 +104,7 @@ def patch(manifest_path: str,
           patches: list[dict] | None = None,
           filter_expr: str | None = None,
           set_expr: str | dict | None = None,
-          delete_filter: str | None = None) -> dict:
+          delete_filter: str | None = None) -> ManifestPatchResult:
     """Appliquer des patches à un manifeste (schema ManifestPatchResult).
 
     Parameters
@@ -130,8 +132,8 @@ def patch(manifest_path: str,
         }
 
     envelope, entries = _load_manifest(path)
-    applied_patches: list[dict] = []
-    not_found: list[dict] = []
+    applied_patches: list[ManifestPatchItem] = []
+    not_found: list[ManifestPatchNotFound] = []
     updated = 0
 
     def _rebuild_index() -> dict[str, int]:
@@ -206,7 +208,7 @@ def patch(manifest_path: str,
 
     _save_manifest(path, envelope, entries)
 
-    result: dict = {
+    result: ManifestPatchResult = {
         "manifest_path": str(path),
         "patches": applied_patches,
         "updated": updated,

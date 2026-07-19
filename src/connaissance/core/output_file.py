@@ -24,16 +24,26 @@ Usage depuis un module ``commands/`` :
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, TypeVar, cast
+
+# Générique : préserve le TypedDict du payload dans la signature de l'appelant.
+# Borne Mapping (et non dict) : un TypedDict est un Mapping, pas un dict aux
+# yeux de pyright. Le récap compact (variante --output-file) est déclaré dans
+# le MÊME TypedDict (clés NotRequired output_file/total_bytes + résumé), d'où
+# le cast final.
+T = TypeVar("T", bound=Mapping[str, object])
 
 
 def write_or_inline(
-    payload: dict,
+    payload: T,
     *,
     output_file: str | None,
-    summary_fn: Callable[[dict], dict] | None = None,
-) -> dict:
+    # Any (et non T) : les résumés locaux `_summary(p: dict)` des appelants
+    # doivent rester assignables quel que soit le TypedDict du payload.
+    summary_fn: Callable[[Any], dict] | None = None,
+) -> T:
     """Si ``output_file`` est fourni, écrire ``payload`` en JSON et retourner
     un récap compact ; sinon retourner ``payload`` tel quel.
 
@@ -60,4 +70,4 @@ def write_or_inline(
     }
     if summary_fn is not None:
         summary.update(summary_fn(payload))
-    return summary
+    return cast(T, summary)

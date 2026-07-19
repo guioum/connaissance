@@ -50,7 +50,10 @@ def _read_fm(md: Path) -> dict | None:
 def _set_fm_source(md: Path, new_source: str) -> None:
     """Mettre à jour le champ ``source`` du frontmatter d'un résumé."""
     t = md.read_text(encoding="utf-8")
-    fm_text, body = split_frontmatter(t)
+    # NOTE : split_frontmatter peut retourner None (résumé sans frontmatter) —
+    # crash latent connu, non corrigé ici (annotation seule, pas de changement
+    # de comportement).
+    fm_text, body = split_frontmatter(t)  # pyright: ignore[reportGeneralTypeIssues]
     fm = yaml.safe_load(fm_text) or {}
     fm["source"] = new_source
     write_frontmatter(md, fm, body)

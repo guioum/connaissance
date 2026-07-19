@@ -27,6 +27,8 @@ from connaissance.core.frontmatter import split_frontmatter
 from connaissance.core.fsio import atomic_write_text
 from connaissance.core.paths import CONNAISSANCE_ROOT
 from connaissance.core.resolution import slugify
+from connaissance.core.schemas import (SummarizePlan, SummarizePrepare,
+                                       SummarizeRegister, SummarizeRequest)
 from connaissance.core.tracking import TrackingDB
 
 TRANSCRIPTIONS = CONNAISSANCE_ROOT / "Transcriptions"
@@ -187,7 +189,8 @@ def _infer_source_type_from_path(rel_path: str) -> str | None:
 # --- API publique ---
 
 
-def plan(db: TrackingDB | None = None, source: str | None = None) -> dict:
+def plan(db: TrackingDB | None = None,
+         source: str | None = None) -> SummarizePlan:
     """Lister les résumés manquants (schema SummarizePlan).
 
     Délègue à pipeline.detect mais transforme la sortie en
@@ -220,7 +223,7 @@ def prepare(paths: list[str] | str = "all", mode: str = "batch",
             source: str | None = None,
             output_file: str | None = None,
             preference: str = "auto",
-            db: TrackingDB | None = None) -> dict:
+            db: TrackingDB | None = None) -> SummarizePrepare:
     """Construire les requêtes pour `mcp__claude_api__submit_batch`.
 
     Parameters
@@ -270,7 +273,7 @@ def prepare(paths: list[str] | str = "all", mode: str = "batch",
     else:
         target_paths = list(paths)
 
-    requests = []
+    requests: list[SummarizeRequest] = []
     total_input_chars = 0
     exclude_set = _filtres.load_exclude_set()   # exclus du payant (OCR + résumé)
     excluded_n = 0
@@ -374,7 +377,7 @@ def prepare(paths: list[str] | str = "all", mode: str = "batch",
     requests.sort(key=lambda r: r.get("source_type", ""))
 
     estimated_tokens = total_input_chars // 4  # ~4 chars/token
-    payload = {
+    payload: SummarizePrepare = {
         "requests": requests,
         "total": len(requests),
         "user_excluded": excluded_n,
@@ -435,7 +438,7 @@ def _strip_code_fence(content: str) -> str:
 
 def register(custom_id: str, content: str,
              source_path: str | None = None,
-             db: TrackingDB | None = None) -> dict:
+             db: TrackingDB | None = None) -> SummarizeRegister:
     """Enregistrer le résultat d'un batch dans la base (schema SummarizeRegister).
 
     Le contenu `content` est le markdown produit par claude-api-mcp. Son
@@ -454,7 +457,7 @@ def register(custom_id: str, content: str,
 
 
 def _register_impl(custom_id: str, content: str,
-                   source_path: str | None, db: TrackingDB) -> dict:
+                   source_path: str | None, db: TrackingDB) -> SummarizeRegister:
     # Défense : certains modèles encapsulent leur réponse dans une fence
     # ```markdown ... ```. On déballe avant parsing du frontmatter.
     content = _strip_code_fence(content)

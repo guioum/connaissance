@@ -11,6 +11,9 @@ from pathlib import Path
 
 from connaissance.core.frontmatter import read_frontmatter
 from connaissance.core.paths import BASE_PATH
+from connaissance.core.schemas import (AuditArchiveNonDocuments, AuditCheck,
+                                       AuditReindex, AuditRepairAttachments,
+                                       AuditResult)
 from connaissance.core.tracking import TrackingDB
 
 CONNAISSANCE = BASE_PATH / "Connaissance"
@@ -288,7 +291,7 @@ _AUDIT_STEPS = {
 }
 
 
-def check(steps: list[str] | None = None) -> dict:
+def check(steps: list[str] | None = None) -> AuditResult:
     """Exécuter les vérifications d'intégrité (schema AuditResult).
 
     `steps` = sous-ensemble des 6 vérifications ou `["all"]`.
@@ -298,7 +301,7 @@ def check(steps: list[str] | None = None) -> dict:
     else:
         active = [s for s in steps if s in _AUDIT_STEPS]
 
-    checks: list[dict] = []
+    checks: list[AuditCheck] = []
     total_issues = 0
     for name in active:
         issues = _AUDIT_STEPS[name]() or []
@@ -317,7 +320,7 @@ def check(steps: list[str] | None = None) -> dict:
     }
 
 
-def reindex_db(dry_run: bool = False) -> dict:
+def reindex_db(dry_run: bool = False) -> AuditReindex:
     """Repopuler tracking.db depuis les fichiers existants (wrapper audit_reindex)."""
     from connaissance.commands import audit_reindex
     return audit_reindex.reindex(dry_run=dry_run)
@@ -342,13 +345,13 @@ def restore_journals(force: bool = False) -> dict:
         db.close()
 
 
-def repair_attachments(dry_run: bool = False) -> dict:
+def repair_attachments(dry_run: bool = False) -> AuditRepairAttachments:
     """Réparer les références d'attachements cassées (wrapper audit_attachments)."""
     from connaissance.commands import audit_attachments
     return audit_attachments.repair(dry_run=dry_run)
 
 
-def archive_non_documents(dry_run: bool = True) -> dict:
+def archive_non_documents(dry_run: bool = True) -> AuditArchiveNonDocuments:
     """Archiver les non-documents hors du périmètre (wrapper audit_archive).
     Dry-run par défaut — passer dry_run=False / `--apply` en CLI pour exécuter."""
     from connaissance.commands import audit_archive

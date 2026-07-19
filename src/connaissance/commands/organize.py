@@ -20,6 +20,8 @@ from connaissance.core.fsio import atomic_write_text
 from connaissance.core.paths import BASE_PATH
 from connaissance.core import ledger as _ledger
 from connaissance.core.manifest_io import load_entries
+from connaissance.core.schemas import (OrganizeApply, OrganizeEntry,
+                                       OrganizePlan, OrganizeResolve)
 from connaissance.core.tracking import TrackingDB
 from connaissance.core.resolution import construire_slug, construire_nom_fichier, chercher_alias
 
@@ -385,7 +387,7 @@ def _apply_manifest_impl(entries: list, dry_run: bool, db: TrackingDB) -> dict:
     return result
 
 
-def generer_manifeste():
+def generer_manifeste() -> list[OrganizeEntry]:
     """Lire les résumés non organisés et pré-remplir un manifeste JSON.
 
     Pour chaque résumé, extrait le frontmatter, construit le new_name via
@@ -398,7 +400,7 @@ def generer_manifeste():
     """
     # Trouver les résumés non organisés
     entity_dirs = {"personnes", "organismes", "divers", "inconnus"}
-    manifeste = []
+    manifeste: list[OrganizeEntry] = []
     _db = TrackingDB()   # lecture seule : aligner les entités sur le registre
     try:
 
@@ -498,7 +500,7 @@ def generer_manifeste():
 # --- API publique ---
 
 
-def plan() -> dict:
+def plan() -> OrganizePlan:
     """Générer un manifeste d'organisation (schema OrganizePlan).
 
     Écrit le manifeste dans ~/Connaissance/.config/organize-manifest.json
@@ -570,10 +572,10 @@ def enrich(manifest_path: str, qmd_results: list[dict]) -> dict:
     }
 
 
-def apply(manifest: str, dry_run: bool = True) -> dict:
+def apply(manifest: str, dry_run: bool = True) -> OrganizeApply:
     """Appliquer un manifeste (schema OrganizeApply). Dry-run par défaut."""
     result = _apply_manifest(manifest, dry_run=dry_run)
-    out = {
+    out: OrganizeApply = {
         "moved": result.get("moved", 0),
         "skipped": result.get("skipped", 0),
         "errors": result.get("errors", 0),
@@ -587,9 +589,9 @@ def apply(manifest: str, dry_run: bool = True) -> dict:
 
 
 def resolve(name: str | None = None, date: str | None = None,
-            title: str | None = None, alias: str | None = None) -> dict:
+            title: str | None = None, alias: str | None = None) -> OrganizeResolve:
     """Résoudre un nom/date/alias vers slug/filename/type-slug (schema OrganizeResolve)."""
-    result: dict = {"slug": "", "filename": "", "alias_match": None}
+    result: OrganizeResolve = {"slug": "", "filename": "", "alias_match": None}
     if name:
         result["slug"] = construire_slug(name)
     if date and title:

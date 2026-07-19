@@ -35,6 +35,8 @@ from connaissance.core.output_file import write_or_inline
 from connaissance.core.paths import (DOCUMENTS_DIR, SPECIAL_TOP_DIRS,
                                       documents_read_path, is_dataless,
                                       require_connaissance_root)
+from connaissance.core.schemas import (SecretFile, SecretFinding, SecretsQuarantine,
+                                       SecretsRelocate, SecretsScan)
 
 # Zone physique des secrets relocalisés (préfixe « - » → hors scan pipeline).
 PROTECTED_SUBDIR = "- Protégés/secrets"
@@ -72,7 +74,8 @@ def _should_read_content(path: Path) -> bool:
     return path.name.lower() in _EXTLESS_SCAN
 
 
-def scan(scope: str | None = None, output_file: str | None = None) -> dict:
+def scan(scope: str | None = None,
+         output_file: str | None = None) -> SecretsScan:
     """Scanner ~/Documents (ou un sous-dossier) à la recherche de secrets.
 
     Args:
@@ -85,7 +88,7 @@ def scan(scope: str | None = None, output_file: str | None = None) -> dict:
     (schema ``SecretsScan``).
     """
     base = DOCUMENTS_DIR if scope is None else (DOCUMENTS_DIR / scope)
-    files: list[dict] = []
+    files: list[SecretFile] = []
     scanned = 0
     containers_skipped = 0
     skipped = {"dataless": 0, "too_big": 0, "binary": 0, "read_error": 0}
@@ -127,7 +130,7 @@ def scan(scope: str | None = None, output_file: str | None = None) -> dict:
             rel = str(fpath.relative_to(DOCUMENTS_DIR))
 
             name_sig = _secrets.filename_signal(fname)
-            content_findings: list[dict] = []
+            content_findings: list[SecretFinding] = []
 
             if _should_read_content(fpath):
                 read_path = documents_read_path(fpath)
@@ -166,7 +169,7 @@ def scan(scope: str | None = None, output_file: str | None = None) -> dict:
             })
 
     files.sort(key=lambda f: (f["severity"] != "high", -f["findings_count"]))
-    payload = {
+    payload: SecretsScan = {
         "flagged": len(files),
         "files": files,
         "scanned": scanned,
@@ -195,7 +198,7 @@ def scan(scope: str | None = None, output_file: str | None = None) -> dict:
 
 
 def quarantine_apply(scope: str | None = None,
-                     include_medium: bool = False) -> dict:
+                     include_medium: bool = False) -> SecretsQuarantine:
     """Peupler la liste de quarantaine secrets depuis un scan (garde-fou ACTIF).
 
     Scanne (lecture seule), puis écrit les chemins détectés dans
@@ -214,7 +217,7 @@ def quarantine_apply(scope: str | None = None,
     require_connaissance_root()
     ocr_exts = set(_filtres.Filtres().docs_config.get("extensions", []))
 
-    def _risky(f: dict) -> bool:
+    def _risky(f: SecretFile) -> bool:
         if f["severity"] == "high":
             return True
         if f["severity"] != "medium":
@@ -252,7 +255,7 @@ def quarantine_apply(scope: str | None = None,
     }
 
 
-def relocate(dry_run: bool = True, db=None) -> dict:
+def relocate(dry_run: bool = True, db=None) -> SecretsRelocate:
     """Déplacer PHYSIQUEMENT les secrets en quarantaine vers ``- Protégés/secrets/``
     (schema SecretsRelocate).
 
@@ -303,7 +306,7 @@ def relocate(dry_run: bool = True, db=None) -> dict:
     if not dry_run and moved:
         _filtres.write_quarantine_set(new_quarantine)
 
-    result = {
+    result: SecretsRelocate = {
         "dry_run": dry_run,
         "candidates": len(rels),
         "moved": 0 if dry_run else len(moved),

@@ -16,6 +16,7 @@ import yaml
 from connaissance.core import ledger as _ledger
 from connaissance.core import frontmatter as _fm
 from connaissance.core.paths import CONNAISSANCE_ROOT, require_connaissance_root
+from connaissance.core.schemas import EmailsCleanupObsolete
 from connaissance.core.tracking import TrackingDB
 from connaissance.core.filtres import Filtres
 
@@ -42,8 +43,9 @@ def parse_frontmatter(content: str) -> tuple[dict, str] | None:
     fm = _fm.parse_frontmatter(content)
     if fm is None:
         return None
+    # fm non-None garantit un frontmatter délimité → split ne peut être None.
     parts = _fm.split_frontmatter(content)
-    return fm, parts[1].lstrip("\n")
+    return fm, parts[1].lstrip("\n")  # pyright: ignore[reportOptionalSubscript]
 
 
 def extract_attachments_from_body(body: str) -> list[dict]:
@@ -295,7 +297,7 @@ def cleanup_obsolete(dry_run: bool = True,
                      only_domain: str | None = None,
                      only_entity: str | None = None,
                      since=None, until=None,
-                     db: TrackingDB | None = None) -> dict:
+                     db: TrackingDB | None = None) -> EmailsCleanupObsolete:
     """Re-scorer et archiver les courriels obsolètes (schema EmailsCleanupObsolete).
 
     Mode par défaut : dry_run=True (ne modifie rien, retourne la liste).

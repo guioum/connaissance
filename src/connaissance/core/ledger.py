@@ -19,6 +19,7 @@ import uuid
 from pathlib import Path
 
 from connaissance.core.paths import CONNAISSANCE_ROOT, documents_read_path
+from connaissance.core.schemas import LedgerPurge, LedgerRevert, LedgerVerify
 from connaissance.core.tracking import LEDGER_JOURNAL_DIR, _append_jsonl
 
 
@@ -120,7 +121,8 @@ def safe_trash(db, path, reason: str, run_id: str,
 
 
 def purge_run(db, *, run_id: str | None = None,
-              older_than_days: int | None = None, dry_run: bool = False) -> dict:
+              older_than_days: int | None = None,
+              dry_run: bool = False) -> LedgerPurge:
     """Vider la corbeille ledger : suppression **définitive** des fichiers
     déplacés en corbeille (``op='trash'``, ``status='applied'``).
 
@@ -130,7 +132,7 @@ def purge_run(db, *, run_id: str | None = None,
     rapporte seulement ce qui serait purgé.
     """
     ops = db.ledger_trash_ops(run_id=run_id, older_than_days=older_than_days)
-    result = {
+    result: LedgerPurge = {
         "dry_run": dry_run,
         "purged": 0,
         "freed_bytes": 0,
@@ -200,7 +202,7 @@ def snapshot_entries(db, *, run_id: str | None = None) -> list[dict]:
     return out
 
 
-def revert_run(db, run_id: str, *, dry_run: bool = False) -> dict:
+def revert_run(db, run_id: str, *, dry_run: bool = False) -> LedgerRevert:
     """Annuler un run : remettre chaque fichier à son ancien emplacement.
 
     Parcourt les opérations ``applied`` en ordre **inverse**. Chaque restauration
@@ -214,7 +216,7 @@ def revert_run(db, run_id: str, *, dry_run: bool = False) -> dict:
     En ``dry_run``, rien n'est déplacé ; on rapporte seulement ce qui serait fait.
     """
     ops = db.ledger_ops(run_id, status="applied")
-    result = {
+    result: LedgerRevert = {
         "run_id": run_id,
         "dry_run": dry_run,
         "reverted": 0,
@@ -281,7 +283,7 @@ def write_run_report(run_id: str) -> str | None:
         return None
 
 
-def verify_run(db, run_id: str) -> dict:
+def verify_run(db, run_id: str) -> LedgerVerify:
     """Vérifier la cohérence ledger ↔ disque pour un run.
 
     Pour chaque opération ``applied`` : le fichier est-il bien présent à
@@ -289,7 +291,8 @@ def verify_run(db, run_id: str) -> dict:
     disparu) sans rien changer.
     """
     ops = db.ledger_ops(run_id, status="applied")
-    result = {"run_id": run_id, "checked": len(ops), "ok": 0, "issues": []}
+    result: LedgerVerify = {"run_id": run_id, "checked": len(ops), "ok": 0,
+                            "issues": []}
     for row in ops:
         cur = Path(row["new_path"])
         if not cur.exists():

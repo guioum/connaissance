@@ -24,6 +24,7 @@ from connaissance.core.manifest_io import load_entries
 from connaissance.core.output_file import write_or_inline
 from connaissance.core.paths import (DOCUMENTS_DIR, documents_read_path,
                                      require_paths, transit_file)
+from connaissance.core.schemas import Duplicates, DuplicatesApply, DuplicatesPlan
 from connaissance.core.tracking import TrackingDB
 
 QUASI_THRESHOLD = _dedup.DEFAULT_THRESHOLD   # Hamming <= 3 / 64
@@ -43,7 +44,7 @@ def _keeper_index(rels: list[str]) -> int:
                key=lambda i: (len(Path(rels[i]).parts), rels[i].lower()))
 
 
-def scan(db: TrackingDB | None = None) -> dict:
+def scan(db: TrackingDB | None = None) -> Duplicates:
     """Détecter les doublons (exacts + quasi) du corpus signalé (schema Duplicates).
 
     Lecture seule. Itère le cache ``doc_signals`` ; lit le contenu via le miroir
@@ -104,7 +105,8 @@ def scan(db: TrackingDB | None = None) -> dict:
     }
 
 
-def plan(output_file: str | None = None, db: TrackingDB | None = None) -> dict:
+def plan(output_file: str | None = None,
+         db: TrackingDB | None = None) -> DuplicatesPlan:
     """Construire un manifeste de déduplication (schema DuplicatesPlan).
 
     Pour chaque cluster, garde un *keeper* (le mieux rangé) et marque les autres
@@ -127,7 +129,7 @@ def plan(output_file: str | None = None, db: TrackingDB | None = None) -> dict:
     transit = transit_file("duplicates-manifest")
     transit.write_text(json.dumps({"entries": entries}, ensure_ascii=False),
                        encoding="utf-8")
-    payload = {
+    payload: DuplicatesPlan = {
         "total": len(entries),
         "exact": s["exact_duplicates"],
         "quasi": s["quasi_duplicates"],
@@ -147,7 +149,7 @@ def plan(output_file: str | None = None, db: TrackingDB | None = None) -> dict:
 
 
 def apply(manifest_file: str, dry_run: bool = True,
-          db: TrackingDB | None = None) -> dict:
+          db: TrackingDB | None = None) -> DuplicatesApply:
     """Envoyer les doublons d'un manifeste à la corbeille ledger (schema
     DuplicatesApply). **Dry-run par défaut** ; réversible par ``ledger revert``.
     """
@@ -209,7 +211,7 @@ def apply(manifest_file: str, dry_run: bool = True,
         if owns:
             db.close()
 
-    result = {
+    result: DuplicatesApply = {
         "dry_run": dry_run,
         "planned": len(entries),
         "trashed": 0 if dry_run else len(trashed),

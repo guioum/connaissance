@@ -21,6 +21,9 @@ import yaml
 from connaissance.core.frontmatter import parse_frontmatter as _parse_fm
 from connaissance.core.fsio import atomic_write_text
 from connaissance.core.paths import CONNAISSANCE_ROOT
+from connaissance.core.schemas import (AliasCandidate, AliasesCandidates,
+                                       RelationCandidate, RelationsCandidates,
+                                       SynthesisPlan, SynthesisRegister)
 from connaissance.core.tracking import TrackingDB
 
 RESUMES = CONNAISSANCE_ROOT / "Résumés"
@@ -84,7 +87,7 @@ def _load_existing_aliases(entity: str) -> list[str]:
 # --- API publique ---
 
 
-def plan(db: TrackingDB | None = None) -> dict:
+def plan(db: TrackingDB | None = None) -> SynthesisPlan:
     """Lister les entités et MOC à régénérer (schema SynthesisPlan)."""
     from connaissance.commands import pipeline
     result = pipeline.detect(db=db, steps=["synthese_perimee", "moc_perimes"])
@@ -94,7 +97,7 @@ def plan(db: TrackingDB | None = None) -> dict:
     }
 
 
-def aliases_candidates(entity: str) -> dict:
+def aliases_candidates(entity: str) -> AliasesCandidates:
     """Extraire les alias candidats pour une entité (schema AliasesCandidates, NEW).
 
     Scanne tous les résumés de l'entité et extrait :
@@ -138,7 +141,7 @@ def aliases_candidates(entity: str) -> dict:
                         )
                         entry["count"] += 1
 
-    candidates = sorted(
+    candidates: list[AliasCandidate] = sorted(
         ({"alias": v["alias"], "support_resumes": v["count"], "kind": v["kind"]}
          for v in candidate_sources.values()),
         key=lambda c: (-cast(int, c["support_resumes"]), c["alias"]),
@@ -173,7 +176,7 @@ def _entity_display_title(other: str) -> str:
     return other.split("/", 1)[-1].replace("-", " ")
 
 
-def relations_candidates(entity: str) -> dict:
+def relations_candidates(entity: str) -> RelationsCandidates:
     """Extraire les relations candidates via co-mentions (schema RelationsCandidates, NEW).
 
     Scanne tous les résumés de l'entité et collecte les autres entités
@@ -201,7 +204,7 @@ def relations_candidates(entity: str) -> dict:
                 rel_path = str(md_path)
             co_mentions[other].append(rel_path)
 
-    candidates = []
+    candidates: list[RelationCandidate] = []
     for other, supports in co_mentions.items():
         candidates.append({
             "other": other,
@@ -756,7 +759,7 @@ def register(content: str | None = None,
              rel_path: str | None = None,
              source_type: str | None = None,
              source_path: str | None = None,
-             db: TrackingDB | None = None) -> dict:
+             db: TrackingDB | None = None) -> SynthesisRegister:
     """Écrire une fiche/chronologie/MOC/digest et l'enregistrer dans la DB.
 
     Deux modes :

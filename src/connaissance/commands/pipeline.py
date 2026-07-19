@@ -8,8 +8,14 @@ Expose :
 """
 
 
+from typing import cast
+
 from connaissance.core.frontmatter import parse_frontmatter
 from connaissance.core.paths import BASE_PATH
+from connaissance.core.schemas import (Couts, CoutsReels, MocPerimes,
+                                       NonOrganises, PipelineDetection,
+                                       ResumesManquants, ResumesPerimes,
+                                       StaleMoc, Stats, SynthesePerimee)
 from connaissance.core.tracking import TrackingDB
 
 CONNAISSANCE = BASE_PATH / "Connaissance"
@@ -17,7 +23,8 @@ RESUMES = CONNAISSANCE / "Résumés"
 SYNTHESE = CONNAISSANCE / "Synthèse"
 
 
-def resumes_manquants(db, source_type=None, since=None, until=None):
+def resumes_manquants(db, source_type=None, since=None,
+                      until=None) -> ResumesManquants:
     """Résumés manquants par source. ``since``/``until`` en YYYY-MM-DD."""
     rows = db.missing_resumes(source_type, since=since, until=until)
     by_source = {}
@@ -31,7 +38,7 @@ def resumes_manquants(db, source_type=None, since=None, until=None):
     }
 
 
-def non_organises(db):
+def non_organises(db) -> NonOrganises:
     """Résumés sans entité assignée."""
     rows = db.unorganized_resumes()
     return {
@@ -40,7 +47,7 @@ def non_organises(db):
     }
 
 
-def synthese_perimee(db):
+def synthese_perimee(db) -> SynthesePerimee:
     """Entités dont la synthèse est périmée ou manquante."""
     rows = db.stale_synthesis()
     return {
@@ -63,7 +70,7 @@ def synthese_perimee(db):
 MOC_STALE_THRESHOLD = 3
 
 
-def moc_perimes(threshold: int = MOC_STALE_THRESHOLD):
+def moc_perimes(threshold: int = MOC_STALE_THRESHOLD) -> MocPerimes:
     """MOC périmés ou manquants par catégorie.
 
     Un MOC est périmé seulement quand ≥ ``threshold`` résumés de sa catégorie
@@ -101,7 +108,7 @@ def moc_perimes(threshold: int = MOC_STALE_THRESHOLD):
 
     # Comparer avec les MOC existants
     sujets_dir = SYNTHESE / "sujets"
-    perimes = []
+    perimes: list[StaleMoc] = []
     for cat, resume_mtime in sorted(categories_mtime.items()):
         moc_path = sujets_dir / f"{cat}.md"
         if not moc_path.exists():
@@ -121,7 +128,7 @@ def moc_perimes(threshold: int = MOC_STALE_THRESHOLD):
             "seuil": threshold}
 
 
-def estimer_couts(db, mode="batch", since=None, until=None):
+def estimer_couts(db, mode="batch", since=None, until=None) -> Couts:
     """Estimer les coûts du pipeline. ``since``/``until`` en YYYY-MM-DD
     appliquent au périmètre des résumés manquants uniquement ; les
     synthèses et MOC périmés ne sont pas filtrés par date (leur
@@ -178,7 +185,7 @@ def estimer_couts(db, mode="batch", since=None, until=None):
     }
 
 
-def resumes_perimes(db):
+def resumes_perimes(db) -> ResumesPerimes:
     """Résumés dont la transcription source a été modifiée depuis."""
     rows = db.stale_resumes()
     return {
@@ -190,9 +197,10 @@ def resumes_perimes(db):
     }
 
 
-def stats(db):
+def stats(db) -> Stats:
     """Statistiques globales de la base."""
-    return db.stats()
+    # Cast : la DB construit le dict dynamiquement (clé par file_type).
+    return cast(Stats, db.stats())
 
 
 # --- API publique ---
@@ -205,7 +213,7 @@ _STEP_ALL = ("resumes_manquants", "resumes_perimes", "non_organises",
 def detect(db: TrackingDB | None = None, steps: list[str] | None = None,
            source: str | None = None, mode: str = "batch",
            since: str | None = None, until: str | None = None,
-           moc_threshold: int | None = None) -> dict:
+           moc_threshold: int | None = None) -> PipelineDetection:
     """Détecter le travail du pipeline (schema PipelineDetection).
 
     Parameters
@@ -231,7 +239,7 @@ def detect(db: TrackingDB | None = None, steps: list[str] | None = None,
     else:
         active = set(steps)
 
-    result: dict = {}
+    result: PipelineDetection = {}
     if "resumes_manquants" in active:
         result["resumes_manquants"] = resumes_manquants(
             db, source, since=since, until=until)
@@ -259,7 +267,7 @@ def detect(db: TrackingDB | None = None, steps: list[str] | None = None,
 
 def costs(db: TrackingDB | None = None, mode: str = "batch",
           since: str | None = None, until: str | None = None,
-          real: bool = False) -> dict:
+          real: bool = False) -> Couts | CoutsReels:
     """Estimation des coûts du pipeline (schema Couts).
 
     ``since``/``until`` (YYYY-MM-DD) restreignent le périmètre des résumés
@@ -276,11 +284,13 @@ def costs(db: TrackingDB | None = None, mode: str = "batch",
         db = TrackingDB()
     try:
         if real:
-            result = db.usage_summary(since=since, until=until)
-            result["source"] = "llm_usage"
+            # Cast : usage_summary agrège des lignes SQL (shape dynamique).
+            real_result = cast(CoutsReels, db.usage_summary(since=since,
+                                                            until=until))
+            real_result["source"] = "llm_usage"
             if since or until:
-                result["date_range"] = {"since": since, "until": until}
-            return result
+                real_result["date_range"] = {"since": since, "until": until}
+            return real_result
         result = estimer_couts(db, mode, since=since, until=until)
         if since or until:
             result["date_range"] = {"since": since, "until": until}

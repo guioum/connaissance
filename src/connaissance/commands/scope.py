@@ -14,6 +14,7 @@ import yaml
 
 from connaissance.core.fsio import atomic_write_text
 from connaissance.core.paths import BASE_PATH, require_paths, require_connaissance_root
+from connaissance.core.schemas import ScopeMutate, ScopeScan
 
 # ── Chemins ──────────────────────────────────────────────────────────────────
 
@@ -387,7 +388,7 @@ CATEGORY_ORDER = [
 # --- API publique ---
 
 
-def scan(depth: int | None = 3) -> dict:
+def scan(depth: int | None = 3) -> ScopeScan:
     """Scanner ~/Documents/ et produire le rapport (schema ScopeScan).
 
     Parameters
@@ -442,7 +443,7 @@ def check() -> dict:
     }
 
 
-def include(folder: str) -> dict:
+def include(folder: str) -> ScopeMutate:
     """Ajouter un dossier à dossiers_inclus (mutation filtres.yaml)."""
     config = load_config() or {}
     included = list(config.get("dossiers_inclus", []))
@@ -454,7 +455,7 @@ def include(folder: str) -> dict:
     return {"added": [folder], "filtres_yaml_mutated": True}
 
 
-def exclude(folder: str) -> dict:
+def exclude(folder: str) -> ScopeMutate:
     """Ajouter un dossier à dossiers_exclus (mutation filtres.yaml)."""
     config = load_config() or {}
     excluded = list(config.get("dossiers_exclus", []))

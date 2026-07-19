@@ -19,6 +19,7 @@ from connaissance.core import ledger as _ledger
 from connaissance.core.manifest_io import load_entries
 from connaissance.core.output_file import write_or_inline
 from connaissance.core.paths import DOCUMENTS_DIR, require_paths, transit_file
+from connaissance.core.schemas import MediaApply, MediaPlan
 from connaissance.core.signals import _date_from_name, _fs_dates
 from connaissance.core.tracking import TrackingDB
 from connaissance.commands.triage import MARKER_DIRS, MEDIA_EXTS
@@ -56,7 +57,7 @@ def _iter_media(base: Path):
                 yield Path(root) / name
 
 
-def plan(scope: str | None = None, output_file: str | None = None) -> dict:
+def plan(scope: str | None = None, output_file: str | None = None) -> MediaPlan:
     """Construire un manifeste de rangement des médias par date (schema MediaPlan).
 
     N'écrit/ne déplace rien sur le corpus — produit un manifeste plan→apply.
@@ -77,7 +78,7 @@ def plan(scope: str | None = None, output_file: str | None = None) -> dict:
     transit = transit_file("media-manifest")
     transit.write_text(json.dumps({"entries": entries}, ensure_ascii=False),
                        encoding="utf-8")
-    payload = {
+    payload: MediaPlan = {
         "total": len(entries),
         "by_year": dict(sorted(by_year.items(), reverse=True)),
         "manifest_file": str(transit),
@@ -93,7 +94,7 @@ def plan(scope: str | None = None, output_file: str | None = None) -> dict:
 
 
 def apply(manifest_file: str, dry_run: bool = True,
-          db: TrackingDB | None = None) -> dict:
+          db: TrackingDB | None = None) -> MediaApply:
     """Appliquer un manifeste de rangement médias (schema MediaApply).
 
     Déplace chaque média via le **ledger** (réversible). **Dry-run par défaut.**
@@ -132,7 +133,7 @@ def apply(manifest_file: str, dry_run: bool = True,
         if owns:
             db.close()
 
-    result = {
+    result: MediaApply = {
         "dry_run": dry_run,
         "planned": len(entries),
         "moved": 0 if dry_run else len(moved),

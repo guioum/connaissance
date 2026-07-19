@@ -27,6 +27,9 @@ from datetime import datetime, timezone
 from html.parser import HTMLParser
 
 from connaissance.core.paths import BASE_PATH, require_paths
+from connaissance.core.schemas import (EmailsCalibrate, EmailsCleanupObsolete,
+                                       EmailsExtract, EmailsStats,
+                                       EmailsThreads, EmailThread)
 from connaissance.core.tracking import TrackingDB
 from connaissance.core.filtres import Filtres
 
@@ -1109,7 +1112,7 @@ def backlog_count(account=None, folder=None, since=None, until=None) -> dict:
     }
 
 
-def stats(account=None, folder=None, since=None, until=None) -> dict:
+def stats(account=None, folder=None, since=None, until=None) -> EmailsStats:
     """Compte des courriels par dossier mbox (schema EmailsStats)."""
     since, until = _parse_dates(since, until)
     mbox_files = _collect_mbox_files(account, folder)
@@ -1142,7 +1145,7 @@ def stats(account=None, folder=None, since=None, until=None) -> dict:
 
 def extract(account=None, folder=None, since=None, until=None,
             dry_run: bool = False, no_images: bool = False,
-            db: TrackingDB | None = None) -> dict:
+            db: TrackingDB | None = None) -> EmailsExtract:
     """Extraire les courriels en markdown (schema EmailsExtract)."""
     since, until = _parse_dates(since, until)
     mbox_files = _collect_mbox_files(account, folder)
@@ -1223,7 +1226,7 @@ def extract(account=None, folder=None, since=None, until=None,
     }
 
 
-def threads(account=None, folder=None, since=None, until=None) -> dict:
+def threads(account=None, folder=None, since=None, until=None) -> EmailsThreads:
     """Regrouper les messages en fils via In-Reply-To/References.
 
     Construit un graphe des messages par leurs liens RFC 5322, applique
@@ -1297,7 +1300,7 @@ def threads(account=None, folder=None, since=None, until=None) -> dict:
         root = find(mid)
         groups.setdefault(root, []).append(mid)
 
-    thread_list: list[dict] = []
+    thread_list: list[EmailThread] = []
     orphans: list[dict] = []
     for members in groups.values():
         if len(members) == 1:
@@ -1324,7 +1327,8 @@ def threads(account=None, folder=None, since=None, until=None) -> dict:
     }
 
 
-def calibrate(sample: int = 200, since=None, until=None, account=None) -> dict:
+def calibrate(sample: int = 200, since=None, until=None,
+              account=None) -> EmailsCalibrate:
     """Calibrage du scoring avec `proposed_mutations` pré-calculées.
 
     Invoque `calibrer()` pour produire le rapport YAML, puis le lit
@@ -1420,7 +1424,7 @@ def senders(sample: int = 500, since=None, until=None, account=None) -> dict:
 
 def cleanup_obsolete(dry_run: bool = True, only_domain: str | None = None,
                      only_entity: str | None = None, since=None, until=None,
-                     db: TrackingDB | None = None) -> dict:
+                     db: TrackingDB | None = None) -> EmailsCleanupObsolete:
     """Re-scorer les courriels existants et archiver ceux qui tombent sous seuil."""
     from connaissance.commands import emails_cleanup
     return emails_cleanup.cleanup_obsolete(

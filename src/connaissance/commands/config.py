@@ -16,10 +16,12 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from connaissance.core.fsio import atomic_write_text
 from connaissance.core.paths import CONNAISSANCE_ROOT
+from connaissance.core.schemas import (ScoringDiff, ScoringDiffChange,
+                                       ScoringSet, ScoringValidate)
 
 PACKAGE_ROOT = Path(__file__).resolve().parents[1]
 TEMPLATE_SCORING = PACKAGE_ROOT / "config" / "scoring-courriels.yaml"
@@ -92,7 +94,7 @@ def scoring_set(dry_run: bool = True,
                 add_pattern_actionnable: list[str] | None = None,
                 add_pattern_promotionnel: list[str] | None = None,
                 set_weight: dict[str, int] | None = None,
-                set_seuil: dict[str, int] | None = None) -> dict:
+                set_seuil: dict[str, int] | None = None) -> ScoringSet:
     """Appliquer des mutations atomiques à scoring-courriels.yaml.
 
     Toutes les mutations sont appliquées en une transaction. Retourne un
@@ -113,10 +115,11 @@ def scoring_set(dry_run: bool = True,
             "error": "config introuvable",
         }
 
-    diff: list[dict] = []
+    diff: list[ScoringDiffChange] = []
     regex_errors: list[str] = []
 
-    def _append_to_list(section: str, items: list[str], op_label: str = "add"):
+    def _append_to_list(section: str, items: list[str],
+                        op_label: Literal["add", "remove", "set"] = "add"):
         current = data.get(section) or []
         before = list(current)
         added = []
@@ -212,7 +215,7 @@ def scoring_set(dry_run: bool = True,
     }
 
 
-def scoring_diff() -> dict:
+def scoring_diff() -> ScoringDiff:
     """Diff entre la config utilisateur et le template."""
     path = _ensure_user_scoring()
     user_data, _ = _load_yaml_preserve_comments(path)
@@ -220,7 +223,7 @@ def scoring_diff() -> dict:
         return {"changes": []}
     template_data, _ = _load_yaml_preserve_comments(TEMPLATE_SCORING)
 
-    changes: list[dict] = []
+    changes: list[ScoringDiffChange] = []
 
     def walk(user_d: Any, tmpl_d: Any, prefix: str = ""):
         if isinstance(user_d, dict) and isinstance(tmpl_d, dict):
@@ -247,7 +250,7 @@ def scoring_diff() -> dict:
     return {"changes": changes}
 
 
-def scoring_validate() -> dict:
+def scoring_validate() -> ScoringValidate:
     """Vérifier que la config est bien formée (regex valides, seuils cohérents)."""
     path = _ensure_user_scoring()
     data, _ = _load_yaml_preserve_comments(path)
