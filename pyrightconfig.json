@@ -6,6 +6,11 @@
   "venvPath": ".",
   "venv": ".venv",
   "pythonVersion": "3.11",
+  // Plateforme cible primaire : macOS (st_birthtime…). Le code garde les
+  // accès spécifiques derrière hasattr/getattr pour Linux (VM cowork), mais
+  // pyright ne narrowe pas hasattr sur stat_result — analyser en Darwin
+  // évite les faux positifs du runner CI Linux.
+  "pythonPlatform": "Darwin",
 
   // Les schemas déclarent massivement des clés NotRequired (total=False) car
   // leur présence dépend des flags CLI. Le code interne accède à ces clés dans

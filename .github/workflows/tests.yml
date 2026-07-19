@@ -32,10 +32,12 @@ jobs:
           python-version: "3.12"
       # pyrightconfig.json résout l'environnement via venvPath/venv=.venv :
       # on installe le package dans un venv local du même nom qu'en dev.
+      # Extra [pdf] inclus : pypdfium2 est importé (optionnellement) par
+      # core/signals.py — sans lui, reportMissingImports côté pyright.
       - name: Install package in .venv
         run: |
           python -m venv .venv
-          .venv/bin/pip install -e .
+          .venv/bin/pip install -e ".[pdf]"
       - name: Run pyright (contrat schemas ↔ commandes)
         run: |
           pip install pyright
