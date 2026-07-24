@@ -129,8 +129,11 @@ def _pdf_embedded_text(read_path: Path, max_pages: int = 50) -> str:
     except Exception:
         return ""
     try:
-        return "\n".join(pdf[i].get_textpage().get_text_range()
+        text = "\n".join(pdf[i].get_textpage().get_text_range()
                          for i in range(min(len(pdf), max_pages)))
+        # Glyphes sans mapping Unicode (ligatures fi/fl) → U+0000 dans la
+        # couche : les retirer, un NUL rend le .md « binaire » (grep, qmd).
+        return "".join(c for c in text if ord(c) >= 0x20 or c in "\n\t\r")
     except Exception:
         return ""
     finally:

@@ -72,7 +72,19 @@ func fusedText(_ page: PDFPage?, _ box: NormalizedRect, fallback: String) -> Str
     guard let s = page.selection(for: rect)?.string else { return fallback }
     let joined = joinLines(s.components(separatedBy: .newlines)
         .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) })
-    return (joined.isEmpty || looksDegenerate(joined)) ? fallback : joined
+    // U+0000 = glyphe sans mapping Unicode (ligatures fi/fl des PDF web) —
+    // l'OCR du bloc, lui, lit le vrai mot : on lui rend la main.
+    if joined.isEmpty || looksDegenerate(joined) || joined.contains("\u{0000}") {
+        return fallback
+    }
+    return joined
+}
+
+// Filet final : aucun caractère de contrôle (C0 sauf \n et \t) ne doit
+// atteindre le .md — un NUL suffit à faire passer le fichier pour binaire
+// (grep, indexation qmd).
+func sanitize(_ s: String) -> String {
+    String(s.unicodeScalars.filter { $0.value >= 0x20 || $0 == "\n" || $0 == "\t" })
 }
 
 func mdTable(_ table: DocumentObservation.Container.Table, fuse page: PDFPage?) -> String {
@@ -198,7 +210,7 @@ struct Main {
             if n > 0 { confs.append(c) }
             lineCount = n; pages = 1
         }
-        let text = parts.joined(separator: "\n\n")
+        let text = sanitize(parts.joined(separator: "\n\n"))
         let conf = confs.isEmpty ? 0.0 : confs.reduce(0, +) / Double(confs.count)
         let obj: [String: Any] = ["text": text, "confidence": conf,
                                   "pages": pages, "lines": lineCount]
