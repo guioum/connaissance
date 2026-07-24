@@ -29,11 +29,13 @@ Trois sources, trois commandes :
   manquantes (OCR écrit au mauvais endroit) au lieu de produire des orphelins.
   `documents suspects` repère les transcriptions OCR mal formées à reprendre.
   En complément du flux Mistral : **OCR local Vision** gratuit (`documents
-  ocr-local` pour les PDF scannés, `ocr-images` pour les images-documents,
-  `ocr-review` pour lister les transcriptions à faible confiance), et **repasse
-  Mistral bornée** via `documents transcribe-plan --max-pages N` (worklist des
-  transcriptions `vision-local` à upgrader + scannés sans transcription, avec
-  estimation de coût).
+  ocr-local` pour les PDF scannés, `--born-digital` pour les PDF à couche texte
+  — fusion structure Vision + caractères de la couche, ou OCR pur si la couche
+  vient d'un vieil OCR invisible —, `ocr-images` pour les images-documents,
+  `ocr-review` pour lister les transcriptions à faible confiance), et **cascade
+  Vision → Mistral** via `documents transcribe-plan --max-pages N` : worklist
+  des transcriptions `vision-local` à confiance ≤ 0,55 (Mistral OCR 4 réservé
+  aux cas difficiles) + scannés sans transcription, avec estimation de coût.
 - **Courriels** (`emails extract`) : lit les archives mbox, **score** chaque
   courriel (multi-signaux), ne capture que ce qui dépasse le seuil, regroupe
   les fils. Voir [emails.md](emails.md).

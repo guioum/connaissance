@@ -10,6 +10,7 @@ Mistral existant les reprend alors, en écrasant la version locale).
 from __future__ import annotations
 
 import os
+import re
 import statistics
 import unicodedata
 from pathlib import Path
@@ -28,6 +29,10 @@ from connaissance.core.frontmatter import parse_frontmatter
 from connaissance.core.output_file import write_or_inline
 from connaissance.core.paths import (DOCUMENTS_DIR, SPECIAL_TOP_DIRS,
                                      documents_read_path, require_paths)
+# Coût page Mistral : source unique dans tracking (OCR 4 batch, $2/1000 p) —
+# la même constante sert à l'estimation (ici) et au journal `llm_usage`.
+from connaissance.core.tracking import (MISTRAL_PAGE_COST_USD as
+                                        _MISTRAL_PAGE_COST)
 from connaissance.core.tracking import TrackingDB
 
 _IMG_EXTS = {".jpg", ".jpeg", ".png", ".heic", ".heif", ".tiff", ".tif",
@@ -38,6 +43,98 @@ _VIEW_TOP = set(SPECIAL_TOP_DIRS)   # source unique (était une liste divergente
 def _read_frontmatter(content: str) -> dict:
     """Frontmatter YAML d'une transcription (dict vide si absent/invalide)."""
     return parse_frontmatter(content) or {}
+
+
+# ---------------------------------------------------------------------------
+# Born-digital : détecteur de couche texte + fusion Vision/texte embarqué.
+# ---------------------------------------------------------------------------
+
+_WORD_RE = re.compile(r"[\wÀ-ÿ]+")
+
+
+def _vocab_recall(reference: str, candidate: str) -> float:
+    """Part du vocabulaire de ``reference`` retrouvée dans ``candidate`` (0–1).
+    Métrique du garde-fou de fusion : insensible à l'ordre et à la structure,
+    elle mesure « a-t-on perdu des mots ? » — pas la mise en forme."""
+    ref = set(_WORD_RE.findall(reference.lower()))
+    if not ref:
+        return 1.0
+    cand = set(_WORD_RE.findall(candidate.lower()))
+    return len(ref & cand) / len(ref)
+
+
+def _pdf_layer_kind(read_path: Path, max_pages: int = 5) -> str:
+    """Classer la couche texte d'un PDF (échantillon des premières pages).
+
+    Un ``text_source=pdf_embedded`` ne dit PAS d'où vient le texte : un vrai
+    born-digital a du texte vectoriel visible ; un scan passé par un vieil OCR
+    (Doxie/Evernote…) a une couche en mode de rendu **invisible** posée sur une
+    image pleine page — texte souvent mauvais, à ne jamais réutiliser.
+
+    Retours : ``digital`` (texte visible), ``scan_ocr`` (texte invisible, OU
+    image couvrant ≥85 % d'une page dont le texte visible est clairsemé — un
+    relevé bancaire a un fond pleine page ET des centaines d'objets texte
+    vectoriels : c'est du digital, pas un scan), ``none`` (aucun objet texte),
+    ``unknown`` (pypdfium2 absent / PDF illisible). Une seule page ``scan_ocr``
+    requalifie tout le document (voie sûre)."""
+    try:
+        import pypdfium2 as pdfium
+        import pypdfium2.raw as praw
+    except ImportError:
+        return "unknown"
+    try:
+        pdf = pdfium.PdfDocument(str(read_path))
+    except Exception:
+        return "unknown"
+    try:
+        has_digital = False
+        for i in range(min(len(pdf), max_pages)):
+            page = pdf[i]
+            pw, ph = page.get_size()
+            n_text = n_inv = 0
+            cover = 0.0
+            for obj in page.get_objects(max_depth=4):
+                # `type` existe sur PdfObject mais manque aux stubs pypdfium2.
+                obj_type = getattr(obj, "type", None)
+                if obj_type == praw.FPDF_PAGEOBJ_TEXT:
+                    n_text += 1
+                    if (praw.FPDFTextObj_GetTextRenderMode(obj.raw)
+                            == praw.FPDF_TEXTRENDERMODE_INVISIBLE):
+                        n_inv += 1
+                elif obj_type == praw.FPDF_PAGEOBJ_IMAGE:
+                    try:
+                        l, b, r, t = obj.get_bounds()
+                    except Exception:
+                        continue
+                    if pw and ph:
+                        cover = max(cover, (r - l) * (t - b) / (pw * ph))
+            if n_text == 0:
+                continue                    # page sans texte (photo, vierge)
+            if n_inv > 0 or (cover >= 0.85 and n_text <= 15):
+                return "scan_ocr"
+            has_digital = True
+        return "digital" if has_digital else "none"
+    finally:
+        pdf.close()
+
+
+def _pdf_embedded_text(read_path: Path, max_pages: int = 50) -> str:
+    """Texte de la couche embarquée (pypdfium2), '' si indisponible."""
+    try:
+        import pypdfium2 as pdfium
+    except ImportError:
+        return ""
+    try:
+        pdf = pdfium.PdfDocument(str(read_path))
+    except Exception:
+        return ""
+    try:
+        return "\n".join(pdf[i].get_textpage().get_text_range()
+                         for i in range(min(len(pdf), max_pages)))
+    except Exception:
+        return ""
+    finally:
+        pdf.close()
 
 
 def ocr_local(limit: int | None = None, force: bool = False,
@@ -97,6 +194,128 @@ def ocr_local(limit: int | None = None, force: bool = False,
             "sample": done[:10]}
 
 
+def ocr_born_digital(limit: int | None = None, force: bool = False,
+                     scope: str | None = None, min_recall: float = 0.9,
+                     db: TrackingDB | None = None) -> dict:
+    """OCR local des PDF **born-digital** — structure Vision, caractères sûrs.
+
+    Routage par ``_pdf_layer_kind`` :
+
+    - ``digital`` → helper Vision en mode **fusion** (structure Vision +
+      caractères de la couche texte embarquée). Garde-fou : rappel de
+      vocabulaire de la sortie vs la couche texte ; sous ``min_recall`` (Vision
+      a raté des régions de mise en page), fallback **texte embarqué brut**
+      (``ocr_engine: pdf-text`` — fidèle mais sans structure).
+    - ``scan_ocr`` (couche OCR invisible d'époque — Doxie/Evernote — ou image
+      pleine page) / ``none`` / ``unknown`` → OCR Vision **pur** : la vieille
+      couche n'est jamais une source. La cascade Mistral par confiance
+      s'applique ensuite (``transcribe-plan``).
+
+    Frontmatter : ``ocr_engine`` + ``ocr_confidence`` + ``ocr_kind``
+    (``born-digital`` / ``scan-ocr-layer`` / ``scan``) + ``text_recall``.
+    Ne touche jamais une transcription ``mistral`` (même ``--force``).
+    Idempotent sinon (saute si transcription présente, sauf ``--force``)."""
+    require_paths(DOCUMENTS_DIR, context="documents ocr-local born-digital")
+    if not _ocr.available():
+        return {"error": "OCR local indisponible (swiftc absent ou hors macOS)."}
+    owns = db is None
+    if db is None:
+        db = TrackingDB()
+    done: list[dict] = []
+    counts = {"fusion": 0, "pdf_text_fallback": 0, "scan_ocr_layer": 0,
+              "scan_pur": 0}
+    skipped = {"transcription_existe": 0, "mistral_preserve": 0,
+               "sans_miroir": 0, "echec_ou_vide": 0}
+
+    def _write(trans: Path, ab: Path, text: str, extras: dict) -> None:
+        trans.parent.mkdir(parents=True, exist_ok=True)
+        trans.write_text(text.rstrip() + "\n", encoding="utf-8")
+        register_document(db, ab, trans)        # frontmatter canonique + DB
+        trans.write_text(_merge_frontmatter(
+            trans.read_text(encoding="utf-8"), extras), encoding="utf-8")
+
+    try:
+        for rel, pkt in db.all_doc_signals():
+            if pkt.get("type") != "pdf" or pkt.get("born_digital") is not True:
+                continue
+            if scope and not rel.startswith(scope):
+                continue
+            trans = TRANSCRIPTIONS_DIR / Path(rel).with_suffix(".md")
+            if trans.exists():
+                engine = None
+                try:
+                    engine = _read_frontmatter(
+                        trans.read_text(encoding="utf-8")).get("ocr_engine")
+                except OSError:
+                    pass
+                if engine == "mistral":     # moteur terminal, jamais écrasé
+                    skipped["mistral_preserve"] += 1
+                    continue
+                if not force:
+                    skipped["transcription_existe"] += 1
+                    continue
+            ab = DOCUMENTS_DIR / rel
+            rp = documents_read_path(ab)
+            if not rp or not Path(rp).is_file():
+                skipped["sans_miroir"] += 1
+                continue
+            kind = _pdf_layer_kind(Path(rp))
+            entry: dict = {"rel": rel, "layer": kind}
+            if kind == "digital":
+                res = _ocr.ocr_file(rp, fuse=True) or {}
+                text = res.get("text", "").strip()
+                if not text:
+                    skipped["echec_ou_vide"] += 1
+                    continue
+                conf = round(float(res.get("confidence") or 0), 3)
+                recall = round(_vocab_recall(_pdf_embedded_text(Path(rp)),
+                                             text), 3)
+                if recall >= min_recall:
+                    _write(trans, ab, text,
+                           {"ocr_engine": _ocr.OCR_ENGINE,
+                            "ocr_confidence": conf,
+                            "ocr_kind": "born-digital", "text_recall": recall})
+                    counts["fusion"] += 1
+                    entry.update(route="fusion", confidence=conf, recall=recall)
+                else:                        # mise en page ratée → texte sûr
+                    embedded = _pdf_embedded_text(Path(rp)).strip()
+                    if not embedded:
+                        skipped["echec_ou_vide"] += 1
+                        continue
+                    _write(trans, ab, embedded,
+                           {"ocr_engine": "pdf-text",
+                            "ocr_kind": "born-digital", "text_recall": recall})
+                    counts["pdf_text_fallback"] += 1
+                    entry.update(route="pdf-text", recall=recall)
+            else:                            # scan_ocr / none / unknown
+                res = _ocr.ocr_file(rp) or {}
+                text = res.get("text", "").strip()
+                if not text:
+                    skipped["echec_ou_vide"] += 1
+                    continue
+                conf = round(float(res.get("confidence") or 0), 3)
+                kind_key = "scan_ocr_layer" if kind == "scan_ocr" else "scan_pur"
+                _write(trans, ab, text,
+                       {"ocr_engine": _ocr.OCR_ENGINE, "ocr_confidence": conf,
+                        "ocr_kind": ("scan-ocr-layer" if kind == "scan_ocr"
+                                     else "scan")})
+                counts[kind_key] += 1
+                entry.update(route="ocr", confidence=conf)
+            done.append(entry)
+            if limit and len(done) >= limit:
+                break
+    finally:
+        if owns:
+            db.close()
+    recalls = [d["recall"] for d in done if "recall" in d]
+    confs = [d["confidence"] for d in done if "confidence" in d]
+    return {"born_digital": len(done), "counts": counts, "skipped": skipped,
+            "min_recall": min_recall,
+            "avg_recall": round(statistics.mean(recalls), 3) if recalls else None,
+            "avg_confidence": round(statistics.mean(confs), 3) if confs else None,
+            "sample": done[:10]}
+
+
 def _vision_transcriptions(max_confidence: float | None):
     """Transcriptions produites par l'OCR local, filtrées par confiance max."""
     out = []
@@ -115,10 +334,16 @@ def _vision_transcriptions(max_confidence: float | None):
     return out
 
 
-def repass_candidates(max_confidence: float = 0.6,
+def repass_candidates(max_confidence: float = 0.55,
                       db: TrackingDB | None = None) -> dict:
     """Lister les transcriptions OCR local à **faible confiance** (≤ seuil) —
-    candidates à une repasse Mistral. N'écrit/ne déplace rien."""
+    candidates à une repasse Mistral. N'écrit/ne déplace rien.
+
+    Échelle : ``RecognizeDocumentsRequest`` (macOS 26) score ~0,3 plus bas que
+    l'ancien moteur ligne-à-ligne — mesuré sur corpus : bons scans 0,60–0,66,
+    scans dégradés 0,49–0,54, manuscrit 0,29. Défaut 0,55 calé sur cette
+    échelle. Les vision-local historiques (ancienne échelle, min 0,75)
+    n'étaient déjà pas captés par l'ancien défaut 0,6."""
     items = _vision_transcriptions(max_confidence)
     return {"max_confidence": max_confidence, "total": len(items),
             "candidates": [{"transcription": str(f.relative_to(TRANSCRIPTIONS_DIR)),
@@ -190,7 +415,7 @@ def review_candidates(max_confidence: float = 0.85,
     return summary
 
 
-def repass(max_confidence: float = 0.6, apply: bool = False,
+def repass(max_confidence: float = 0.55, apply: bool = False,
            db: TrackingDB | None = None) -> dict:
     """Mettre les transcriptions OCR local faibles « à retranscrire » : les
     envoie à la corbeille ledger (réversible) → elles redeviennent manquantes,
@@ -218,9 +443,6 @@ def repass(max_confidence: float = 0.6, apply: bool = False,
             db.close()
 
 
-# $2 / 1000 pages : Mistral OCR 4 en batch (migration 2026-07-19 ; OCR 3
-# était à $1/1000). Doit suivre le modèle épinglé dans mistral-ocr/cli.py.
-_MISTRAL_PAGE_COST = 0.002
 # Types OCRisables côté image (sans le point), pour la cible de la repasse.
 _OCR_IMAGE_TYPES = {e.lstrip(".") for e in _IMG_EXTS}
 
@@ -228,19 +450,25 @@ _OCR_IMAGE_TYPES = {e.lstrip(".") for e in _IMG_EXTS}
 def transcribe_plan(max_pages: int = 10, include_missing: bool = True,
                     include_born_digital: bool = False,
                     dedup_content: bool = True,
+                    max_confidence: float = 0.55,
                     scope: str | None = None, output_file: str | None = None,
                     db: TrackingDB | None = None) -> dict:
     """Worklist de la **repasse Mistral**, bornée par le nombre de pages (coût).
 
     Cible : documents qui ont besoin d'OCR (PDF scannés, images-documents) et qui
     n'ont PAS encore de transcription Mistral — soit une transcription
-    ``vision-local`` à *upgrader* vers le markdown structuré de Mistral, soit
-    (``include_missing``) un scanné sans aucune transcription. Les PDF
-    **born-digital** (couche texte propre) sont exclus et comptés
-    (``born_digital_skip``) : pas de coût OCR inutile — sauf
-    ``include_born_digital``, qui les embarque aussi (un seul moteur, un seul
-    format de transcription pour toute la base ; comptés
-    ``born_digital_included``). Borne ``--max-pages`` : un
+    ``vision-local`` à *upgrader*, soit (``include_missing``) un scanné sans
+    aucune transcription. **CASCADE Vision → Mistral** : une transcription
+    ``vision-local`` n'entre en worklist que si sa confiance est ≤
+    ``max_confidence`` (défaut 0.55 — Mistral réservé aux cas où le VLM apporte
+    un vrai gain : formulaires denses, vieux scans) ; au-dessus →
+    ``vision_ok_skip``. Les fusions born-digital (``ocr_kind: born-digital``,
+    caractères issus de la couche texte) → ``vision_fusion_skip`` ; les
+    fallbacks ``pdf-text`` (texte fidèle sans structure) → ``pdf_text_skip`` —
+    les deux réintégrables via ``include_born_digital``. Les PDF born-digital
+    **sans transcription** restent exclus (``born_digital_skip`` — les traiter
+    gratuitement via ``ocr-local --born-digital``) sauf ``include_born_digital``
+    (comptés ``born_digital_included``). Borne ``--max-pages`` : un
     document de plus de N pages part dans ``deferred`` (au-dessus du budget).
 
     Issu de la DB (``doc_signals``). **Déduplique** les lignes-fantômes
@@ -268,6 +496,7 @@ def transcribe_plan(max_pages: int = 10, include_missing: bool = True,
     seen: set[str] = set()          # rel normalisé → dédup des lignes-fantômes
     counts = {"upgrade_vision": 0, "missing": 0, "already_mistral": 0,
               "born_digital_skip": 0, "born_digital_included": 0,
+              "vision_ok_skip": 0, "vision_fusion_skip": 0, "pdf_text_skip": 0,
               "deferred_pages": 0, "phantom_dupes": 0, "content_dupes": 0,
               "user_excluded": 0, "encrypted_or_broken": 0,
               "non_ocr_type_skip": 0}
@@ -295,9 +524,11 @@ def transcribe_plan(max_pages: int = 10, include_missing: bool = True,
                 or (is_image and ts == "ocr_cache")
             if not ocr_target and include_born_digital \
                     and is_pdf and born is True:
-                # Uniformisation sur Mistral (décision 2026-06) : la couche
-                # texte reste fidèle mais sans structure ; le markdown Mistral
-                # vaut ~$1/1000 p, borné par --max-pages comme le reste.
+                # Uniformisation sur Mistral (opt-in) : la couche texte reste
+                # fidèle mais sans structure ; le markdown Mistral OCR 4 vaut
+                # $2/1000 p, borné par --max-pages comme le reste. Depuis la
+                # cascade v2.69, la voie par défaut est ocr-local --born-digital
+                # (fusion Vision gratuite).
                 ocr_target = True
             if not ocr_target:
                 if is_pdf and born is True:
@@ -317,18 +548,37 @@ def transcribe_plan(max_pages: int = 10, include_missing: bool = True,
                 continue
             seen.add(key)
             trans = TRANSCRIPTIONS_DIR / Path(rel).with_suffix(".md")
-            engine = None
+            fm: dict = {}
             if trans.exists():
                 try:
-                    engine = _read_frontmatter(
-                        trans.read_text(encoding="utf-8")).get("ocr_engine")
+                    fm = _read_frontmatter(trans.read_text(encoding="utf-8"))
                 except OSError:
-                    engine = None
+                    fm = {}
+            engine = fm.get("ocr_engine")
             if engine == "mistral":
                 counts["already_mistral"] += 1
                 continue
             if not trans.exists() and not include_missing:
                 continue
+            # CASCADE : Mistral seulement là où il apporte quelque chose.
+            if engine == "pdf-text" and not include_born_digital:
+                # Fallback born-digital : caractères fidèles (couche texte),
+                # structure absente — upgrade Mistral optionnel.
+                counts["pdf_text_skip"] += 1
+                continue
+            if engine == _ocr.OCR_ENGINE:
+                if fm.get("ocr_kind") == "born-digital" \
+                        and not include_born_digital:
+                    counts["vision_fusion_skip"] += 1   # caractères = couche
+                    continue
+                conf = fm.get("ocr_confidence")
+                try:
+                    conf = float(conf) if conf is not None else None
+                except (TypeError, ValueError):
+                    conf = None
+                if conf is not None and conf > max_confidence:
+                    counts["vision_ok_skip"] += 1       # Vision suffit
+                    continue
             pages = pkt.get("pages")
             n = pages if isinstance(pages, int) and pages > 0 else 1
             if engine == _ocr.OCR_ENGINE:
@@ -460,7 +710,10 @@ def ocr_images(limit: int | None = None, min_chars: int = 100, min_lines: int = 
                     continue
                 res = _ocr.ocr_file(rp, max_pages=1)
                 text = (res or {}).get("text", "").strip() if res else ""
-                lines = text.count("\n") + 1 if text else 0
+                # Lignes *reconnues* par le moteur : le Markdown fusionne les
+                # lignes en paragraphes, compter les "\n" sous-estimerait.
+                lines = int((res or {}).get("lines") or 0) or \
+                    (text.count("\n") + 1 if text else 0)
                 conf = round(float((res or {}).get("confidence") or 0), 3)
                 is_document = len(text) >= min_chars and lines >= min_lines
                 if is_document:

@@ -79,6 +79,10 @@ def _cmd_documents(args) -> Any:
             return ocr.repass_candidates(max_confidence=args.max_confidence)
         if getattr(args, "repass", False):
             return ocr.repass(max_confidence=args.max_confidence, apply=args.apply)
+        if getattr(args, "born_digital", False):
+            return ocr.ocr_born_digital(limit=args.limit, force=args.force,
+                                        scope=args.scope,
+                                        min_recall=args.min_recall)
         return ocr.ocr_local(limit=args.limit, force=args.force, scope=args.scope)
     if args.verb == "ocr-images":
         from connaissance.commands import ocr
@@ -102,6 +106,7 @@ def _cmd_documents(args) -> Any:
                                    include_missing=not args.upgrade_only,
                                    include_born_digital=args.include_born_digital,
                                    dedup_content=not args.no_dedup_content,
+                                   max_confidence=args.max_confidence,
                                    scope=args.scope,
                                    output_file=args.output_file)
     raise SystemExit(f"verbe inconnu : documents {args.verb}")
@@ -602,10 +607,22 @@ def build_parser() -> argparse.ArgumentParser:
                            help="Remettre les transcriptions faibles « à "
                                 "retranscrire » (corbeille ledger). Dry-run sauf --apply.")
     p_doc_ocr.add_argument("--max-confidence", dest="max_confidence", type=float,
-                           default=0.6,
-                           help="Seuil de confiance pour --repass[-candidates] (défaut 0.6).")
+                           default=0.55,
+                           help="Seuil de confiance pour --repass[-candidates] "
+                                "(défaut 0.55, échelle RecognizeDocumentsRequest).")
     p_doc_ocr.add_argument("--apply", action="store_true",
                            help="Avec --repass : exécuter (défaut : dry-run).")
+    p_doc_ocr.add_argument("--born-digital", dest="born_digital",
+                           action="store_true",
+                           help="Traiter les PDF born-digital : fusion structure "
+                                "Vision + caractères de la couche texte ; scans "
+                                "à couche OCR d'époque → OCR Vision pur.")
+    p_doc_ocr.add_argument("--min-recall", dest="min_recall", type=float,
+                           default=0.9,
+                           help="Avec --born-digital : rappel de vocabulaire "
+                                "minimal de la fusion vs la couche texte ; en "
+                                "dessous, fallback texte embarqué brut "
+                                "(défaut 0.9).")
     p_doc_rev = p_doc_verbs.add_parser("ocr-review")
     p_doc_rev.add_argument("--max-confidence", dest="max_confidence", type=float,
                            default=0.85,
@@ -652,6 +669,12 @@ def build_parser() -> argparse.ArgumentParser:
                           help="Inclure aussi les PDF born-digital (un seul "
                                "moteur/format pour toute la base ; sinon exclus, "
                                "couche texte propre).")
+    p_doc_tp.add_argument("--max-confidence", dest="max_confidence", type=float,
+                          default=0.55,
+                          help="Cascade Vision → Mistral : n'upgrader une "
+                               "transcription vision-local que si sa confiance "
+                               "est ≤ ce seuil (défaut 0.55) ; au-dessus, "
+                               "Vision suffit (vision_ok_skip).")
     p_doc_tp.add_argument("--no-dedup-content", dest="no_dedup_content",
                           action="store_true",
                           help="Désactiver la dédup par contenu (hash). Par "

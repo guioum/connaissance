@@ -1,12 +1,16 @@
-"""OCR local via le framework Vision de macOS (moteur Live Text).
+"""OCR local structuré via le framework Vision de macOS
+(`RecognizeDocumentsRequest`, macOS 26+) — sortie Markdown (paragraphes,
+tableaux, listes).
 
 Gratuit, local (Neural Engine), sans téléchargement iCloud (on lit le chemin
 fourni — typiquement le miroir SSD). Le helper Swift (`helpers/ocr_vision.swift`)
-est compilé à la volée vers un cache et réutilisé.
+est compilé à la volée vers un cache et réutilisé ; sur un SDK antérieur à
+macOS 26 la compilation échoue et l'OCR local est simplement indisponible.
 
 Sert de **première passe OCR gratuite** ; les transcriptions produites sont
 marquées (`ocr_engine: vision-local` + `ocr_confidence`) pour permettre une
-**repasse Mistral** ciblée sur les cas à faible confiance.
+**repasse Mistral** ciblée sur les cas à faible confiance (formulaires denses,
+vieux scans — là où le VLM garde un avantage réel).
 """
 from __future__ import annotations
 
@@ -36,23 +40,28 @@ def _ensure_binary() -> Path | None:
         if _BIN.is_file() and _BIN.stat().st_mtime >= _HELPER_SRC.stat().st_mtime:
             return _BIN
         _BIN_DIR.mkdir(parents=True, exist_ok=True)
-        r = subprocess.run(["swiftc", "-O", str(_HELPER_SRC), "-o", str(_BIN)],
+        r = subprocess.run(["swiftc", "-O", "-parse-as-library",
+                            str(_HELPER_SRC), "-o", str(_BIN)],
                            capture_output=True, timeout=180)
         return _BIN if r.returncode == 0 and _BIN.is_file() else None
     except (OSError, subprocess.SubprocessError):
         return None
 
 
-def ocr_file(path, max_pages: int = 50, timeout: int = 180) -> dict | None:
+def ocr_file(path, max_pages: int = 50, timeout: int = 180,
+             fuse: bool = False) -> dict | None:
     """OCR un PDF (rendu page→image) ou une image. Retourne
-    ``{text, confidence, pages}`` ou None (indisponible / échec / vide).
+    ``{text, confidence, pages, lines}`` (``text`` en Markdown, ``lines`` = nb
+    de lignes reconnues) ou None (indisponible / échec / vide).
+    ``fuse`` (PDF born-digital) : structure Vision + caractères de la couche
+    texte embarquée — zéro erreur d'OCR quand la couche est fiable.
     ``path`` doit être lisible directement (miroir SSD pour un dataless)."""
     b = _ensure_binary()
     if b is None:
         return None
     try:
-        r = subprocess.run([str(b), str(path), str(max_pages)],
-                           capture_output=True, timeout=timeout)
+        argv = [str(b), str(path), str(max_pages)] + (["--fuse"] if fuse else [])
+        r = subprocess.run(argv, capture_output=True, timeout=timeout)
         if r.returncode != 0:
             return None
         out = json.loads(r.stdout.decode("utf-8", "replace"))

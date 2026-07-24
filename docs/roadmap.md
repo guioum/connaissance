@@ -77,6 +77,39 @@ validé 78 % auto) ; (4) grand déplacement `classify apply --apply` par lots +
   reste en `deferred`. Renvoie `estimated_pages`/`estimated_cost_usd`
   ($1/1000 p). Le skill `transcrire` consomme `worklist[].source`, OCRise via
   `mistral-ocr`, ré-enregistre avec `ocr_engine="mistral"`.
+- [x] **OCR local structuré — `RecognizeDocumentsRequest`** (v2.69.0) : le helper
+  `helpers/ocr_vision.swift` passe à l'API document de macOS 26 (adapté de
+  riddleling/docOCR, MIT) → sortie **Markdown** (paragraphes, tableaux, listes)
+  au lieu du texte ligne-à-ligne, à qualité Live Text égale. Benchmark sur 8 docs
+  du corpus vs référence Mistral : **équivalent sur scans propres/photos/PNG**
+  (rappel vocab 0,91–0,98, tableaux extraits — p.ex. contrat R3D), Mistral garde
+  l'avantage sur **formulaires denses** (T5/RL, rappel 0,54–0,60) et vieux scans ;
+  manuscrit illisible pour les deux. JSON helper : + champ `lines` (nb de lignes
+  reconnues — le Markdown fusionne les lignes, `ocr-images` s'en sert pour le
+  triage document/photo au lieu de compter les `\n`). **Échelle de confiance
+  recalibrée** (~0,3 plus bas : bons 0,60–0,66, dégradés ≤0,54, manuscrit 0,29) →
+  défaut `--repass[-candidates]` 0,6 → **0,55** ; `ocr-review` (échelle Mistral)
+  inchangé. Compilation : `-parse-as-library` ; SDK < macOS 26 → compilation
+  échoue → OCR local proprement indisponible (fallback existant). ~0,6–2,7 s/doc.
+- [x] **Cascade born-digital → Vision → Mistral** (v2.69.0) : `documents
+  ocr-local --born-digital` traite les PDF à couche texte, gratuitement, avec
+  **routage par détecteur de couche** (pypdfium2 : texte en rendu invisible =
+  couche OCR d'époque type Doxie/Evernote ; image pleine page + texte
+  clairsemé = scan ; attention au faux positif « fond de page » — un relevé BNC
+  a une image pleine page ET des centaines d'objets texte vectoriels →
+  digital). Vrais digitaux → helper `--fuse` : **structure Vision + caractères
+  de la couche texte** (`PDFPage.selection` par bloc/cellule, garde
+  anti-dégénérescence par bloc) — bench 4 étalons : rappel 0,655→0,909 sur le
+  pire cas, 1,000 sur 2/4. Garde-fou `--min-recall` (0,9) : sous le seuil,
+  fallback **texte embarqué brut** (`ocr_engine: pdf-text`). Scans à couche
+  OCR → Vision pur (la vieille couche n'est jamais une source). Frontmatter :
+  `ocr_kind` + `text_recall`. `transcribe-plan --max-confidence` (0,55) ferme
+  la cascade : seules les vision-local faibles partent à Mistral
+  (`vision_ok_skip`/`vision_fusion_skip`/`pdf_text_skip` sinon) ; coût page
+  **unifié** sur `tracking.MISTRAL_PAGE_COST_USD` = 0,002 (OCR 4 batch — le
+  journal `llm_usage` sous-comptait ×2 depuis la migration du 2026-07-19).
+  Vague 2 (4 175 docs, ~16,5 k pages, 16,49 $) → traitable en local à ~0 $,
+  Mistral réservé au reliquat sous seuil.
 - [x] **Exécuter la repasse Mistral — vague 1 (scannés + images) : TERMINÉE**
   (2026-06, cf. bloc REPRISE en tête) : 2 780 docs Mistral, $3,83, flux 100 % DB
   → CLI → MCP (`transcribe-plan --output-file` → `ocr_batch_submit` en lots →

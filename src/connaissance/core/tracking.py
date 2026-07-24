@@ -349,9 +349,11 @@ PRICING_USD_PER_MTOK: dict[str, dict[str, float]] = {
 _DEFAULT_PRICING = {"input": 3.0, "output": 15.0}
 
 
-# Prix Mistral OCR (déjà tarif batch : $1 / 1000 pages). Source unique du coût
-# OCR journalisé dans ``llm_usage`` (lignes Mistral : tokens=0, units=pages).
-MISTRAL_PAGE_COST_USD = 0.001
+# Prix Mistral OCR 4 (déjà tarif batch : $2 / 1000 pages ; OCR 3 était à
+# $1/1000, migration 2026-07-19 — modèle épinglé dans mistral-ocr/cli.py).
+# Source unique du coût OCR : journal ``llm_usage`` (tokens=0, units=pages)
+# ET estimateur de ``documents transcribe-plan`` (import dans commands/ocr).
+MISTRAL_PAGE_COST_USD = 0.002
 
 
 def compute_cost_usd(model: str | None, usage: dict,

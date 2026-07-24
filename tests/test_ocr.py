@@ -1,5 +1,7 @@
 """OCR local (commands/ocr + core/ocr_local). Le moteur Vision est macOS-only ;
 on teste ce qui est pur (parsing frontmatter, disponibilité)."""
+from pathlib import Path
+
 from connaissance.commands import ocr as O
 from connaissance.core import ocr_local
 
@@ -228,3 +230,123 @@ def test_transcribe_plan_upgrade_only(tmp_path, monkeypatch, tracking_db):
                  born_digital=False, pages=2)
     res = O.transcribe_plan(max_pages=10, include_missing=False, db=tracking_db)
     assert res["worklist_count"] == 0
+
+
+def test_vocab_recall():
+    """Garde-fou de fusion : part du vocabulaire retrouvée, insensible à
+    l'ordre/structure ; référence vide → 1.0 (rien à perdre)."""
+    assert O._vocab_recall("Bonjour le monde", "monde — le. BONJOUR !") == 1.0
+    assert O._vocab_recall("un deux trois quatre", "un deux") == 0.5
+    assert O._vocab_recall("", "peu importe") == 1.0
+
+
+def _fm_trans(trans_dir, rel, **fm):
+    p = trans_dir / (rel.rsplit(".", 1)[0] + ".md")
+    p.parent.mkdir(parents=True, exist_ok=True)
+    lines = "\n".join(f"{k}: {v}" for k, v in fm.items())
+    p.write_text(f"---\n{lines}\n---\nTexte.", encoding="utf-8")
+
+
+def test_transcribe_plan_cascade_confidence(tmp_path, monkeypatch, tracking_db):
+    """Cascade Vision → Mistral : seule la vision-local à confiance ≤ seuil part
+    en worklist ; fusion born-digital et fallback pdf-text sont terminaux
+    (réintégrables via include_born_digital)."""
+    docs = tmp_path / "Documents"; trans = tmp_path / "Transcriptions" / "Documents"
+    docs.mkdir(parents=True); trans.mkdir(parents=True)
+    monkeypatch.setattr(O, "DOCUMENTS_DIR", docs)
+    monkeypatch.setattr(O, "TRANSCRIPTIONS_DIR", trans)
+    monkeypatch.setattr(O, "documents_read_path", lambda p: str(p))
+
+    # confiance basse → upgrade Mistral
+    _put_signals(tracking_db, "faible.pdf", type="pdf", text_source="ocr_cache",
+                 born_digital=False, pages=1)
+    _fm_trans(trans, "faible.pdf", ocr_engine="vision-local",
+              ocr_confidence=0.42)
+    # confiance haute → Vision suffit
+    _put_signals(tracking_db, "bon.pdf", type="pdf", text_source="ocr_cache",
+                 born_digital=False, pages=1)
+    _fm_trans(trans, "bon.pdf", ocr_engine="vision-local", ocr_confidence=0.66)
+    # fusion born-digital (caractères = couche texte) → terminal
+    _put_signals(tracking_db, "fusion.pdf", type="pdf", text_source="ocr_cache",
+                 born_digital=True, pages=1)
+    _fm_trans(trans, "fusion.pdf", ocr_engine="vision-local",
+              ocr_confidence=0.5, ocr_kind="born-digital", text_recall=0.98)
+    # fallback texte embarqué → terminal
+    _put_signals(tracking_db, "brut.pdf", type="pdf", text_source="ocr_cache",
+                 born_digital=True, pages=1)
+    _fm_trans(trans, "brut.pdf", ocr_engine="pdf-text",
+              ocr_kind="born-digital", text_recall=0.7)
+
+    res = O.transcribe_plan(max_pages=10, db=tracking_db)
+    assert {e["rel"] for e in res["worklist"]} == {"faible.pdf"}
+    assert res["counts"]["vision_ok_skip"] == 1
+    assert res["counts"]["vision_fusion_skip"] == 1
+    assert res["counts"]["pdf_text_skip"] == 1
+
+    # include_born_digital réintègre fusion + pdf-text (uniformisation opt-in)
+    res2 = O.transcribe_plan(max_pages=10, include_born_digital=True,
+                             db=tracking_db)
+    assert {e["rel"] for e in res2["worklist"]} >= {"faible.pdf", "fusion.pdf",
+                                                    "brut.pdf"}
+
+
+def test_mistral_cost_single_source():
+    """Le coût page (OCR 4 batch) a UNE source : tracking.MISTRAL_PAGE_COST_USD."""
+    from connaissance.core.tracking import MISTRAL_PAGE_COST_USD
+    assert O._MISTRAL_PAGE_COST is MISTRAL_PAGE_COST_USD
+    assert MISTRAL_PAGE_COST_USD == 0.002
+
+
+def test_ocr_born_digital_routes(tmp_path, monkeypatch, tracking_db):
+    """Routage born-digital : digital+rappel OK → fusion ; digital+rappel bas →
+    fallback texte embarqué (pdf-text) ; scan à couche OCR → Vision pur ;
+    transcription mistral jamais écrasée (même --force)."""
+    docs = tmp_path / "Documents"; trans = tmp_path / "Transcriptions" / "Documents"
+    docs.mkdir(parents=True); trans.mkdir(parents=True)
+    monkeypatch.setattr(O, "DOCUMENTS_DIR", docs)
+    monkeypatch.setattr(O, "TRANSCRIPTIONS_DIR", trans)
+    monkeypatch.setattr(O, "documents_read_path", lambda p: str(p))
+    monkeypatch.setattr(O._ocr, "available", lambda: True)
+    monkeypatch.setattr(O, "register_document", lambda *a, **k: None)
+
+    for rel in ("digital.pdf", "rate.pdf", "vieux-scan.pdf", "deja.pdf"):
+        (docs / rel).write_bytes(b"%PDF")
+        _put_signals(tracking_db, rel, type="pdf", text_source="pdf_embedded",
+                     born_digital=True, pages=1)
+    _fm_trans(trans, "deja.pdf", ocr_engine="mistral")
+
+    kinds = {"digital.pdf": "digital", "rate.pdf": "digital",
+             "vieux-scan.pdf": "scan_ocr", "deja.pdf": "digital"}
+    monkeypatch.setattr(O, "_pdf_layer_kind",
+                        lambda p, max_pages=5: kinds[Path(p).name])
+    embedded = {"digital.pdf": "un texte fidèle et complet",
+                "rate.pdf": "des mots que vision ne verra jamais ici",
+                "vieux-scan.pdf": "couche ocr pourrie", "deja.pdf": "x"}
+    monkeypatch.setattr(O, "_pdf_embedded_text",
+                        lambda p, max_pages=50: embedded[Path(p).name])
+    seen_fuse = {}
+
+    def fake_ocr(p, max_pages=50, timeout=180, fuse=False):
+        seen_fuse[Path(p).name] = fuse
+        if Path(p).name == "rate.pdf":      # fusion qui rate la mise en page
+            return {"text": "un texte", "confidence": 0.6}
+        return {"text": "un texte fidèle et complet", "confidence": 0.45}
+    monkeypatch.setattr(O._ocr, "ocr_file", fake_ocr)
+
+    res = O.ocr_born_digital(min_recall=0.9, force=True, db=tracking_db)
+    assert res["counts"] == {"fusion": 1, "pdf_text_fallback": 1,
+                             "scan_ocr_layer": 1, "scan_pur": 0}
+    assert res["skipped"]["mistral_preserve"] == 1
+    # fusion : fuse=True pour digital, False pour le scan à couche OCR
+    assert seen_fuse == {"digital.pdf": True, "rate.pdf": True,
+                         "vieux-scan.pdf": False}
+    fused = (trans / "digital.md").read_text(encoding="utf-8")
+    assert "ocr_engine: vision-local" in fused and "ocr_kind: born-digital" in fused
+    rate = (trans / "rate.md").read_text(encoding="utf-8")
+    assert "ocr_engine: pdf-text" in rate
+    assert "des mots que vision ne verra jamais ici" in rate
+    scan = (trans / "vieux-scan.md").read_text(encoding="utf-8")
+    assert "ocr_kind: scan-ocr-layer" in scan
+    assert "couche ocr pourrie" not in scan     # la vieille couche ≠ source
+    deja = (trans / "deja.md").read_text(encoding="utf-8")
+    assert "ocr_engine: mistral" in deja        # intact malgré force
