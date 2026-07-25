@@ -34,6 +34,30 @@ def test_date_from_path_deepest_segment_wins():
     assert date_from_path("projets/INC2087/rapport.pdf") is None
 
 
+def test_fs_date_gated_by_restored_archives():
+    """Acceptation CIBLÉE de la date filesystem : dernier recours, et jamais
+    sous une archive restaurée (Takeout/Archive/Téléchargements → date de
+    copie, pas du document)."""
+    from connaissance.core.classify import fs_date_plausible, pick_date
+    assert fs_date_plausible("- Inbox/facture.pdf")
+    assert fs_date_plausible("Classer/_Clients/R3D/contrat.pdf")
+    assert not fs_date_plausible(
+        "Classer/2021/Archive 2021-11-19 (Google Takout)/Disque/x.pdf")
+    assert not fs_date_plausible("Classer/Téléchargements 2020/x.pdf")
+    # pick_date : fs accepté hors archive…
+    sig = {"rel": "- Inbox/reçu sans nom daté.pdf",
+           "dates": {"filesystem_created": "2026-07-20T10:00:00"}}
+    assert pick_date(sig) == ("2026-07-20", "filesystem")
+    # …refusé sous archive (chemin non daté par ailleurs → aucune date)
+    sig2 = {"rel": "Vieux backup/reçu.pdf",
+            "dates": {"filesystem_created": "2021-11-19T10:00:00"}}
+    assert pick_date(sig2) == (None, "none")
+    # et le chemin daté garde priorité sur fs
+    sig3 = {"rel": "Classer/_Clients/2019-04 mandat/reçu.pdf",
+            "dates": {"filesystem_created": "2026-07-20T10:00:00"}}
+    assert pick_date(sig3) == ("2019-04-01", "path")
+
+
 def test_well_named_document_high_confidence():
     s = _sig(
         "Classer/2026/Maison2/Municipalité/"

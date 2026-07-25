@@ -136,22 +136,42 @@ def date_from_path(rel: str) -> str | None:
     return None
 
 
+# Marqueurs d'archive restaurée : sous ces dossiers, la date filesystem est la
+# date d'EXTRACTION/copie (Takeout 2021, dumps 2020…), pas celle du document.
+# « Takout » : orthographe réelle du dossier du corpus.
+_RESTORED_RE = re.compile(
+    r"archive|tak[eo]?out|t[ée]l[ée]chargement|download|backup|restaur",
+    re.I)
+
+
+def fs_date_plausible(rel: str) -> bool:
+    """Vrai si la date filesystem est un repli acceptable pour ce chemin :
+    aucun segment n'évoque une archive restaurée — ailleurs (flux récent type
+    ``- Inbox``, dossiers de travail), la date de création ≈ l'arrivée réelle
+    du document. Acceptation CIBLÉE demandée le 2026-07-25."""
+    return not any(_RESTORED_RE.search(seg) for seg in Path(rel).parts[:-1])
+
+
 def pick_date(signals: Mapping) -> tuple[str | None, str]:
     """(date AAAA-MM-JJ, provenance). Priorité : nom > métadonnée > chemin >
-    filesystem — le chemin (dossiers datés, segment le plus profond) est un
-    vrai signal documentaire ; la date filesystem n'est qu'une date d'import."""
+    filesystem — chaque étage n'est qu'un repli du précédent. Le chemin
+    (dossiers datés, segment le plus profond) est un vrai signal documentaire ;
+    la date filesystem n'est acceptée qu'en dernier recours ET hors archives
+    restaurées (``fs_date_plausible``) — là-bas c'est une date de copie."""
+    rel = str(signals.get("rel") or "")
     dates = signals.get("dates", {}) or {}
     for key, label in (("from_name", "name"), ("metadata", "metadata")):
         d = _to_iso_date(dates.get(key) if isinstance(dates.get(key), str)
                          else dates.get(key))
         if d:
             return d, label
-    d = date_from_path(str(signals.get("rel") or ""))
+    d = date_from_path(rel)
     if d:
         return d, "path"
-    d = _to_iso_date(dates.get("filesystem_created"))
-    if d:
-        return d, "filesystem"
+    if fs_date_plausible(rel):
+        d = _to_iso_date(dates.get("filesystem_created"))
+        if d:
+            return d, "filesystem"
     return None, "none"
 
 

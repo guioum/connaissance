@@ -537,8 +537,12 @@ def register(results_file: str, from_prepare: str,
             date_approx = False
             if not date:
                 hd, hsrc = hint.get("date"), hint.get("date_source")
-                if hd and _DATE_OK.match(hd or "") \
-                        and hsrc in ("name", "metadata", "path"):
+                ok = hsrc in ("name", "metadata", "path") or (
+                    # fs : acceptation CIBLÉE — jamais sous une archive
+                    # restaurée (re-vérifié ici, les hints anciens émettaient
+                    # `filesystem` sans cette garde).
+                    hsrc == "filesystem" and _heur.fs_date_plausible(source))
+                if hd and _DATE_OK.match(hd or "") and ok:
                     date, date_approx = hd, True
             if not date:
                 # Filet indépendant du hint (les manifestes préparés avant
