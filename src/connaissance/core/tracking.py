@@ -1023,6 +1023,19 @@ class TrackingDB:
         if commit:
             self._conn.commit()
 
+    def set_classification_hash(self, rel_path, sha256: str | None,
+                                *, commit: bool = True) -> None:
+        """Estampiller le ``hash`` de la fiche classement (ancre du diff de
+        photos). Appelé par ``relocate_document`` avec le sha déjà calculé par
+        le ledger — sans lui, le « hash en ancre » (v2.31) restait NULL."""
+        if not sha256:
+            return
+        self._conn.execute(
+            "UPDATE doc_classification SET hash = ? WHERE rel_path = ?",
+            (sha256, _nfc(rel_path)))
+        if commit:
+            self._conn.commit()
+
     def get_classification(self, rel_path):
         """Étage classement (dict) de la fiche d'un document, ou None."""
         row = self._conn.execute(

@@ -179,25 +179,78 @@ def view(name: str, apply: bool = False, clear: bool = False,
             "view_dir": str(view_dir)}
 
 
+def _ledger_forward(db_file: Path) -> dict[str, str]:
+    """Carte old→new (chemins ABS, NFC) du ``file_ledger`` d'une photo."""
+    conn = sqlite3.connect(str(db_file))
+    try:
+        rows = conn.execute(
+            "SELECT old_path, new_path FROM file_ledger "
+            "WHERE status = 'applied'").fetchall()
+    except sqlite3.OperationalError:
+        rows = []
+    finally:
+        conn.close()
+    n = unicodedata.normalize
+    return {n("NFC", o): n("NFC", w) for o, w in rows if o and w}
+
+
 def diff(a: str, b: str) -> dict:
-    """Comparer deux photos par hash : déplacés / reclassés / ajoutés / retirés."""
+    """Comparer deux photos : déplacés / reclassés / ajoutés / retirés.
+
+    Appariement d'une ligne de A à sa ligne de B : par **hash** quand les deux
+    photos en ont un (ancre idéale — estampillé par ``relocate_document`` à
+    chaque déplacement), sinon par **rel NFC résolu à travers le ledger de la
+    photo B** (chaîne old→new, comme la vue snapshot) — c'est ce qui rend le
+    diff véridique même pour les photos historiques dont ``hash`` est NULL
+    (le « hash en ancre » du design v2.31 n'était jamais alimenté : le diff
+    renvoyait des zéros systématiques, constaté le 2026-07-25)."""
     pa, pb = _snap_path(a), _snap_path(b)
     if pa is None or pb is None:
         return {"error": f"snapshot introuvable : {a if pa is None else b}"}
-    A = {r["hash"]: r for r in _classification_rows(pa) if r["hash"]}
-    B = {r["hash"]: r for r in _classification_rows(pb) if r["hash"]}
-    added = [B[h]["rel_path"] for h in B.keys() - A.keys()]
-    removed = [A[h]["rel_path"] for h in A.keys() - B.keys()]
-    moved, reclassified = [], []
-    for h in A.keys() & B.keys():
-        if A[h]["rel_path"] != B[h]["rel_path"]:
-            moved.append({"from": A[h]["rel_path"], "to": B[h]["rel_path"]})
-        if (A[h]["entity_slug"], A[h]["category"]) != \
-                (B[h]["entity_slug"], B[h]["category"]):
+    n = unicodedata.normalize
+    rows_a = _classification_rows(pa)
+    rows_b = _classification_rows(pb)
+    B_by_hash = {r["hash"]: r for r in rows_b if r["hash"]}
+    B_by_rel = {n("NFC", r["rel_path"]): r for r in rows_b}
+    fwd = _ledger_forward(pb)
+
+    def _resolve(abs_t: str) -> str:
+        seen = {abs_t}
+        while abs_t in fwd and fwd[abs_t] not in seen:
+            abs_t = fwd[abs_t]
+            seen.add(abs_t)
+        return abs_t
+
+    moved, reclassified, removed = [], [], []
+    matched_b: set[str] = set()
+    for ra in rows_a:
+        rel_a = n("NFC", ra["rel_path"])
+        rb = B_by_hash.get(ra["hash"]) if ra["hash"] else None
+        if rb is None:
+            rb = B_by_rel.get(rel_a)
+        if rb is None:
+            # rel disparu de B : suivre la chaîne du ledger de B.
+            terminal = _resolve(n("NFC", str(DOCUMENTS_DIR / ra["rel_path"])))
+            try:
+                rel_t = n("NFC", str(Path(terminal).relative_to(DOCUMENTS_DIR)))
+            except ValueError:
+                rel_t = None
+            rb = B_by_rel.get(rel_t) if rel_t else None
+        if rb is None:
+            removed.append(ra["rel_path"])
+            continue
+        rel_b = n("NFC", rb["rel_path"])
+        matched_b.add(rel_b)
+        if rel_a != rel_b:
+            moved.append({"from": ra["rel_path"], "to": rb["rel_path"]})
+        if (ra["entity_slug"], ra["category"]) != \
+                (rb["entity_slug"], rb["category"]):
             reclassified.append({
-                "rel_path": B[h]["rel_path"],
-                "from": f'{A[h]["entity_slug"]}/{A[h]["category"]}',
-                "to": f'{B[h]["entity_slug"]}/{B[h]["category"]}'})
+                "rel_path": rb["rel_path"],
+                "from": f'{ra["entity_slug"]}/{ra["category"]}',
+                "to": f'{rb["entity_slug"]}/{rb["category"]}'})
+    added = [r["rel_path"] for r in rows_b
+             if n("NFC", r["rel_path"]) not in matched_b]
     return {"a": pa.stem, "b": pb.stem,
             "added": len(added), "removed": len(removed),
             "moved": len(moved), "reclassified": len(reclassified),

@@ -125,9 +125,13 @@ def relocate_document(db, old_rel: str, new_rel: str, run_id: str,
                 "transcription_found": tr_old is not None}
 
     done = []
+    src_sha = None
     with db.transaction():
         for key, s, d in moves:
-            _ledger.safe_move(db, s, d, f"{reason} {key}", run_id, commit=False)
+            entry = _ledger.safe_move(db, s, d, f"{reason} {key}", run_id,
+                                      commit=False)
+            if key == "source":
+                src_sha = entry.get("sha256")
             done.append(key)
         # source du résumé → transcription (co-localisée). Mise à jour même en
         # réalignement (la transcription a bougé bien que le résumé non).
@@ -137,6 +141,9 @@ def relocate_document(db, old_rel: str, new_rel: str, run_id: str,
         # sinon old==new viderait la ligne).
         if old_rel != new_rel:
             db.relink_document(old_rel, new_rel, commit=False)
+        # Hash en ancre de la fiche (diff de photos) : le ledger vient de le
+        # calculer pour le move de la source — l'estampiller gratuitement.
+        db.set_classification_hash(new_rel, src_sha, commit=False)
         if tr_old is not None:
             old_tr_rel = str(Path(tr_old).relative_to(CONNAISSANCE_ROOT))
             if old_tr_rel != tr_new_rel:
