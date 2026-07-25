@@ -104,7 +104,8 @@ def test_get_or_compute_signals_caches(tracking_db, tmp_path):
 
     a = tracking_db.get_or_compute_signals(p, "doc.txt", compute)
     b = tracking_db.get_or_compute_signals(p, "doc.txt", compute)
-    assert a == b == {"_v": SIGNALS_SCHEMA_VERSION, "rel": "doc.txt", "ok": True}
+    assert a == b == {"_v": SIGNALS_SCHEMA_VERSION, "rel": "doc.txt",
+                      "ok": True, "_tr_mtime": None}
     assert len(calls) == 1   # 2e appel servi par le cache
 
     # mtime change → recalcul
@@ -112,6 +113,35 @@ def test_get_or_compute_signals_caches(tracking_db, tmp_path):
     os.utime(p, (0, 0))
     tracking_db.get_or_compute_signals(p, "doc.txt", compute)
     assert len(calls) == 2
+
+
+def test_signals_cache_invalidated_by_transcription(tmp_path, tracking_db):
+    """Jeton `_tr_mtime` : une transcription apparue/changée depuis le paquet
+    invalide le cache — sinon un doc OCRisé après coup garde un excerpt tiré
+    de la couche PDF (voire d'une vieille couche OCR pourrie)."""
+    from connaissance.core.signals import SIGNALS_SCHEMA_VERSION
+    p = tmp_path / "doc.pdf"
+    p.write_bytes(b"%PDF")
+    calls = []
+
+    def compute(_p):
+        calls.append(1)
+        return {"_v": SIGNALS_SCHEMA_VERSION, "rel": "doc.pdf"}
+
+    # Sans transcription : calcul puis cache stable.
+    tracking_db.get_or_compute_signals(p, "doc.pdf", compute, tr_mtime=None)
+    tracking_db.get_or_compute_signals(p, "doc.pdf", compute, tr_mtime=None)
+    assert len(calls) == 1
+    # Une transcription apparaît → recalcul, puis cache stable au même jeton.
+    tracking_db.get_or_compute_signals(p, "doc.pdf", compute, tr_mtime=111.0)
+    tracking_db.get_or_compute_signals(p, "doc.pdf", compute, tr_mtime=111.0)
+    assert len(calls) == 2
+    # La transcription est mise à jour (repasse) → recalcul.
+    tracking_db.get_or_compute_signals(p, "doc.pdf", compute, tr_mtime=222.0)
+    assert len(calls) == 3
+    # La transcription disparaît → recalcul aussi (retour couche PDF).
+    tracking_db.get_or_compute_signals(p, "doc.pdf", compute, tr_mtime=None)
+    assert len(calls) == 4
 
 
 # --- commande documents signals --------------------------------------------

@@ -884,7 +884,8 @@ class TrackingDB:
         return self._get_or_compute_simhash(
             abs_path, rel_path, table="doc_simhash", compute_fn=compute_fn)
 
-    def get_or_compute_signals(self, abs_path, rel_path, compute_fn):
+    def get_or_compute_signals(self, abs_path, rel_path, compute_fn,
+                               *, tr_mtime: float | None = None):
         """Paquet de signaux Phase B d'un document, caché par ``(rel_path, size,
         mtime)``.
 
@@ -893,6 +894,13 @@ class TrackingDB:
         ``compute_fn(abs_path) -> dict`` : calcule le paquet quand le cache est
         froid/périmé. Retourne le dict (caché ou frais), ou ``None`` si stat
         échoue.
+
+        ``tr_mtime`` : mtime de la **transcription** du document (None si
+        absente). Le paquet mémorise ce jeton (``_tr_mtime``) : une
+        transcription apparue, mise à jour ou supprimée depuis le calcul
+        invalide le cache — sinon un doc OCRisé après coup garderait un
+        ``excerpt`` tiré de la couche PDF (voire d'une vieille couche OCR
+        pourrie) au lieu de sa transcription (source prioritaire ``ocr_cache``).
         """
         import json as _json
         try:
@@ -914,8 +922,12 @@ class TrackingDB:
                 try:
                     packet = _json.loads(d["signals"])
                     # Recalcule si le paquet caché est d'une version antérieure
-                    # du schéma (p. ex. sans le champ `excerpt`, schéma v1).
-                    if packet.get("_v") == SIGNALS_SCHEMA_VERSION:
+                    # du schéma (p. ex. sans le champ `excerpt`, schéma v1) ou
+                    # si la transcription a changé depuis (jeton `_tr_mtime` —
+                    # les vieux paquets sans jeton ne restent valides que si le
+                    # doc n'a toujours pas de transcription).
+                    if packet.get("_v") == SIGNALS_SCHEMA_VERSION \
+                            and packet.get("_tr_mtime") == tr_mtime:
                         return packet
                 except (ValueError, TypeError):
                     pass  # cache corrompu → recalculer
@@ -923,6 +935,7 @@ class TrackingDB:
         packet = compute_fn(abs_path)
         if packet is None:
             return None
+        packet["_tr_mtime"] = tr_mtime
         self._conn.execute(
             """INSERT INTO doc_signals (rel_path, signals, size, mtime)
                VALUES (?, ?, ?, ?)

@@ -54,15 +54,19 @@ def _strip_frontmatter(md: str) -> str:
     return md[end + 4:].lstrip("\n") if end >= 0 else md
 
 
-def _ocr_cache_text(rel: str) -> str | None:
-    """Texte d'une transcription existante (cache OCR gratuit), ou None."""
+def _ocr_cache_text(rel: str) -> tuple[str | None, float | None]:
+    """(texte, mtime) d'une transcription existante (cache OCR gratuit), ou
+    (None, None). Le mtime sert de **jeton d'invalidation** du cache signaux :
+    une transcription apparue/mise à jour depuis le paquet le périme."""
     trans = TRANSCRIPTIONS_DIR / Path(rel).with_suffix(".md")
     if not trans.exists():
-        return None
+        return None, None
     try:
-        return _strip_frontmatter(trans.read_text(encoding="utf-8", errors="replace"))
+        return (_strip_frontmatter(trans.read_text(encoding="utf-8",
+                                                   errors="replace")),
+                trans.stat().st_mtime)
     except OSError:
-        return None
+        return None, None
 
 
 def scan(scope: str | None = None, output_file: str | None = None,
@@ -119,7 +123,7 @@ def scan(scope: str | None = None, output_file: str | None = None,
                     skipped["secret"] += 1
                     continue
 
-                ocr = _ocr_cache_text(rel)
+                ocr, tr_mtime = _ocr_cache_text(rel)
 
                 # Image SANS transcription = photo souvenir (pas un document) :
                 # hors doc_signals. Avec transcription = reconnue document par
@@ -145,7 +149,8 @@ def scan(scope: str | None = None, output_file: str | None = None,
                     # (size/mtime ne changent pas si le fichier se matérialise).
                     packet = _compute(fpath)
                 else:
-                    packet = db.get_or_compute_signals(fpath, rel, _compute)
+                    packet = db.get_or_compute_signals(fpath, rel, _compute,
+                                                       tr_mtime=tr_mtime)
                 if packet is not None:
                     # Cast : le paquet vient du cache DB (JSON) ou du calcul brut.
                     packets.append(cast(DocumentSignals, packet))
