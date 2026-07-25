@@ -516,8 +516,11 @@ def prune_orphans(db: TrackingDB, dry_run: bool) -> dict:
     """
     counts = {"total": 0}
     orphans: list[str] = []
+    from connaissance.core import tracking as _tracking
     for path, file_type in db.list_all_files():
-        if not (CONNAISSANCE / path).exists():
+        # Résolution via le canon files (relatif au HOME) — l'ancien
+        # `CONNAISSANCE / path` supposait la vieille convention mixte.
+        if not _tracking.resolve_file_path(path).exists():
             orphans.append(path)
             ft = file_type or "autre"
             counts[ft] = counts.get(ft, 0) + 1

@@ -105,7 +105,8 @@ def test_reindex_reconstruit_les_lignes_attendues(base, tracking_db):
     assert resume["file_type"] == "resume"
     assert resume["entity_type"] == "personnes"
     assert resume["entity_slug"] == "jean-dupont"
-    assert resume["source_path"] == "Transcriptions/Courriels/aaa.md"
+    assert resume["source_path"] == \
+        "Connaissance/Transcriptions/Courriels/aaa.md"   # forme canon
 
     fiche = tracking_db.get_file("Synthèse/personnes/jean-dupont/fiche.md")
     assert fiche["file_type"] == "fiche" and fiche["entity_slug"] == "jean-dupont"

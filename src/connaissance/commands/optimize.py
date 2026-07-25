@@ -13,6 +13,7 @@ import shutil
 from pathlib import Path
 
 from connaissance.core import ledger as _ledger
+from connaissance.core.tracking import canon_file_path
 from connaissance.core.fsio import atomic_write_text
 from connaissance.core.manifest_io import unique_dest
 from connaissance.core.paths import BASE_PATH
@@ -91,7 +92,9 @@ def promote(db, dry_run=False):
             # get_or_compute_hash vient d'enregistrer le hash de la PJ sous
             # son PROPRE chemin : se retrouver soi-même n'est pas un doublon
             # (même garde que scan_duplicates).
-            if existing and Path(existing) == Path(src):
+            # Comparaison en forme CANONIQUE : `existing` vient de la
+            # table files (relatif au home), `src` est absolu.
+            if existing and canon_file_path(existing) == canon_file_path(src):
                 existing = None
         if existing:
             print(f"  ○ {src.name} — déjà connu ({Path(existing).name})", file=sys.stderr)
@@ -179,7 +182,7 @@ def scan_duplicates(db):
                     continue
 
                 existing = db.has_hash(file_hash)
-                if existing and str(f) != existing:
+                if existing and canon_file_path(f) != canon_file_path(existing):
                     duplicates.append({
                         "path": f,
                         "hash": file_hash,

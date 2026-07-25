@@ -34,7 +34,8 @@ from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 
-from connaissance.core.paths import CONNAISSANCE_ROOT, require_connaissance_root
+from connaissance.core.paths import (BASE_PATH, CONNAISSANCE_ROOT,
+                                     require_connaissance_root)
 
 DB_PATH = CONNAISSANCE_ROOT / ".config" / "tracking.db"
 # Artefacts couplés à la base, sous .config/ (cf. paths : .config = couplé DB).
@@ -96,6 +97,41 @@ def _nfc(rel_path) -> str:
     décomposés) ; on canonicalise pour que stockage et lecture matchent quelle
     que soit la source du chemin (walk filesystem NFD vs littéral/CLI NFC)."""
     return unicodedata.normalize("NFC", str(rel_path))
+
+
+# Premiers segments des vieilles formes relatives à ~/Connaissance (écrites
+# par register_document avant l'unification) — reconnues et re-préfixées.
+_CONN_TOPS = ("Transcriptions/", "Résumés/", "Synthèse/", "Courriels/",
+              "Notes/", ".trash/", ".config/")
+
+
+def canon_file_path(path) -> str:
+    """Forme CANONIQUE d'un chemin de la table ``files`` : **NFC, relatif au
+    home** (``Documents/…``, ``Connaissance/Transcriptions/…``) ; hors home →
+    absolu NFC.
+
+    Historique (2026-07-26) : deux conventions coexistaient selon l'écrivain —
+    absolu (ledger/relocate via ``move_file``) et relatif à ~/Connaissance
+    (``register_document``). Un ``UPDATE … WHERE path = ?`` dans une forme ne
+    matchait jamais l'autre : après le grand déplacement, 10 308 chemins de
+    transcriptions étaient périmés et ``summarize plan`` les croyait tous
+    manquants. Toute frontière de ``files.path`` passe désormais par ici, et
+    ``_migrate`` normalise les bases existantes à l'ouverture."""
+    s = unicodedata.normalize("NFC", str(path))
+    home = unicodedata.normalize("NFC", str(BASE_PATH))
+    if s.startswith(home + "/"):
+        return s[len(home) + 1:]
+    if not s.startswith("/") and s.startswith(_CONN_TOPS):
+        return "Connaissance/" + s
+    return s
+
+
+def resolve_file_path(path) -> Path:
+    """Chemin ABSOLU d'une valeur de ``files.path`` (l'inverse du canon) :
+    relatif → sous le home, absolu (hors home) → tel quel. Tout consommateur
+    qui touche le disque depuis la table ``files`` doit passer par ici."""
+    s = str(path)
+    return Path(s) if s.startswith("/") else BASE_PATH / s
 
 
 # Bruit de dossier d'origine : sujets `classify` provisoires dérivés de noms de
@@ -466,6 +502,27 @@ class TrackingDB:
         self._conn.execute(
             "UPDATE files SET message_id = TRIM(message_id) "
             "WHERE message_id IS NOT NULL AND message_id != TRIM(message_id)")
+        # Convention de chemins UNIQUE pour files (NFC, relatif au home — cf.
+        # canon_file_path) : normalise les bases existantes. Idempotent (ne
+        # touche que les lignes non canoniques) ; collision UNIQUE → la ligne
+        # legacy est absorbée (la canonique, plus fraîche, fait foi).
+        for (p,) in self._conn.execute("SELECT path FROM files").fetchall():
+            c = canon_file_path(p)
+            if c == p:
+                continue
+            try:
+                self._conn.execute(
+                    "UPDATE files SET path = ? WHERE path = ?", (c, p))
+            except sqlite3.IntegrityError:
+                self._conn.execute("DELETE FROM files WHERE path = ?", (p,))
+        for (p,) in self._conn.execute(
+                "SELECT DISTINCT source_path FROM files "
+                "WHERE source_path IS NOT NULL").fetchall():
+            c = canon_file_path(p)
+            if c != p:
+                self._conn.execute(
+                    "UPDATE files SET source_path = ? WHERE source_path = ?",
+                    (c, p))
 
     def _cleanup_fuse_hidden(self):
         """Supprimer les fichiers .fuse_hidden* orphelins du dossier de la DB.
@@ -601,7 +658,8 @@ class TrackingDB:
                mtime=COALESCE(excluded.mtime, mtime),
                size=COALESCE(excluded.size, size),
                updated_at=strftime('%Y-%m-%dT%H:%M:%S', 'now', 'localtime')""",
-            (str(path), file_type, source_type, str(source_path) if source_path else None,
+            (canon_file_path(path), file_type, source_type,
+             canon_file_path(source_path) if source_path else None,
              entity_type, entity_slug, created, modified, message_id, hash, mtime, size))
         if commit:
             self._conn.commit()
@@ -609,7 +667,8 @@ class TrackingDB:
     def get_file(self, path):
         """Récupérer un fichier par son chemin."""
         row = self._conn.execute(
-            "SELECT * FROM files WHERE path = ?", (str(path),)).fetchone()
+            "SELECT * FROM files WHERE path = ?",
+            (canon_file_path(path),)).fetchone()
         return dict(row) if row else None
 
     def rename_text_simhash(self, old_rel, new_rel, *, commit: bool = True) -> int:
@@ -633,7 +692,8 @@ class TrackingDB:
                entity_slug = COALESCE(?, entity_slug),
                updated_at = strftime('%Y-%m-%dT%H:%M:%S', 'now', 'localtime')
                WHERE path = ?""",
-            (str(new_path), entity_type, entity_slug, str(old_path)))
+            (canon_file_path(new_path), entity_type, entity_slug,
+             canon_file_path(old_path)))
         if commit:
             self._conn.commit()
 
@@ -696,8 +756,9 @@ class TrackingDB:
         invalide le ``hash`` (NULL) — le fichier a été modifié, l'ancien hash
         ne s'applique plus.
         """
+        key = canon_file_path(path)
         row = self._conn.execute(
-            "SELECT size, mtime FROM files WHERE path = ?", (str(path),)).fetchone()
+            "SELECT size, mtime FROM files WHERE path = ?", (key,)).fetchone()
         if row is not None:
             old = dict(row)
             changed = (old.get("size") != int(size)
@@ -707,18 +768,18 @@ class TrackingDB:
                     """UPDATE files SET size = ?, mtime = ?, hash = NULL,
                        updated_at = strftime('%Y-%m-%dT%H:%M:%S', 'now', 'localtime')
                        WHERE path = ?""",
-                    (int(size), float(mtime), str(path)))
+                    (int(size), float(mtime), key))
             else:
                 self._conn.execute(
                     """UPDATE files SET
                        updated_at = strftime('%Y-%m-%dT%H:%M:%S', 'now', 'localtime')
                        WHERE path = ?""",
-                    (str(path),))
+                    (key,))
         else:
             self._conn.execute(
                 """INSERT INTO files (path, file_type, size, mtime)
                    VALUES (?, ?, ?, ?)""",
-                (str(path), file_type, int(size), float(mtime)))
+                (key, file_type, int(size), float(mtime)))
         self._conn.commit()
 
     def register_hash(self, hash_value, path, size=0, mtime: float | None = None):
@@ -737,7 +798,8 @@ class TrackingDB:
                size=COALESCE(excluded.size, size),
                mtime=COALESCE(excluded.mtime, mtime),
                updated_at=strftime('%Y-%m-%dT%H:%M:%S', 'now', 'localtime')""",
-            (str(path), hash_value, int(size) if size else None, mtime))
+            (canon_file_path(path), hash_value,
+             int(size) if size else None, mtime))
         self._conn.commit()
 
     def get_or_compute_hash(self, path,
@@ -768,7 +830,7 @@ class TrackingDB:
 
         row = self._conn.execute(
             "SELECT hash, size, mtime FROM files WHERE path = ?",
-            (str(path),)).fetchone()
+            (canon_file_path(path),)).fetchone()
         if row is not None:
             d = dict(row)
             if (d.get("hash")
@@ -1451,7 +1513,7 @@ class TrackingDB:
             return
         self._conn.executemany(
             "DELETE FROM files WHERE path = ?",
-            [(p,) for p in paths],
+            [(canon_file_path(p),) for p in paths],
         )
         self._conn.commit()
 
@@ -1490,7 +1552,8 @@ class TrackingDB:
 
             total += 1
             row = self._conn.execute(
-                "SELECT size, mtime FROM files WHERE path = ?", (str(f),)
+                "SELECT size, mtime FROM files WHERE path = ?",
+                (canon_file_path(f),)
             ).fetchone()
             if row is not None:
                 d = dict(row)
@@ -1533,7 +1596,16 @@ class TrackingDB:
             query += " AND f.created IS NOT NULL AND f.created < ?"
             params.append(until)
         query += " ORDER BY f.created DESC"
-        return [dict(r) for r in self._conn.execute(query, params).fetchall()]
+        out = []
+        for r in self._conn.execute(query, params).fetchall():
+            d = dict(r)
+            # API stable : chemins relatifs à ~/Connaissance (les appelants —
+            # summarize.plan — font CONNAISSANCE_ROOT / path). Le stockage
+            # canonique est relatif au HOME (« Connaissance/… »).
+            if d.get("path", "").startswith("Connaissance/"):
+                d["path"] = d["path"][len("Connaissance/"):]
+            out.append(d)
+        return out
 
     def unorganized_resumes(self):
         """Trouver les résumés sans entité assignée."""

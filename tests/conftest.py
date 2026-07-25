@@ -26,6 +26,10 @@ def _isole_config_reelle(tmp_path, monkeypatch):
 
     cfg = tmp_path / "_config_isole"
     journal = cfg / "journal"
+    # Canon de files.path (relatif au home) : ancrer le « home » sur tmp pour
+    # que les arbres de test (tmp/Connaissance, tmp/Documents) se canonisent
+    # et se résolvent comme en prod.
+    monkeypatch.setattr(tracking, "BASE_PATH", tmp_path)
     monkeypatch.setattr(tracking, "DB_PATH", cfg / "tracking.db")
     monkeypatch.setattr(tracking, "BACKUPS_DIR", cfg / "backups")
     monkeypatch.setattr(tracking, "JOURNAL_DIR", journal)

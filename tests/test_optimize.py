@@ -11,6 +11,7 @@ import hashlib
 import pytest
 
 import connaissance.core.ledger as ledger_mod
+from connaissance.core.tracking import canon_file_path
 from connaissance.commands import optimize
 
 
@@ -63,7 +64,8 @@ def test_promote_deux_pj_meme_nom_contenus_differents(racines, tracking_db):
     assert {dest_1.read_bytes(), dest_2.read_bytes()} == {contenu_a, contenu_b}
     for dest in (dest_1, dest_2):
         # Chaque hash enregistré pointe le chemin dont il est VRAIMENT le contenu.
-        assert tracking_db.has_hash(_sha(dest.read_bytes())) == str(dest)
+        assert tracking_db.has_hash(_sha(dest.read_bytes())) == \
+                canon_file_path(dest)
     # Les sources restent en place (promotion = copie).
     assert pj_a.exists() and pj_b.exists()
 
@@ -148,7 +150,8 @@ def test_dedup_reecrit_les_references_et_corbeille(racines, tracking_db):
     # Le .md ne pointe plus vers Attachments/ mais vers le keeper.
     contenu_md = md.read_text(encoding="utf-8")
     assert "(Attachments/piece.pdf)" not in contenu_md
-    assert f"voir {keeper}" in contenu_md
+    from connaissance.core.tracking import canon_file_path
+    assert f"voir {canon_file_path(keeper)}" in contenu_md
     assert _sha(contenu)[:12] in contenu_md
     # Le doublon est en corbeille ledger (réversible), pas supprimé.
     assert not dup.exists()

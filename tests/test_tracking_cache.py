@@ -57,7 +57,8 @@ def test_read_path_reads_mirror_but_keys_canonical(tracking_db, tmp_path):
     rows = tracking_db._conn.execute(
         "SELECT path FROM files WHERE hash = ?", (h,)).fetchall()
     paths = [r["path"] for r in rows]
-    assert str(canon) in paths        # indexé sous le canonique
+    from connaissance.core.tracking import canon_file_path
+    assert canon_file_path(canon) in paths   # indexé sous le canonique
     assert str(mirror) not in paths   # jamais sous le miroir
 
 

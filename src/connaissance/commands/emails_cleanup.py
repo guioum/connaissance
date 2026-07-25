@@ -252,7 +252,7 @@ def archive_items(obsoletes: list[dict], db: TrackingDB,
         manifest_item["transcription_archived"] = str(trans_dest.relative_to(archive_dir))
 
         # Retirer de la DB (ignore si absente)
-        db._conn.execute("DELETE FROM files WHERE path = ?", (trans_rel,))
+        db.delete_files([trans_rel])   # API tracking (canon des chemins)
 
         # Log
         db.log("connaissance", "archive_obsolete_courriel",
@@ -272,7 +272,7 @@ def archive_items(obsoletes: list[dict], db: TrackingDB,
             resume_dest = archive_dir / resume_rel
             _ledger.safe_move(db, resume, resume_dest,
                               "cleanup courriel obsolète", run_id)
-            db._conn.execute("DELETE FROM files WHERE path = ?", (resume_rel,))
+            db.delete_files([resume_rel])   # API tracking (canon)
             manifest_item["resume_original"] = resume_rel
             manifest_item["resume_archived"] = str(resume_dest.relative_to(archive_dir))
 

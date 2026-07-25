@@ -281,6 +281,28 @@ def verifier_quasi_doublons(seuil: int | None = None) -> list[dict]:
 # --- API publique ---
 
 
+def verifier_chemins_files() -> list[dict]:
+    """Vérifier que ``files.path`` respecte la convention canonique (NFC,
+    relatif au home — cf. ``tracking.canon_file_path``). Un mélange de formes
+    rend les ``UPDATE … WHERE path`` silencieusement inopérants (constaté le
+    2026-07-26 : 10 308 chemins périmés après le grand déplacement)."""
+    from connaissance.core.tracking import TrackingDB, canon_file_path
+    problemes = []
+    db = TrackingDB()
+    try:
+        rows = db._conn.execute("SELECT path FROM files").fetchall()
+    finally:
+        db.close()
+    for (p,) in rows:
+        if canon_file_path(p) != p:
+            problemes.append({"type": "chemin_non_canonique", "path": p})
+            if len(problemes) >= 50:
+                problemes.append({"type": "tronqué",
+                                  "note": "plus de 50 — liste tronquée"})
+                break
+    return problemes
+
+
 _AUDIT_STEPS = {
     "liens_casses": verifier_liens_casses,
     "frontmatter_invalide": verifier_frontmatter,
@@ -288,6 +310,7 @@ _AUDIT_STEPS = {
     "attachements_manquants": verifier_attachements,
     "doublons": verifier_doublons,
     "quasi_doublons": verifier_quasi_doublons,
+    "chemins_files": verifier_chemins_files,
 }
 
 
