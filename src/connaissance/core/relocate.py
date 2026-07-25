@@ -24,6 +24,7 @@ from connaissance.core import ledger as _ledger
 from connaissance.core.frontmatter import (parse_frontmatter,
                                             split_frontmatter,
                                             write_frontmatter)
+from connaissance.core.manifest_io import unique_dest
 from connaissance.core.paths import CONNAISSANCE_ROOT, DOCUMENTS_DIR
 
 TRANSCR = CONNAISSANCE_ROOT / "Transcriptions" / "Documents"
@@ -69,6 +70,8 @@ def relocate_document(db, old_rel: str, new_rel: str, run_id: str,
     # ``classify apply`` (bug attrapé par le pilote du 2026-07-25).
     res_old = RESUMES / Path(old_rel).with_suffix(".md")
     res_new = RESUMES / Path(new_rel).with_suffix(".md")
+    if res_old.is_file() and res_new.exists() and res_old != res_new:
+        res_new = unique_dest(res_new)     # même collision de miroir (stem)
 
     # Transcription : suivre le `source` du résumé (récupère les orphelines
     # sous un ancien slug) ; sinon le miroir co-localisé du rel.
@@ -81,6 +84,13 @@ def relocate_document(db, old_rel: str, new_rel: str, run_id: str,
         cand = TRANSCR / Path(old_rel).with_suffix(".md")
         tr_old = cand if cand.exists() else None
     tr_new = TRANSCR / Path(new_rel).with_suffix(".md")
+    # Collision de MIROIR : deux sources d'extensions différentes (scan .jpg +
+    # .pdf du même document) peuvent viser le même stem → même `.md`. La
+    # source est uniquifiée par l'appelant, pas ses miroirs : uniquifier ici
+    # (constaté en réel tranche 2 : 3 refus d'écrasement, sources déjà
+    # parties — le move disque n'est pas transactionnel).
+    if tr_old is not None and tr_new.exists() and tr_old != tr_new:
+        tr_new = unique_dest(tr_new)
     tr_new_rel = str(tr_new.relative_to(CONNAISSANCE_ROOT))
 
     # On ignore les déplacements src==dst : permet d'appeler relocate avec

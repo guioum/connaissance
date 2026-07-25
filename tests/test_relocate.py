@@ -4,6 +4,34 @@ import connaissance.core.relocate as R
 from connaissance.core.relocate import relocate_document, _read_fm
 
 
+def test_relocate_uniquifies_mirror_collision(tmp_path, monkeypatch,
+                                              tracking_db):
+    """Deux sources d'extensions différentes (scan .jpg + .pdf du même doc)
+    visant le même stem → leurs transcriptions partagent le même `.md`. La
+    cible miroir doit être uniquifiée, pas refusée (constaté en réel tranche 2 :
+    3 sources parties, transcriptions orphelines)."""
+    docs, tr, res, croot = _setup(tmp_path, monkeypatch)
+    # doc A déjà en place avec sa transcription
+    (tr / "organismes" / "caa").mkdir(parents=True)
+    (tr / "organismes" / "caa" / "2014-08-15 carte.md").write_text(
+        "transcription A", encoding="utf-8")
+    # doc B (autre extension, même stem cible) + sa transcription au miroir vrac
+    (docs / "vrac").mkdir(parents=True)
+    (docs / "vrac" / "scan.pdf").write_bytes(b"%PDF B")
+    (tr / "vrac").mkdir(parents=True)
+    (tr / "vrac" / "scan.md").write_text("transcription B", encoding="utf-8")
+
+    out = relocate_document(tracking_db, "vrac/scan.pdf",
+                            "organismes/caa/2014-08-15 carte.pdf",
+                            Lmod.new_run_id("test"))
+    assert "transcription" in out["moved"]
+    # A intacte, B uniquifiée à côté
+    assert (tr / "organismes" / "caa" / "2014-08-15 carte.md").read_text(
+        encoding="utf-8") == "transcription A"
+    assert (tr / "organismes" / "caa" / "2014-08-15 carte (2).md").read_text(
+        encoding="utf-8") == "transcription B"
+
+
 def _setup(tmp_path, monkeypatch):
     docs = tmp_path / "Documents"
     tr = tmp_path / "Connaissance" / "Transcriptions" / "Documents"
