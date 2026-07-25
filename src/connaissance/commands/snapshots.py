@@ -17,6 +17,7 @@ from __future__ import annotations
 import re
 import shutil
 import sqlite3
+import unicodedata
 from datetime import datetime
 from pathlib import Path
 
@@ -135,15 +136,24 @@ def view(name: str, apply: bool = False, clear: bool = False,
     if db is None:
         db = TrackingDB()
     try:
+        # Carte NORMALISÉE NFC des deux côtés : le ledger journalise les
+        # chemins tels que fournis (souvent NFD, rel brut du walk APFS) alors
+        # que les rels du snapshot sont NFC (clés DB) — sans normaliser, la
+        # chaîne rate tous les déplacements et la vue les croit « gone »
+        # (constaté en réel : 914 introuvables après l'apply tranche 1).
+        # L'accès disque APFS est insensible à la normalisation → un chemin
+        # résolu en NFC se lit même si le fichier est nommé NFD.
+        _n = lambda s: unicodedata.normalize("NFC", s)  # noqa: E731
         fwd: dict[str, str] = {}
         for op in db.ledger_all_ops(status="applied"):
             if op.get("old_path") and op.get("new_path"):
-                fwd[op["old_path"]] = op["new_path"]
+                fwd[_n(op["old_path"])] = _n(op["new_path"])
     finally:
         if owns:
             db.close()
 
     def _current(abs_t: str) -> str:
+        abs_t = _n(abs_t)
         seen = {abs_t}
         while abs_t in fwd and fwd[abs_t] not in seen:
             abs_t = fwd[abs_t]

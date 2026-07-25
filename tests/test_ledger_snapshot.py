@@ -34,6 +34,32 @@ def test_snapshot_chains_to_current_location(tmp_path, monkeypatch, tracking_db)
     assert links[0].resolve() == (docs / "final" / "doc.pdf").resolve()
 
 
+def test_snapshot_chain_survives_mixed_normalization(tmp_path, monkeypatch,
+                                                     tracking_db):
+    """Une chaîne dont les maillons mêlent NFC et NFD (ledger = chemins tels
+    que fournis) doit quand même se résoudre — constaté en réel le 2026-07-25 :
+    914 « introuvables » dans la vue snapshot après l'apply tranche 1."""
+    import unicodedata
+    docs = _setup(tmp_path, monkeypatch)
+    nfd = unicodedata.normalize("NFD", "Téléchargés")
+    nfc = unicodedata.normalize("NFC", "Téléchargés")
+    (docs / nfd).mkdir()
+    f = docs / nfd / "doc.pdf"
+    f.write_bytes(b"data")
+    r1 = new_run_id("t")
+    # move journalisé en NFD (chemin brut du walk)…
+    safe_move(tracking_db, docs / nfd / "doc.pdf",
+              docs / nfd / "doc2.pdf", "m1", r1)
+    # …puis en NFC (chemin recomposé depuis une clé DB)
+    safe_move(tracking_db, str(docs / nfc / "doc2.pdf"),
+              docs / "final" / "doc.pdf", "m2", new_run_id("t"))
+    entries = Lmod.snapshot_entries(tracking_db)
+    origins = [e for e in entries if e["is_origin"]]
+    assert len(origins) == 1
+    assert origins[0]["terminal"].endswith("final/doc.pdf")
+    assert origins[0]["exists"]
+
+
 def test_snapshot_dry_run_and_clear(tmp_path, monkeypatch, tracking_db):
     docs = _setup(tmp_path, monkeypatch)
     (docs / "a").mkdir()

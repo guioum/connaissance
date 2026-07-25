@@ -171,15 +171,24 @@ def snapshot_entries(db, *, run_id: str | None = None) -> list[dict]:
     Retourne ``[{run_id, timestamp, op, old_path, terminal, exists}]`` (filtrable
     par ``run_id``). Sert à la vue ``- Historique`` (snapshots en symlinks).
     """
+    import unicodedata
+
+    def _n(s: str) -> str:
+        # Chaîne NORMALISÉE NFC : le ledger journalise les chemins tels que
+        # fournis (NFD du walk APFS ou NFC des clés DB selon l'appelant) —
+        # sans normaliser, une chaîne old→new mêlant les deux formes se casse.
+        return unicodedata.normalize("NFC", s)
+
     ops = db.ledger_all_ops(status="applied")
     forward: dict[str, str] = {}
     destinations: set[str] = set()
     for o in ops:
         if o.get("old_path") and o.get("new_path"):
-            forward[o["old_path"]] = o["new_path"]
-            destinations.add(o["new_path"])
+            forward[_n(o["old_path"])] = _n(o["new_path"])
+            destinations.add(_n(o["new_path"]))
 
     def resolve(p: str) -> str:
+        p = _n(p)
         seen = {p}
         while p in forward and forward[p] not in seen:
             p = forward[p]
@@ -193,6 +202,7 @@ def snapshot_entries(db, *, run_id: str | None = None) -> list[dict]:
         old, new = o.get("old_path"), o.get("new_path")
         if not old or not new:
             continue
+        old, new = _n(old), _n(new)
         terminal = resolve(new)
         out.append({
             "run_id": o["run_id"], "timestamp": o.get("timestamp"),
