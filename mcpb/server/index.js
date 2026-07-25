@@ -875,7 +875,7 @@ server.registerTool(
   "connaissance_classify_apply",
   {
     description:
-      "Phase C brique 5 — apply a classify_register manifest: move each 'auto' entry to its destination (entity_type/slug/'AAAA-MM-JJ title.ext') VIA THE LEDGER (journaled, reversible with ledger_revert). 'attente' entries are left in place. DRY-RUN BY DEFAULT — pass apply=true to actually move files. Name collisions are handled ((2),(3)…). Returns planned/moved counts + ledger_run when files moved.",
+      "Phase C brique 5 — apply a classify_register manifest: move each 'auto' entry to its destination (entity_type/slug/'AAAA-MM-JJ title.ext') via relocate_document — the FULL GRAPH moves together (source + transcription + summary + DB references) in one ledger transaction (journaled, reversible with ledger_revert; the revert also relinks DB references back). 'attente' entries are left in place. DRY-RUN BY DEFAULT — pass apply=true to actually move files. Name collisions are handled ((2),(3)…); an entry already at its destination is skipped (deja_en_place). CRASH-SAFE RESUME: re-running the same manifest after an interruption reconciles manifest↔ledger↔disk (already-moved entries → deja_applique; file moved but DB not committed → relink_repare, counted in 'reconciled'). Returns planned/moved/reconciled counts + ledger_run when files moved.",
     inputSchema: {
       manifest: z.string().describe("Path to the classify_register manifest JSON."),
       apply: z.boolean().optional().describe("Execute the moves (default false = dry-run, moves nothing)."),

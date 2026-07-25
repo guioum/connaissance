@@ -18,7 +18,11 @@ import shutil
 import uuid
 from pathlib import Path
 
-from connaissance.core.paths import CONNAISSANCE_ROOT, documents_read_path
+import yaml
+
+from connaissance.core.frontmatter import split_frontmatter, write_frontmatter
+from connaissance.core.paths import (CONNAISSANCE_ROOT, DOCUMENTS_DIR,
+                                     documents_read_path)
 from connaissance.core.schemas import LedgerPurge, LedgerRevert, LedgerVerify
 from connaissance.core.tracking import LEDGER_JOURNAL_DIR, _append_jsonl
 
@@ -202,6 +206,63 @@ def snapshot_entries(db, *, run_id: str | None = None) -> list[dict]:
     return out
 
 
+def _revert_refs(db, cur: Path, dest: Path) -> None:
+    """Faire suivre les **références DB** à une restauration (relink inverse).
+
+    ``revert_run`` remettait les fichiers en place mais laissait les tables
+    pointer vers le chemin annulé (fiche/`doc_*` sur l'ancien nouveau chemin,
+    `text_simhash` d'une transcription, `files`, champ ``source`` d'un résumé).
+    Miroir exact des mises à jour faites par ``relocate_document`` à l'aller.
+    Best-effort : une référence absente n'empêche pas la restauration."""
+    # doc_signals / doc_classification / doc_sujets (rel ~/Documents)
+    try:
+        cur_rel = str(cur.relative_to(DOCUMENTS_DIR))
+        dest_rel = str(dest.relative_to(DOCUMENTS_DIR))
+        if cur_rel != dest_rel:
+            db.relink_document(cur_rel, dest_rel)
+    except ValueError:
+        pass
+    # transcription : simhash indexé par rel ~/Connaissance
+    try:
+        cur_c = str(cur.relative_to(CONNAISSANCE_ROOT))
+        dest_c = str(dest.relative_to(CONNAISSANCE_ROOT))
+        if cur_c.startswith("Transcriptions/") and cur_c != dest_c:
+            db.rename_text_simhash(cur_c, dest_c)
+    except ValueError:
+        pass
+    # cache `files` : le calcul de hash (aller comme revert) peut avoir laissé
+    # une ligne à l'ancien chemin — la purger avant l'UPDATE (UNIQUE sur path).
+    db.delete_files([str(dest)])
+    db.move_file(str(cur), str(dest))
+
+
+def _restore_resume_source(dest: Path) -> None:
+    """Repointer le champ ``source`` d'un résumé restauré vers sa transcription
+    co-localisée (relocate l'avait fait pointer vers le nouveau chemin).
+    Appelé en **post-passe** du revert : le parcours inverse restaure le résumé
+    avant sa transcription, le champ ne peut être réaligné qu'une fois tous
+    les fichiers revenus."""
+    try:
+        rel = dest.relative_to(CONNAISSANCE_ROOT)
+    except ValueError:
+        return
+    if rel.parts[:2] != ("Résumés", "Documents"):
+        return
+    tr = CONNAISSANCE_ROOT / "Transcriptions" / Path(*rel.parts[1:])
+    if not tr.is_file():
+        return
+    try:
+        parts = split_frontmatter(dest.read_text(encoding="utf-8"))
+        if not parts:
+            return
+        fm_text, body = parts
+        fm = yaml.safe_load(fm_text) or {}
+        fm["source"] = str(tr.relative_to(CONNAISSANCE_ROOT))
+        write_frontmatter(dest, fm, body)
+    except (OSError, yaml.YAMLError):
+        pass
+
+
 def revert_run(db, run_id: str, *, dry_run: bool = False) -> LedgerRevert:
     """Annuler un run : remettre chaque fichier à son ancien emplacement.
 
@@ -213,6 +274,8 @@ def revert_run(db, run_id: str, *, dry_run: bool = False) -> LedgerRevert:
       depuis → skip, on ne perd jamais une version plus récente) ;
     - ``old_path`` doit être libre (sinon collision → skip).
 
+    Les **références DB suivent** la restauration (``_revert_refs`` : relink
+    inverse fiche/simhash/files + champ ``source`` des résumés).
     En ``dry_run``, rien n'est déplacé ; on rapporte seulement ce qui serait fait.
     """
     ops = db.ledger_ops(run_id, status="applied")
@@ -222,6 +285,7 @@ def revert_run(db, run_id: str, *, dry_run: bool = False) -> LedgerRevert:
         "reverted": 0,
         "skipped": [],  # [{path, reason}]
     }
+    restored: list[Path] = []
 
     for row in reversed(ops):
         cur = Path(row["new_path"])
@@ -241,8 +305,16 @@ def revert_run(db, run_id: str, *, dry_run: bool = False) -> LedgerRevert:
         if not dry_run:
             dest.parent.mkdir(parents=True, exist_ok=True)
             shutil.move(str(cur), str(dest))
+            _revert_refs(db, cur, dest)
             db.ledger_mark_reverted(row["id"])
+            restored.append(dest)
         result["reverted"] += 1
+
+    # Post-passe : réaligner le `source` des résumés restaurés (leur
+    # transcription est revenue APRÈS eux dans le parcours inverse).
+    for dest in restored:
+        if dest.suffix == ".md":
+            _restore_resume_source(dest)
 
     return result
 

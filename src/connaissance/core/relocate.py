@@ -60,12 +60,14 @@ def _set_fm_source(md: Path, new_source: str) -> None:
 
 
 def relocate_document(db, old_rel: str, new_rel: str, run_id: str,
-                      *, dry_run: bool = False) -> dict:
+                      *, dry_run: bool = False,
+                      reason: str = "relocate") -> dict:
     """Déplacer un document (rel ~/Documents) et tout son graphe.
 
     Déplace source + transcription + résumé (ceux qui existent) via le ledger,
     met à jour ``source`` du résumé, ``relink_document`` (doc_*), ``text_simhash``
     et ``files``. Transaction atomique côté DB. Retourne le détail.
+    ``reason`` préfixe le motif journalisé (« <reason> source », …).
     """
     otype, oslug, ostem, _ = _split(old_rel)
     ntype, nslug, nstem, _ = _split(new_rel)
@@ -106,7 +108,7 @@ def relocate_document(db, old_rel: str, new_rel: str, run_id: str,
     done = []
     with db.transaction():
         for key, s, d in moves:
-            _ledger.safe_move(db, s, d, f"relocate {key}", run_id, commit=False)
+            _ledger.safe_move(db, s, d, f"{reason} {key}", run_id, commit=False)
             done.append(key)
         # source du résumé → transcription (co-localisée). Mise à jour même en
         # réalignement (la transcription a bougé bien que le résumé non).

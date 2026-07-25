@@ -28,10 +28,16 @@ régénérer le manifeste. **Aucune exclusion ajoutée pour l'instant.**
 **Snapshot pris avant tout** : `20260619T093401-avant-reorg` (photo DB + vue
 `~/Connaissance/Vues/Snapshots/`).
 
-**Ensuite (ordre) :** (1) lancer vague 2 par lots ; (2) correctifs `classify apply`
-(retrofit `relocate_document`, relink inverse au revert, réconciliation post-crash,
-garde `old==new`) AVANT tout déplacement ; (3) pré-classement complet (Haiku, ~$10,
-validé 78 % auto) ; (4) grand déplacement `classify apply --apply` par lots +
+**Ensuite (ordre) :** ~~(1) lancer vague 2 par lots~~ **FAIT 2026-07-24/25**
+(cascade v2.69, 5 410 transcrits en local, reliquat Mistral 0,11 $) ; ~~(2)
+correctifs `classify apply`~~ **FAIT (v2.70.0)** — retrofit `relocate_document`
+(le graphe complet bouge : source + transcription + résumé + refs, fini les
+orphelines), relink inverse au revert (`_revert_refs` : fiche/simhash/files +
+`source` des résumés en post-passe), réconciliation post-crash idempotente
+(`deja_applique`/`relink_repare`, compteur `reconciled`), garde `old==new`
+(`deja_en_place` — sans elle, `unique_dest` renommait un doc déjà en place en
+« (2) ») ; (3) pré-classement complet (Haiku, ~$10, validé 78 % auto) ;
+(4) grand déplacement `classify apply --apply` par lots +
 `snapshots diff avant-reorg <après>`.
 
 ## Extraction de texte born-digital élargie (Phase B)

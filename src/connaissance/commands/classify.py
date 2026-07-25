@@ -29,6 +29,7 @@ from connaissance.core.paths import DOCUMENTS_DIR, require_paths, transit_file
 from connaissance.core.schemas import (ClassifyApply, ClassifyEntry,
                                        ClassifyPrepare, ClassifyRegister,
                                        ClassifyStatus)
+from connaissance.core.relocate import relocate_document
 from connaissance.core.resolution import (chercher_alias, construire_nom_fichier,
                                           construire_slug, slugify)
 from connaissance.core.tracking import TrackingDB, snapshot_db
@@ -317,10 +318,19 @@ def apply(manifest_file: str, dry_run: bool = True,
           db: TrackingDB | None = None) -> ClassifyApply:
     """Appliquer le manifeste de pré-classement (schema ClassifyApply).
 
-    Déplace chaque entrée ``status=auto`` vers sa destination **via le ledger**
-    (``safe_move`` : journalisé, réversible). Les ``attente`` sont laissées en
-    place. **Dry-run par défaut** : ne bouge RIEN tant que ``dry_run=False``
-    (flag ``--apply``). Collisions de noms gérées (`(2)`, `(3)`…).
+    Déplace chaque entrée ``status=auto`` vers sa destination via
+    ``relocate_document`` : le **graphe complet** (source + transcription +
+    résumé + références DB) bouge en une transaction ledger — jamais de
+    transcription orpheline. Les ``attente`` sont laissées en place. **Dry-run
+    par défaut** : ne bouge RIEN tant que ``dry_run=False`` (flag ``--apply``).
+    Collisions de noms gérées (`(2)`, `(3)`…) ; une entrée déjà à sa place
+    est sautée (``deja_en_place`` — jamais renommée en « (2) »).
+
+    **Reprise post-crash idempotente** : une source absente dont la destination
+    existe est réconciliée — fiche encore à l'ancien chemin (crash entre le
+    move disque et le commit DB) → relink réparé (``relink_repare``) ; fiche
+    déjà relinkée → ``deja_applique``. Relancer le même manifeste après une
+    interruption reprend là où c'était rendu.
     """
     require_paths(DOCUMENTS_DIR, context="classify apply")
     _, entries = load_entries(manifest_file)
@@ -337,26 +347,47 @@ def apply(manifest_file: str, dry_run: bool = True,
     planned: list[dict] = []
     skipped: list[dict] = []
     errors: list[dict] = []
+    reconciled = 0
     try:
         for e in autos:
             src = DOCUMENTS_DIR / e["source"]
-            if not src.exists():
-                skipped.append({"source": e["source"], "reason": "source_introuvable"})
+            dst_intended = DOCUMENTS_DIR / e["dest"]
+            # Garde no-op : déjà à sa place. Sans elle, unique_dest verrait la
+            # destination « occupée » (par le fichier lui-même) et le
+            # renommerait en « (2) ».
+            if src == dst_intended:
+                skipped.append({"source": e["source"], "reason": "deja_en_place"})
                 continue
-            dst = unique_dest(DOCUMENTS_DIR / e["dest"])
+            if not src.exists():
+                # Réconciliation post-crash : manifeste ↔ ledger ↔ disque.
+                if dst_intended.exists():
+                    if db.get_classification(e["source"]):
+                        # Crash entre le shutil.move et le commit DB : le
+                        # fichier a bougé, la fiche non. Réparer le relink
+                        # (le JSONL ledger du run d'origine garde la trace du
+                        # move ; `audit restore-journals` restaure la ligne).
+                        if not dry_run:
+                            db.relink_document(e["source"], e["dest"])
+                        reconciled += 1
+                        skipped.append({"source": e["source"],
+                                        "reason": "relink_repare"
+                                        if not dry_run else "a_reparer_relink"})
+                    else:
+                        skipped.append({"source": e["source"],
+                                        "reason": "deja_applique"})
+                else:
+                    skipped.append({"source": e["source"],
+                                    "reason": "source_introuvable"})
+                continue
+            dst = unique_dest(dst_intended)
             rel_dst = str(dst.relative_to(DOCUMENTS_DIR))
             if dry_run:
                 planned.append({"source": e["source"], "dest": rel_dst})
                 continue
             try:
-                # Ledger + relink de la fiche atomiques : soit les deux sont
-                # journalisés, soit aucun (jamais une fiche désynchronisée du
-                # ledger). Le shutil.move dans safe_move reste hors-transaction.
-                with db.transaction():
-                    _ledger.safe_move(db, src, dst,
-                                      f"classify {e.get('category') or ''}".strip(),
-                                      run_id, commit=False)
-                    db.relink_document(e["source"], rel_dst, commit=False)
+                relocate_document(
+                    db, e["source"], rel_dst, run_id,
+                    reason=f"classify {e.get('category') or ''}".strip())
                 planned.append({"source": e["source"], "dest": rel_dst})
             except OSError as exc:
                 errors.append({"source": e["source"], "error": str(exc)})
@@ -370,6 +401,7 @@ def apply(manifest_file: str, dry_run: bool = True,
         "moved": 0 if dry_run else len(planned),
         "planned": len(planned),
         "attente": sum(1 for e in entries if e.get("status") == "attente"),
+        "reconciled": reconciled,
         "skipped": skipped,
         "errors": errors,
         "moves": planned[:50],

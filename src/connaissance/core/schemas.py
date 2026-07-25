@@ -536,6 +536,7 @@ class ClassifyApply(TypedDict, total=False):
     moved: int
     planned: int
     attente: int
+    reconciled: int   # relinks réparés par la réconciliation post-crash
     skipped: list[dict]
     errors: list[dict]
     moves: list[dict]
