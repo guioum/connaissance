@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import re
 import unicodedata
+from pathlib import Path
 from collections.abc import Mapping
 
 # Catégories par mots-clés (FR/EN). L'ordre = priorité. Termes de NOM + de
@@ -99,15 +100,58 @@ def _to_iso_date(raw: str | None) -> str | None:
     return f"{m.group(1)}-{m.group(2)}-{m.group(3)}" if m else None
 
 
+# Segments de chemin datés : année stricte (bornée, jamais un bout de numéro),
+# année-mois, mois seul en tête de segment (« 01-janvier »).
+_SEG_YEAR_RE = re.compile(r"(?<!\d)(19[89]\d|20[0-4]\d)(?!\d)")
+_SEG_YM_RE = re.compile(r"(?<!\d)(19[89]\d|20[0-4]\d)[-_.](0[1-9]|1[0-2])(?!\d)")
+_SEG_MONTH_RE = re.compile(r"^(0[1-9]|1[0-2])\s*[-_ ]\D")
+
+
+def date_from_path(rel: str) -> str | None:
+    """Date déduite des DOSSIERS du chemin — le segment daté le plus **profond**
+    (le plus proche du fichier) gagne : les segments externes datent les
+    rangements successifs (poupées russes « 2020-05/2020-04/… »), les internes
+    datent le document. « …/anomalies/2019/01-janvier/x.docx » → 2019-01-01
+    (un mois seul emprunte l'année d'un segment moins profond). Précision
+    perdue assumée (jour/mois manquant → 01) : ce repli est toujours marqué
+    ``date_repli`` à l'enregistrement, jamais présenté comme exact."""
+    segs = list(Path(rel).parts[:-1])           # dossiers seulement
+    for i in range(len(segs) - 1, -1, -1):
+        s = segs[i]
+        m = _DATE_RE.search(s)
+        if m:
+            return f"{m.group(1)}-{m.group(2)}-{m.group(3)}"
+        m = _SEG_YM_RE.search(s)
+        if m:
+            return f"{m.group(1)}-{m.group(2)}-01"
+        m = _SEG_MONTH_RE.match(s)
+        if m:                                    # mois sans année → année d'un
+            for j in range(i - 1, -1, -1):       # segment MOINS profond
+                y = _SEG_YEAR_RE.search(segs[j])
+                if y:
+                    return f"{y.group(1)}-{m.group(1)}-01"
+        y = _SEG_YEAR_RE.search(s)
+        if y:
+            return f"{y.group(1)}-01-01"
+    return None
+
+
 def pick_date(signals: Mapping) -> tuple[str | None, str]:
-    """(date AAAA-MM-JJ, provenance). Priorité : nom > métadonnée > filesystem."""
+    """(date AAAA-MM-JJ, provenance). Priorité : nom > métadonnée > chemin >
+    filesystem — le chemin (dossiers datés, segment le plus profond) est un
+    vrai signal documentaire ; la date filesystem n'est qu'une date d'import."""
     dates = signals.get("dates", {}) or {}
-    for key, label in (("from_name", "name"), ("metadata", "metadata"),
-                       ("filesystem_created", "filesystem")):
+    for key, label in (("from_name", "name"), ("metadata", "metadata")):
         d = _to_iso_date(dates.get(key) if isinstance(dates.get(key), str)
                          else dates.get(key))
         if d:
             return d, label
+    d = date_from_path(str(signals.get("rel") or ""))
+    if d:
+        return d, "path"
+    d = _to_iso_date(dates.get("filesystem_created"))
+    if d:
+        return d, "filesystem"
     return None, "none"
 
 

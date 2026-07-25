@@ -12,6 +12,28 @@ def _sig(rel, **kw):
     return base
 
 
+def test_date_from_path_deepest_segment_wins():
+    """Poupées russes : le segment daté le plus PROFOND date le document ;
+    un mois seul (« 01-janvier ») emprunte l'année d'un segment moins profond.
+    Cas réel du corpus (2026-07-25)."""
+    from connaissance.core.classify import date_from_path
+    rel = ("Classer/2020/Archive 2020/Téléchargements 2020/2020-05/2020-04/"
+           "2020-03/2020-02/2020-01/2019-04/anomalies - ODV/anomalies/2019/"
+           "01-janvier/INC0019 - Faible.docx")
+    assert date_from_path(rel) == "2019-01-01"
+    # fichier directement dans un dossier année-mois → ce mois
+    assert date_from_path("Téléchargements 2020/2020-05/doc.pdf") == "2020-05-01"
+    # date complète dans un segment (archive datée)
+    assert date_from_path(
+        "Classer/2021/Archive 2021-11-19 (Takeout)/x.pdf") == "2021-11-19"
+    # année seule en dernier recours
+    assert date_from_path("Classer/Impôts 2023/avis.pdf") == "2023-01-01"
+    # aucun segment daté → None (jamais de date inventée)
+    assert date_from_path("Classer/Recettes/tarte.md") is None
+    # un numéro de ticket n'est PAS une année (bornes strictes)
+    assert date_from_path("projets/INC2087/rapport.pdf") is None
+
+
 def test_well_named_document_high_confidence():
     s = _sig(
         "Classer/2026/Maison2/Municipalité/"

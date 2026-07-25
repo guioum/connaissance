@@ -525,17 +525,27 @@ def register(results_file: str, from_prepare: str,
             category = canonicalize_category(j.get("category"))
             date = j.get("date") if isinstance(j.get("date"), str) and _DATE_OK.match(j.get("date") or "") else None
             # Repli date (levier taux auto) : si Haiku n'émet pas de date, retomber
-            # sur la date des SIGNAUX — mais seulement les sources FIABLES (nom de
-            # fichier, métadonnée PDF). On EXCLUT `filesystem` (date d'import, pas
-            # date du doc : daterait p.ex. un reçu OIQ 2015 à son année de scan).
-            # Tracé `date_approx` pour rester réversible/auditable. Haiku reçoit déjà
-            # ces dates et choisit prudemment de ne pas les émettre → décision de
-            # politique assumée ici, le déplacement restant réversible (ledger).
+            # sur la date des SIGNAUX — mais seulement les sources FIABLES : nom de
+            # fichier, métadonnée PDF, ou CHEMIN (dossiers datés — segment le plus
+            # profond, cf. date_from_path ; demandé le 2026-07-25 : « …/anomalies/
+            # 2019/01-janvier/x.docx » date le doc à ~2019-01). On EXCLUT
+            # `filesystem` (date d'import, pas date du doc : daterait p.ex. un reçu
+            # OIQ 2015 à son année de scan). Tracé `date_approx` pour rester
+            # réversible/auditable. Haiku reçoit déjà ces dates et choisit
+            # prudemment de ne pas les émettre → décision de politique assumée ici,
+            # le déplacement restant réversible (ledger).
             date_approx = False
             if not date:
                 hd, hsrc = hint.get("date"), hint.get("date_source")
-                if hd and _DATE_OK.match(hd or "") and hsrc in ("name", "metadata"):
+                if hd and _DATE_OK.match(hd or "") \
+                        and hsrc in ("name", "metadata", "path"):
                     date, date_approx = hd, True
+            if not date:
+                # Filet indépendant du hint (les manifestes préparés avant
+                # l'arrivée de date_from_path en profitent au re-register).
+                pd = _heur.date_from_path(source)
+                if pd:
+                    date, date_approx = pd, True
             title = (j.get("title") or "").strip()
             # Sujet normalisé en slug (minuscules-tirets, ACCENTS CONSERVÉS — même
             # règle que les slugs d'entité) pour éviter les variantes café/cafes.
