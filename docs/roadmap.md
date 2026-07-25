@@ -36,9 +36,20 @@ orphelines), relink inverse au revert (`_revert_refs` : fiche/simhash/files +
 `source` des résumés en post-passe), réconciliation post-crash idempotente
 (`deja_applique`/`relink_repare`, compteur `reconciled`), garde `old==new`
 (`deja_en_place` — sans elle, `unique_dest` renommait un doc déjà en place en
-« (2) ») ; (3) pré-classement complet (Haiku, ~$10, validé 78 % auto) ;
-(4) grand déplacement `classify apply --apply` par lots +
-`snapshots diff avant-reorg <après>`.
+« (2) ») ; ~~(3) pré-classement complet~~ **FAIT
+2026-07-25** : 11 522 docs classés en 6 tranches Haiku + pilote (~20 $, cache
+batch 74 %) — 8 201 auto (71 %) / 3 321 attente (notes sans émetteur) ; repli
+date par CHEMIN (segment daté le plus profond) + date fs hors archives
+restaurées (calibrés en cours de run, +254 autos re-registrés gratuitement) ;
+~~(4) grand déplacement~~ **FAIT 2026-07-25** : ~7 900 déplacements ledger en
+6 applies vérifiés (0 lien cassé, vues Snapshots/Historique rafraîchies après
+chaque tranche, photos avant/après prises). Incidents attrapés par le
+pilote/les tranches et corrigés : miroir complet des transcriptions
+(`7ce0536`), fuite NFD `- Protégés` (`65344ff`, 154 docs retirés du manifeste,
+extraits partis au batch — divulgué), résolution de chaîne NFC (`d722f0f`),
+collision de miroir (`1452c0d`). RESTE : passe `entities candidates/merge`
+(fragmentation : 1 015 organismes, doublons type 2a-design/2adesign), gisement
+attente (notes → flux dédié), bug `snapshots diff` (zéros systématiques).
 
 ## Extraction de texte born-digital élargie (Phase B)
 
