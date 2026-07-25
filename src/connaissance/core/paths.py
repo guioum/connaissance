@@ -21,6 +21,7 @@ Usage :
 """
 
 import sys
+import unicodedata
 from pathlib import Path
 
 # Home réel de l'utilisateur (VM en cowork, Mac en natif). Utiliser pour
@@ -74,6 +75,18 @@ SPECIAL_TOP_DIRS = frozenset({
     "- Médias", "- Protégés",                              # actifs (physiques)
     "- Sujets", "- Catégories", "- Historique", "- Par catégorie",  # legacy (vues parties)
 })
+
+
+def filter_skip_dirs(dirnames, skip) -> list[str]:
+    """``dirnames`` privé des noms de ``skip`` — comparaison **NFC**.
+
+    ``os.walk`` renvoie du NFD sur APFS : « - Protégés » (é décomposé) ne
+    matche pas un set NFC, et le walk ENTRAIT dans les dossiers censés être
+    exclus (constaté en réel le 2026-07-25 : 154 documents de ``- Protégés``
+    signalés puis embarqués dans un batch de pré-classement). Tout filtre de
+    dossiers spéciaux doit passer par ici."""
+    return [n for n in dirnames
+            if unicodedata.normalize("NFC", n) not in skip]
 
 
 def _detect_documents_cache_root() -> Path | None:

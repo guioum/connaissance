@@ -146,6 +146,28 @@ def test_signals_cache_invalidated_by_transcription(tmp_path, tracking_db):
 
 # --- commande documents signals --------------------------------------------
 
+def test_scan_skips_special_dirs_nfd(tmp_path, monkeypatch, tracking_db):
+    """APFS renvoie les noms en NFD : « - Protégés » (é décomposé) doit être
+    exclu du walk MÊME sous cette forme — constaté en réel le 2026-07-25 :
+    154 documents protégés avaient fui dans un batch de pré-classement."""
+    import unicodedata
+    from connaissance.commands import signals as CMD
+    root = tmp_path / "Documents"
+    prot_nfd = unicodedata.normalize("NFD", "- Protégés")
+    (root / prot_nfd / "banque").mkdir(parents=True)
+    (root / prot_nfd / "banque" / "relevé secret.txt").write_text(
+        "Solde 999 999 $", encoding="utf-8")
+    (root / "Classer").mkdir()
+    (root / "Classer" / "doc public.txt").write_text("Facture 10 $",
+                                                     encoding="utf-8")
+    monkeypatch.setattr(CMD, "DOCUMENTS_DIR", root)
+    monkeypatch.setattr(CMD._filtres, "load_quarantine_set", lambda: set())
+    res = CMD.scan(db=tracking_db)
+    rels = [d["rel"] for d in res["documents"]]
+    assert len(rels) == 1 and rels[0].endswith("doc public.txt")
+    assert not any("Prot" in r for r in rels)
+
+
 def test_signals_command_walks_group_a(tmp_path, monkeypatch, tracking_db):
     from connaissance.commands import signals as CMD
     root = tmp_path / "Documents"

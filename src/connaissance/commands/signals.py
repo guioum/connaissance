@@ -27,7 +27,7 @@ from connaissance.core import signals as _signals
 from connaissance.core.output_file import write_or_inline
 from connaissance.core.paths import (CONNAISSANCE_ROOT, DOCUMENTS_DIR,
                                       SPECIAL_TOP_DIRS, documents_read_path,
-                                      is_dataless)
+                                      filter_skip_dirs, is_dataless)
 from connaissance.core.schemas import DocumentSignals, DocumentsSignals
 from connaissance.core.tracking import TrackingDB
 
@@ -90,7 +90,7 @@ def scan(scope: str | None = None, output_file: str | None = None,
         for dirpath, dirnames, filenames in os.walk(base):
             d = Path(dirpath)
             if d == DOCUMENTS_DIR:
-                dirnames[:] = [n for n in dirnames if n not in _SKIP_TOP]
+                dirnames[:] = filter_skip_dirs(dirnames, _SKIP_TOP)
             # Règle symlink universelle : ne jamais descendre un dossier-lien ni
             # traiter un fichier-lien (toujours un doublon d'une cible déjà
             # indexée ; évite aussi de suivre un lien hors périmètre). Couvre les

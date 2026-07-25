@@ -33,8 +33,8 @@ from connaissance.core import ledger as _ledger
 from connaissance.core import secrets as _secrets
 from connaissance.core.output_file import write_or_inline
 from connaissance.core.paths import (DOCUMENTS_DIR, SPECIAL_TOP_DIRS,
-                                      documents_read_path, is_dataless,
-                                      require_connaissance_root)
+                                      documents_read_path, filter_skip_dirs,
+                                      is_dataless, require_connaissance_root)
 from connaissance.core.schemas import (SecretFile, SecretFinding, SecretsQuarantine,
                                        SecretsRelocate, SecretsScan)
 
@@ -102,7 +102,7 @@ def scan(scope: str | None = None,
     for dirpath, dirnames, filenames in os.walk(base):
         d = Path(dirpath)
         if d == DOCUMENTS_DIR:
-            dirnames[:] = [n for n in dirnames if n not in _SKIP_TOP]
+            dirnames[:] = filter_skip_dirs(dirnames, _SKIP_TOP)
 
         # Conteneur (repo de code, bundle macOS) → unité tierce : on n'y descend
         # pas. Un secret dans `phpseclib/Crypt/RSA.php` ou une fixture npm est du

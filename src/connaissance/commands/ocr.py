@@ -28,7 +28,8 @@ from connaissance.commands.triage import (BUNDLE_SUFFIXES, CODE_MARKERS,
 from connaissance.core.frontmatter import parse_frontmatter
 from connaissance.core.output_file import write_or_inline
 from connaissance.core.paths import (DOCUMENTS_DIR, SPECIAL_TOP_DIRS,
-                                     documents_read_path, require_paths)
+                                     documents_read_path, filter_skip_dirs,
+                                     require_paths)
 # Coût page Mistral : source unique dans tracking (OCR 4 batch, $2/1000 p) —
 # la même constante sert à l'estimation (ici) et au journal `llm_usage`.
 from connaissance.core.tracking import (MISTRAL_PAGE_COST_USD as
@@ -805,7 +806,7 @@ def ocr_images(limit: int | None = None, min_chars: int = 100, min_lines: int = 
                 break
             d = Path(dp)
             if d == DOCUMENTS_DIR:
-                dirs[:] = [n for n in dirs if n not in _VIEW_TOP]
+                dirs[:] = filter_skip_dirs(dirs, _VIEW_TOP)
             dirs[:] = [n for n in dirs if not (d / n).is_symlink()]  # jamais un lien
             if (d.suffix.lower() in BUNDLE_SUFFIXES
                     or (set(fs) & CODE_MARKERS) or (set(dirs) & MARKER_DIRS)):

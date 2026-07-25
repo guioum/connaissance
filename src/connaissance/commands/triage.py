@@ -40,7 +40,8 @@ from collections import Counter
 from pathlib import Path
 
 from connaissance.core.output_file import write_or_inline
-from connaissance.core.paths import DOCUMENTS_DIR, SPECIAL_TOP_DIRS
+from connaissance.core.paths import (DOCUMENTS_DIR, SPECIAL_TOP_DIRS,
+                                     filter_skip_dirs)
 from connaissance.core.schemas import Triage
 
 # Marqueurs FICHIERS : si un dossier en contient un, c'est un repo de code.
@@ -194,7 +195,7 @@ def triage(output_file: str | None = None) -> Triage:
 
         # Ignorer la racine elle-même puis les dossiers déjà classés / notre vue.
         if d == root:
-            dirnames[:] = [n for n in dirnames if n not in SKIP_TOP]
+            dirnames[:] = filter_skip_dirs(dirnames, SKIP_TOP)
 
         # Conteneur → UNITÉ : compté en bloc, non parcouru, exclu des groupes.
         # Repo de code/projet (marqueur fichier ou dossier .git/.claude…) OU
