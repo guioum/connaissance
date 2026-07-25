@@ -62,6 +62,21 @@ def relocate_document(db, old_rel: str, new_rel: str, run_id: str,
     ``reason`` préfixe le motif journalisé (« <reason> source », …).
     """
     src_old, src_new = DOCUMENTS_DIR / old_rel, DOCUMENTS_DIR / new_rel
+    # Collision de SOURCE : la destination est déjà occupée par un AUTRE
+    # fichier (fusion d'entités : « bulletin-de-paie.pdf » existe des deux
+    # côtés) → uniquifier ici, et TOUT le graphe (miroirs, refs) suit le rel
+    # uniquifié. Les appelants qui pré-uniquifient (classify apply) ne sont
+    # pas affectés (destination libre). Cas homonyme APFS insensible à la
+    # casse (même fichier) exclu.
+    if src_old.exists() and src_old != src_new and src_new.exists():
+        same = False
+        try:
+            same = src_old.samefile(src_new)
+        except OSError:
+            pass
+        if not same:
+            src_new = unique_dest(src_new)
+            new_rel = str(src_new.relative_to(DOCUMENTS_DIR))
     # Transcriptions et résumés vivent au MIROIR COMPLET du rel
     # (``Transcriptions/Documents/<rel>.md``) — pour un doc déjà organisé le
     # rel EST ``<type>/<slug>/<stem>.ext``, pour un doc en vrac c'est son

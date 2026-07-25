@@ -4,6 +4,30 @@ import connaissance.core.relocate as R
 from connaissance.core.relocate import relocate_document, _read_fm
 
 
+def test_relocate_uniquifies_source_collision(tmp_path, monkeypatch,
+                                              tracking_db):
+    """Fusion d'entités : la destination SOURCE peut déjà être occupée par un
+    autre fichier du même nom → uniquifier (et le graphe suit le rel « (2) »),
+    ne jamais refuser (constaté en réel : 8 fusions plantées en plein dossier,
+    registre déjà consolidé)."""
+    docs, tr, res, croot = _setup(tmp_path, monkeypatch)
+    (docs / "organismes" / "azur").mkdir(parents=True)
+    (docs / "organismes" / "azur" / "paie.pdf").write_bytes(b"garde")
+    (docs / "organismes" / "azur-inc").mkdir(parents=True)
+    (docs / "organismes" / "azur-inc" / "paie.pdf").write_bytes(b"perdant")
+    (tr / "organismes" / "azur-inc").mkdir(parents=True)
+    (tr / "organismes" / "azur-inc" / "paie.md").write_text("tr perdant",
+                                                            encoding="utf-8")
+    out = relocate_document(tracking_db, "organismes/azur-inc/paie.pdf",
+                            "organismes/azur/paie.pdf",
+                            Lmod.new_run_id("test"))
+    assert out["new"] == "organismes/azur/paie (2).pdf"
+    assert (docs / "organismes" / "azur" / "paie.pdf").read_bytes() == b"garde"
+    assert (docs / "organismes" / "azur" / "paie (2).pdf").read_bytes() == b"perdant"
+    # le miroir suit le rel uniquifié
+    assert (tr / "organismes" / "azur" / "paie (2).md").exists()
+
+
 def test_relocate_uniquifies_mirror_collision(tmp_path, monkeypatch,
                                               tracking_db):
     """Deux sources d'extensions différentes (scan .jpg + .pdf du même doc)
