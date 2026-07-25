@@ -350,3 +350,40 @@ def test_ocr_born_digital_routes(tmp_path, monkeypatch, tracking_db):
     assert "couche ocr pourrie" not in scan     # la vieille couche ≠ source
     deja = (trans / "deja.md").read_text(encoding="utf-8")
     assert "ocr_engine: mistral" in deja        # intact malgré force
+
+
+def test_extract_born_digital_images(tmp_path, monkeypatch, tracking_db):
+    """Parité images : liens ./Attachments/ ajoutés en fin de transcription
+    born-digital ; idempotent (déjà doté → sauté) ; les autres kinds ignorés."""
+    docs = tmp_path / "Documents"; trans = tmp_path / "Transcriptions" / "Documents"
+    docs.mkdir(parents=True); trans.mkdir(parents=True)
+    monkeypatch.setattr(O, "DOCUMENTS_DIR", docs)
+    monkeypatch.setattr(O, "TRANSCRIPTIONS_DIR", trans)
+    monkeypatch.setattr(O, "documents_read_path", lambda p: str(p))
+    monkeypatch.setattr(O, "register_document", lambda *a, **k: None)
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+
+    (docs / "avec.pdf").write_bytes(b"%PDF")
+    (docs / "scan.pdf").write_bytes(b"%PDF")
+    _fm_trans(trans, "avec.pdf", **{"source": "Documents/avec.pdf",
+                                    "ocr_engine": "vision-local",
+                                    "ocr_kind": "born-digital"})
+    _fm_trans(trans, "scan.pdf", **{"source": "Documents/scan.pdf",
+                                    "ocr_engine": "vision-local",
+                                    "ocr_kind": "scan-ocr-layer"})
+
+    def fake_extract(rp, dest, stem, min_dim=150, max_pages=50):
+        dest.mkdir(parents=True, exist_ok=True)
+        (dest / f"{stem}-img0.jpg").write_bytes(b"jpeg")
+        return [f"{stem}-img0.jpg"]
+    monkeypatch.setattr(O, "_extract_pdf_images", fake_extract)
+
+    res = O.extract_born_digital_images(db=tracking_db)
+    assert res["transcriptions_dotees"] == 1     # scan-ocr-layer ignoré
+    body = (trans / "avec.md").read_text(encoding="utf-8")
+    assert "![avec-img0.jpg](./Attachments/avec-img0.jpg)" in body
+    assert (trans / "Attachments" / "avec-img0.jpg").exists()
+    # idempotence : déjà doté → sauté
+    res2 = O.extract_born_digital_images(db=tracking_db)
+    assert res2["transcriptions_dotees"] == 0
+    assert res2["skipped"]["deja_fait"] == 1

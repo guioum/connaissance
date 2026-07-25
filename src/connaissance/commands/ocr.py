@@ -197,6 +197,128 @@ def ocr_local(limit: int | None = None, force: bool = False,
             "sample": done[:10]}
 
 
+def _extract_pdf_images(read_path: Path, dest_dir: Path, stem: str,
+                        min_dim: int = 150, max_pages: int = 50) -> list[str]:
+    """Extraire les images embarquées d'un PDF born-digital vers ``dest_dir``.
+
+    Filtre les logos/icônes (< ``min_dim`` px de côté), déduplique par contenu
+    (letterhead répété à chaque page = un seul fichier). Noms déterministes
+    (``<stem>-imgN.<ext>``) → relance idempotente. Extraction directe des flux
+    (JPEG/PNG passthrough pypdfium2) ; les filtres exotiques sont sautés.
+    Retourne les noms de fichiers écrits (relatifs à ``dest_dir``)."""
+    try:
+        import hashlib
+        import pypdfium2 as pdfium
+    except ImportError:
+        return []
+    try:
+        pdf = pdfium.PdfDocument(str(read_path))
+    except Exception:
+        return []
+    written: list[str] = []
+    seen_hashes: set[str] = set()
+    try:
+        k = 0
+        for i in range(min(len(pdf), max_pages)):
+            for obj in pdf[i].get_objects(max_depth=4):
+                # isinstance : filtre les images ET donne à pyright le type
+                # PdfImage (get_px_size/extract absents du PdfObject de base).
+                if not isinstance(obj, pdfium.PdfImage):
+                    continue
+                try:
+                    w, h = obj.get_px_size()
+                except Exception:
+                    continue
+                if w < min_dim or h < min_dim:
+                    continue
+                tmp = dest_dir / f".{stem}-tmp"
+                try:
+                    dest_dir.mkdir(parents=True, exist_ok=True)
+                    out = obj.extract(tmp)      # ajoute l'extension lui-même
+                except Exception:
+                    continue
+                out = Path(out) if out else next(
+                    iter(dest_dir.glob(f".{stem}-tmp.*")), None)
+                if not out or not out.is_file():
+                    continue
+                digest = hashlib.sha256(out.read_bytes()).hexdigest()[:16]
+                if digest in seen_hashes:
+                    out.unlink(missing_ok=True)
+                    continue
+                seen_hashes.add(digest)
+                final = dest_dir / f"{stem}-img{k}{out.suffix}"
+                out.replace(final)
+                written.append(final.name)
+                k += 1
+    finally:
+        pdf.close()
+    return written
+
+
+def extract_born_digital_images(limit: int | None = None, force: bool = False,
+                                scope: str | None = None, min_dim: int = 150,
+                                db: TrackingDB | None = None) -> dict:
+    """Doter les transcriptions **born-digital** de leurs images embarquées —
+    parité avec les transcriptions Mistral (``Attachments/`` + liens ``![]()``).
+
+    Vision ne détecte pas de régions « figure » : les images sont extraites
+    directement des objets du PDF (pypdfium2) et les liens ajoutés **en fin de
+    transcription** (position exacte inconnue — pour les documents
+    administratifs courts, la fin du document est le bon compromis).
+    Idempotent : une transcription qui référence déjà ``./Attachments/`` est
+    sautée (sauf ``--force``). Rejouable après coup, sans re-OCR."""
+    require_paths(DOCUMENTS_DIR, context="documents ocr-local extract-images")
+    owns = db is None
+    if db is None:
+        db = TrackingDB()
+    done: list[dict] = []
+    skipped = {"deja_fait": 0, "sans_miroir": 0, "sans_image": 0,
+               "source_illisible": 0}
+    try:
+        for md in sorted(TRANSCRIPTIONS_DIR.rglob("*.md")):
+            try:
+                content = md.read_text(encoding="utf-8")
+            except OSError:
+                continue
+            fm = _read_frontmatter(content)
+            if fm.get("ocr_kind") != "born-digital":
+                continue
+            src_rel = " ".join(str(fm.get("source") or "").split())
+            if not src_rel:
+                skipped["source_illisible"] += 1
+                continue
+            rel = str(Path(src_rel).relative_to("Documents")) \
+                if src_rel.startswith("Documents/") else src_rel
+            if scope and not rel.startswith(scope):
+                continue
+            if "](./Attachments/" in content and not force:
+                skipped["deja_fait"] += 1
+                continue
+            ab = Path.home() / src_rel
+            rp = documents_read_path(ab)
+            if not rp or not Path(rp).is_file():
+                skipped["sans_miroir"] += 1
+                continue
+            names = _extract_pdf_images(Path(rp), md.parent / "Attachments",
+                                        md.stem, min_dim=min_dim)
+            if not names:
+                skipped["sans_image"] += 1
+                continue
+            links = "\n".join(f"![{n}](./Attachments/{n})" for n in names)
+            md.write_text(content.rstrip("\n") + "\n\n" + links + "\n",
+                          encoding="utf-8")
+            register_document(db, ab, md)
+            done.append({"rel": rel, "images": len(names)})
+            if limit and len(done) >= limit:
+                break
+    finally:
+        if owns:
+            db.close()
+    return {"transcriptions_dotees": len(done),
+            "images_total": sum(d["images"] for d in done),
+            "min_dim": min_dim, "skipped": skipped, "sample": done[:10]}
+
+
 def ocr_born_digital(limit: int | None = None, force: bool = False,
                      scope: str | None = None, min_recall: float = 0.9,
                      db: TrackingDB | None = None) -> dict:

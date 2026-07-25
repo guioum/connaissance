@@ -79,6 +79,10 @@ def _cmd_documents(args) -> Any:
             return ocr.repass_candidates(max_confidence=args.max_confidence)
         if getattr(args, "repass", False):
             return ocr.repass(max_confidence=args.max_confidence, apply=args.apply)
+        if getattr(args, "extract_images", False):
+            return ocr.extract_born_digital_images(
+                limit=args.limit, force=args.force, scope=args.scope,
+                min_dim=args.min_dim)
         if getattr(args, "born_digital", False):
             return ocr.ocr_born_digital(limit=args.limit, force=args.force,
                                         scope=args.scope,
@@ -623,6 +627,15 @@ def build_parser() -> argparse.ArgumentParser:
                                 "minimal de la fusion vs la couche texte ; en "
                                 "dessous, fallback texte embarqué brut "
                                 "(défaut 0.9).")
+    p_doc_ocr.add_argument("--extract-images", dest="extract_images",
+                           action="store_true",
+                           help="Doter les transcriptions born-digital de "
+                                "leurs images embarquées (Attachments/ + "
+                                "liens, parité Mistral). Idempotent.")
+    p_doc_ocr.add_argument("--min-dim", dest="min_dim", type=int, default=150,
+                           help="Avec --extract-images : côté minimal (px) "
+                                "d'une image extraite — écarte logos/icônes "
+                                "(défaut 150).")
     p_doc_rev = p_doc_verbs.add_parser("ocr-review")
     p_doc_rev.add_argument("--max-confidence", dest="max_confidence", type=float,
                            default=0.85,

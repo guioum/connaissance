@@ -109,7 +109,14 @@ validé 78 % auto) ; (4) grand déplacement `classify apply --apply` par lots +
   **unifié** sur `tracking.MISTRAL_PAGE_COST_USD` = 0,002 (OCR 4 batch — le
   journal `llm_usage` sous-comptait ×2 depuis la migration du 2026-07-19).
   Vague 2 (4 175 docs, ~16,5 k pages, 16,49 $) → traitable en local à ~0 $,
-  Mistral réservé au reliquat sous seuil.
+  Mistral réservé au reliquat sous seuil. **Exécutée le 2026-07-24** : 5 410
+  transcrits (~5 h 30, 0 $), 48 vieilles vision-local repassées, reliquat
+  Mistral 20 docs/0,11 $ (batch OCR 4, `confidence_scores` OK). **Parité
+  images** : `ocr-local --extract-images` dote les transcriptions born-digital
+  de leurs images embarquées (pypdfium2 → `Attachments/` + liens `![]()` en
+  fin de document, filtre `--min-dim` 150 px, dédup par contenu, idempotent) —
+  Vision ne détectant pas de régions « figure », l'extraction se fait sur les
+  objets du PDF ; scans OCR purs sans équivalent (assumé, figures rares).
 - [x] **Exécuter la repasse Mistral — vague 1 (scannés + images) : TERMINÉE**
   (2026-06, cf. bloc REPRISE en tête) : 2 780 docs Mistral, $3,83, flux 100 % DB
   → CLI → MCP (`transcribe-plan --output-file` → `ocr_batch_submit` en lots →
