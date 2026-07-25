@@ -30,15 +30,6 @@ TRANSCR = CONNAISSANCE_ROOT / "Transcriptions" / "Documents"
 RESUMES = CONNAISSANCE_ROOT / "Résumés" / "Documents"
 
 
-def _split(rel: str):
-    """``<type>/<slug>/<stem>.<ext>`` → (type, slug, stem, ext)."""
-    p = Path(rel)
-    parts = p.parts
-    etype = parts[0] if len(parts) >= 1 else ""
-    slug = parts[1] if len(parts) >= 3 else ""
-    return etype, slug, p.stem, p.suffix
-
-
 def _read_fm(md: Path) -> dict | None:
     try:
         t = md.read_text(encoding="utf-8")
@@ -69,24 +60,27 @@ def relocate_document(db, old_rel: str, new_rel: str, run_id: str,
     et ``files``. Transaction atomique côté DB. Retourne le détail.
     ``reason`` préfixe le motif journalisé (« <reason> source », …).
     """
-    otype, oslug, ostem, _ = _split(old_rel)
-    ntype, nslug, nstem, _ = _split(new_rel)
-
     src_old, src_new = DOCUMENTS_DIR / old_rel, DOCUMENTS_DIR / new_rel
-    res_old = RESUMES / otype / oslug / (ostem + ".md")
-    res_new = RESUMES / ntype / nslug / (nstem + ".md")
+    # Transcriptions et résumés vivent au MIROIR COMPLET du rel
+    # (``Transcriptions/Documents/<rel>.md``) — pour un doc déjà organisé le
+    # rel EST ``<type>/<slug>/<stem>.ext``, pour un doc en vrac c'est son
+    # chemin profond. Ne jamais tronquer aux deux premiers segments : c'est ce
+    # qui laissait orphelines les transcriptions des docs en vrac au premier
+    # ``classify apply`` (bug attrapé par le pilote du 2026-07-25).
+    res_old = RESUMES / Path(old_rel).with_suffix(".md")
+    res_new = RESUMES / Path(new_rel).with_suffix(".md")
 
-    # Transcription : suivre le `source` du résumé (récupère les orphelines) ;
-    # sinon le chemin co-localisé.
+    # Transcription : suivre le `source` du résumé (récupère les orphelines
+    # sous un ancien slug) ; sinon le miroir co-localisé du rel.
     tr_old = None
     fm = _read_fm(res_old) if res_old.is_file() else None
     if fm and fm.get("source"):
         cand = CONNAISSANCE_ROOT / fm["source"]
         tr_old = cand if cand.exists() else None
     if tr_old is None:
-        cand = TRANSCR / otype / oslug / (ostem + ".md")
+        cand = TRANSCR / Path(old_rel).with_suffix(".md")
         tr_old = cand if cand.exists() else None
-    tr_new = TRANSCR / ntype / nslug / (nstem + ".md")
+    tr_new = TRANSCR / Path(new_rel).with_suffix(".md")
     tr_new_rel = str(tr_new.relative_to(CONNAISSANCE_ROOT))
 
     # On ignore les déplacements src==dst : permet d'appeler relocate avec

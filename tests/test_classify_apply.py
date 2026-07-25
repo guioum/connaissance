@@ -67,18 +67,24 @@ def test_apply_executes_and_moves_via_ledger(tmp_path, monkeypatch, tracking_db)
 
 def test_apply_moves_full_graph(tmp_path, monkeypatch, tracking_db):
     """Retrofit relocate_document : transcription et résumé SUIVENT la source
-    (fini les transcriptions orphelines du grand déplacement)."""
+    (fini les transcriptions orphelines du grand déplacement). Le rel est
+    PROFOND (vrac type Classer/…) — la transcription vit au miroir complet du
+    rel, pas à <type>/<slug>/<stem> : c'est le cas que le pilote du 2026-07-25
+    a vu échouer (troncature aux deux premiers segments)."""
     root, tr, res_dir = _setup(tmp_path, monkeypatch)
-    (root / "src").mkdir()
-    (root / "src" / "a.pdf").write_bytes(b"%PDF data")
-    (tr / "src").mkdir(parents=True)
-    (tr / "src" / "a.md").write_text("transcription", encoding="utf-8")
-    (res_dir / "src").mkdir(parents=True)
-    (res_dir / "src" / "a.md").write_text(
-        "---\nsource: Transcriptions/Documents/src/a.md\n---\nrésumé",
-        encoding="utf-8")
+    deep = "Classer/2020/Archive 2020/Téléchargements/a.pdf"
+    (root / deep).parent.mkdir(parents=True)
+    (root / deep).write_bytes(b"%PDF data")
+    tr_old = tr / "Classer/2020/Archive 2020/Téléchargements/a.md"
+    tr_old.parent.mkdir(parents=True)
+    tr_old.write_text("transcription", encoding="utf-8")
+    res_old = res_dir / "Classer/2020/Archive 2020/Téléchargements/a.md"
+    res_old.parent.mkdir(parents=True)
+    res_old.write_text(
+        "---\nsource: Transcriptions/Documents/Classer/2020/Archive 2020/"
+        "Téléchargements/a.md\n---\nrésumé", encoding="utf-8")
     mf = _manifest(tmp_path, [
-        {"status": "auto", "source": "src/a.pdf",
+        {"status": "auto", "source": deep,
          "dest": "organismes/bn/2024-01-01 releve.pdf", "category": "banque"},
     ])
     out = CMD.apply(mf, dry_run=False, db=tracking_db)
@@ -86,8 +92,8 @@ def test_apply_moves_full_graph(tmp_path, monkeypatch, tracking_db):
     assert (root / "organismes/bn/2024-01-01 releve.pdf").exists()
     new_tr = tr / "organismes/bn/2024-01-01 releve.md"
     new_res = res_dir / "organismes/bn/2024-01-01 releve.md"
-    assert new_tr.exists() and not (tr / "src" / "a.md").exists()
-    assert new_res.exists() and not (res_dir / "src" / "a.md").exists()
+    assert new_tr.exists() and not tr_old.exists()
+    assert new_res.exists() and not res_old.exists()
     # le `source` du résumé pointe la NOUVELLE transcription
     assert "organismes/bn/2024-01-01 releve.md" in new_res.read_text(
         encoding="utf-8")
