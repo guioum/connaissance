@@ -46,14 +46,21 @@ def _sans_accents(s: str) -> str:
     return "".join(c for c in d if not unicodedata.combining(c))
 
 
-def _annees_par_document(db: TrackingDB, sujet: str,
-                         rels: list[str]) -> dict[str, str]:
-    """Année de regroupement par document pour un sujet ventilé par année.
+# Personnes repérables dans les chemins d'origine des packages (« 2021 Impôts
+# Mélanie », « Guillaume - Consultation », « Impôts Famille 2023 »).
+_PERSONNES_RE = re.compile(r"(melanie|guillaume|famille)")
 
-    L'année **du dossier d'origine** (chaîne ledger : « Package Impôts 2019/ »
-    d'avant le reclassement) fait autorité — un avis de cotisation daté 2025
-    appartient au package 2024. Repli : l'année de la date de classification.
-    Sans l'un ni l'autre : absent du dict (le lien reste à la racine du sujet).
+
+def _ventilation_par_document(db: TrackingDB, sujet: str,
+                              rels: list[str]) -> dict[str, dict]:
+    """Ventilation par document pour un sujet regroupé par année.
+
+    Pour chaque document : ``annee`` (l'année **du dossier d'origine** via la
+    chaîne ledger — « Package Impôts 2019/ » d'avant le reclassement — fait
+    autorité, un avis de cotisation daté 2025 appartenant au package 2024 ;
+    repli sur l'année de la date de classification) ; ``personne`` (mélanie /
+    guillaume / famille si le chemin d'origine ou le nom la révèle) ;
+    ``entite`` (nom lisible du registre, sinon slug).
     """
     # Chaîne des déplacements : new → origine première (suivie de proche en proche).
     origine: dict[str, str] = {}
@@ -67,19 +74,37 @@ def _annees_par_document(db: TrackingDB, sujet: str,
     motif = re.compile(
         rf"{re.escape(mot)}s?[ -]?((?:19|20)\d{{2}})"
         rf"|((?:19|20)\d{{2}})[ -]?{re.escape(mot)}s?")
-    dates = {r["rel_path"]: r["date"] for r in db._conn.execute(
-        "SELECT rel_path, date FROM doc_classification WHERE sujet = ?",
-        (sujet,))}
-    out: dict[str, str] = {}
+    fiches = {r["rel_path"]: dict(r) for r in db._conn.execute(
+        "SELECT rel_path, date, entity_slug, entity_type "
+        "FROM doc_classification WHERE sujet = ?", (sujet,))}
+    noms = {r["slug"]: r["name"] for r in db._conn.execute(
+        "SELECT slug, name FROM entities")}
+    out: dict[str, dict] = {}
+    # Ne chercher année/personne que dans la partie RELATIVE au home : le
+    # chemin absolu contient le nom d'utilisateur (« /Users/guillaume… ») qui
+    # matcherait _PERSONNES_RE pour TOUS les documents.
+    prefixe_home = _sans_accents(unicodedata.normalize("NFC", str(BASE_PATH)))
     for rel in rels:
         abs_cur = unicodedata.normalize("NFC", str(BASE_PATH / "Documents" / rel))
-        m = motif.search(_sans_accents(origine.get(abs_cur, abs_cur)))
+        chemin_origine = _sans_accents(origine.get(abs_cur, abs_cur))
+        if chemin_origine.startswith(prefixe_home):
+            chemin_origine = chemin_origine[len(prefixe_home):]
+        v: dict = {}
+        m = motif.search(chemin_origine)
         if m:
-            out[rel] = m.group(1) or m.group(2)
-            continue
-        d = dates.get(rel) or ""
-        if re.match(r"^(?:19|20)\d{2}", d):
-            out[rel] = d[:4]
+            v["annee"] = m.group(1) or m.group(2)
+        fiche = fiches.get(rel) or {}
+        if "annee" not in v:
+            d = fiche.get("date") or ""
+            if re.match(r"^(?:19|20)\d{2}", d):
+                v["annee"] = d[:4]
+        p = _PERSONNES_RE.search(chemin_origine)
+        if p:
+            v["personne"] = {"melanie": "mélanie"}.get(p.group(1), p.group(1))
+        slug = fiche.get("entity_slug")
+        if slug:
+            v["entite"] = noms.get(slug) or slug
+        out[rel] = v
     return out
 
 
@@ -152,11 +177,11 @@ def view(apply: bool = False, clear: bool = False,
             by_sujet.setdefault(r["sujet"], []).append(
                 (r["rel_path"], label, src))
 
-        # Ventilation par année des sujets demandés (rel → "AAAA").
-        annees: dict[str, dict[str, str]] = {}
+        # Ventilation par année des sujets demandés (rel → année/personne/entité).
+        annees: dict[str, dict[str, dict]] = {}
         for sujet in (par_annee or []):
             if sujet in by_sujet:
-                annees[sujet] = _annees_par_document(
+                annees[sujet] = _ventilation_par_document(
                     db, sujet, [rel for rel, _, _ in by_sujet[sujet]])
     finally:
         if owns:
@@ -174,9 +199,17 @@ def view(apply: bool = False, clear: bool = False,
             sdir = view_dir / _slug_dir(sujet)
             sdir.mkdir(parents=True, exist_ok=True)
             for rel, label, src in items:
-                annee = annees.get(sujet, {}).get(rel)
+                v = annees.get(sujet, {}).get(rel) or {}
+                annee = v.get("annee")
                 ldir = sdir / annee if annee else sdir
                 ldir.mkdir(parents=True, exist_ok=True)
+                if sujet in (par_annee or []):
+                    # Nom porteur de contexte : la provenance (personne,
+                    # entité) ne se lit plus dans le chemin plat de la vue.
+                    prefixe = " · ".join(
+                        x for x in (v.get("personne"), v.get("entite")) if x)
+                    if prefixe:
+                        label = f"{prefixe} · {label}"
                 link = ldir / label
                 i = 1
                 while link.exists() or link.is_symlink():
@@ -198,8 +231,9 @@ def view(apply: bool = False, clear: bool = False,
         repartition: dict[str, dict[str, int]] = {}
         for sujet, mapping in annees.items():
             c: dict[str, int] = {}
-            for a in mapping.values():
-                c[a] = c.get(a, 0) + 1
+            for v in mapping.values():
+                if v.get("annee"):
+                    c[v["annee"]] = c.get(v["annee"], 0) + 1
             repartition[sujet] = dict(sorted(c.items()))
         out["par_annee"] = repartition
     return out

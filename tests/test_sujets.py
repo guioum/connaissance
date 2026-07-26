@@ -150,17 +150,19 @@ def test_view_par_annee_origine_ledger_prime(tmp_path, monkeypatch, tracking_db)
         "status": "auto", "sujet": "impots", "date": "2021-05-05",
         "entity_type": "organismes", "entity_slug": "x"})
     _add(tracking_db, "c.pdf", "impots")           # ni origine ni date
-    # a.pdf vient d'un package « Impôts 2019 » (déplacé via ledger)
+    # a.pdf vient d'un package « Impôts 2019/Mélanie » (déplacé via ledger)
     tracking_db._conn.execute(
         "INSERT INTO file_ledger (run_id, op, old_path, new_path, status) "
         "VALUES ('t', 'move', ?, ?, 'applied')",
-        (str(tmp_path / "Documents" / "Classer" / "Impôts 2019" / "x.pdf"),
+        (str(tmp_path / "Documents" / "Classer" / "Impôts 2019" / "Mélanie" / "x.pdf"),
          str(tmp_path / "Documents" / "a.pdf")))
+    tracking_db.upsert_entity("organismes", "x", "ARC")
     tracking_db._conn.commit()
 
     res = S.view(apply=True, par_annee=["impots"], db=tracking_db)
     assert res["par_annee"]["impots"] == {"2019": 1, "2021": 1}
     view = S.VIEWS_ROOT / S.SUJETS_VIEW_NAME / "impots"
-    assert (view / "2019" / "a.pdf").is_symlink()   # origine ledger prime
-    assert (view / "2021" / "b.pdf").is_symlink()   # repli date
-    assert (view / "c.pdf").is_symlink()            # sans année : racine
+    # origine ledger prime + label porteur (personne · entité · nom)
+    assert (view / "2019" / "mélanie · ARC · a.pdf").is_symlink()
+    assert (view / "2021" / "ARC · b.pdf").is_symlink()   # repli date
+    assert (view / "ARC · c.pdf").is_symlink()            # sans année : racine
