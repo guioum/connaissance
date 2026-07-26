@@ -19,7 +19,7 @@ import yaml
 from connaissance.core.frontmatter import read_frontmatter
 from connaissance.core.fsio import atomic_write_text
 from connaissance.core.paths import (BASE_PATH, VIEWS_ROOT, documents_read_path,
-                                      require_paths)
+                                      require_paths, symlink_avec_mtime)
 from connaissance.core.schemas import (CategoryView, DocumentsScan,
                                        DocumentsSuspects, DocumentSuspect,
                                        DocumentToTranscribe, RegisterBatch,
@@ -953,7 +953,7 @@ def category_view(apply: bool = False, clear: bool = False) -> CategoryView:
                     p = Path(link_name)
                     link = cdir / f"{p.stem} ({i}){p.suffix}"
                     i += 1
-                link.symlink_to(src)
+                symlink_avec_mtime(link, src)
                 links_created += 1
 
     return {

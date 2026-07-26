@@ -20,6 +20,7 @@ Usage :
     zshenv = VM_HOME / ".zshenv"
 """
 
+import os
 import sys
 import unicodedata
 from pathlib import Path
@@ -75,6 +76,23 @@ SPECIAL_TOP_DIRS = frozenset({
     "- Médias", "- Protégés",                              # actifs (physiques)
     "- Sujets", "- Catégories", "- Historique", "- Par catégorie",  # legacy (vues parties)
 })
+
+
+def symlink_avec_mtime(link: Path, target) -> None:
+    """Créer un symlink portant le **mtime de sa cible**.
+
+    Un lien fraîchement créé est daté « maintenant » : dans les vues
+    (Finder, tri par date), tous les documents semblaient modifiés au
+    dernier rafraîchissement. On estampille le lien lui-même
+    (``utime`` nofollow) avec le mtime de la cible pour que les vues
+    reflètent les vraies dates des documents. Cible absente : le lien
+    garde sa date de création (cas ``.disparu`` assumé)."""
+    link.symlink_to(target)
+    try:
+        st = Path(target).stat()
+        os.utime(link, (st.st_atime, st.st_mtime), follow_symlinks=False)
+    except OSError:
+        pass
 
 
 def filter_skip_dirs(dirnames, skip) -> list[str]:

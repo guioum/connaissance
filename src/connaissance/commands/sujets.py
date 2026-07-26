@@ -21,7 +21,8 @@ import shutil
 import unicodedata
 from pathlib import Path
 
-from connaissance.core.paths import DOCUMENTS_DIR, VIEWS_ROOT, require_paths
+from connaissance.core.paths import (DOCUMENTS_DIR, VIEWS_ROOT, require_paths,
+                                     symlink_avec_mtime)
 from connaissance.core.schemas import SujetExport, SujetList, SujetView
 from connaissance.core.tracking import TrackingDB
 
@@ -123,7 +124,7 @@ def view(apply: bool = False, clear: bool = False,
                     p = Path(label)
                     link = sdir / f"{p.stem} ({i}){p.suffix}"
                     i += 1
-                link.symlink_to(src)
+                symlink_avec_mtime(link, src)
                 links_created += 1
 
     return {

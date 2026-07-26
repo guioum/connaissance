@@ -114,3 +114,22 @@ def test_export_zip(tmp_path, monkeypatch, tracking_db):
     assert res["dest"].endswith(".zip")
     from pathlib import Path
     assert Path(res["dest"]).exists()
+
+
+def test_symlink_avec_mtime_estampille_le_lien(tmp_path):
+    """Le symlink d'une vue porte le mtime de sa cible, pas « maintenant »
+    (sinon un tri par date dans le Finder date tout au dernier refresh)."""
+    import os
+    import time
+    from connaissance.core.paths import symlink_avec_mtime
+    cible = tmp_path / "doc.pdf"
+    cible.write_bytes(b"%PDF")
+    vieux = time.time() - 86400 * 365
+    os.utime(cible, (vieux, vieux))
+    lien = tmp_path / "lien.pdf"
+    symlink_avec_mtime(lien, cible)
+    assert abs(lien.lstat().st_mtime - vieux) < 2
+    # cible absente : pas d'exception, le lien existe quand même
+    fantome = tmp_path / "fantome.pdf"
+    symlink_avec_mtime(fantome, tmp_path / "absent.pdf")
+    assert fantome.is_symlink()

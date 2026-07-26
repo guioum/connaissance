@@ -21,7 +21,8 @@ import unicodedata
 from datetime import datetime
 from pathlib import Path
 
-from connaissance.core.paths import (DOCUMENTS_DIR, SNAPSHOTS_DIR, VIEWS_ROOT)
+from connaissance.core.paths import (DOCUMENTS_DIR, SNAPSHOTS_DIR, VIEWS_ROOT,
+                                     symlink_avec_mtime)
 from connaissance.core.tracking import DB_PATH, TrackingDB
 
 
@@ -171,7 +172,7 @@ def view(name: str, apply: bool = False, clear: bool = False,
             link.parent.mkdir(parents=True, exist_ok=True)
             if link.exists() or link.is_symlink():
                 link.unlink()
-            link.symlink_to(cur)
+            symlink_avec_mtime(link, cur)
         linked += 1
 
     return {"snapshot": real, "documents": len(snap_rels),

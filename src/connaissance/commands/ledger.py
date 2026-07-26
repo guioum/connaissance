@@ -10,7 +10,8 @@ from pathlib import Path
 from typing import cast
 
 from connaissance.core import ledger as _ledger
-from connaissance.core.paths import DOCUMENTS_DIR, VIEWS_ROOT
+from connaissance.core.paths import (DOCUMENTS_DIR, VIEWS_ROOT,
+                                     symlink_avec_mtime)
 from connaissance.core.schemas import (LedgerPurge, LedgerRevert, LedgerRun,
                                        LedgerRuns, LedgerShow, LedgerSnapshot,
                                        LedgerVerify)
@@ -98,7 +99,7 @@ def snapshot(run_id: str | None = None, apply: bool = False,
             if dest.exists() or dest.is_symlink():
                 continue
             if e["exists"]:
-                dest.symlink_to(Path(e["terminal"]))
+                symlink_avec_mtime(dest, Path(e["terminal"]))
                 linked += 1
             else:
                 dest.with_name(dest.name + ".disparu").write_text(
