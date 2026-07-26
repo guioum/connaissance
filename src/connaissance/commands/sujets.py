@@ -17,12 +17,13 @@ Expose :
 """
 from __future__ import annotations
 
+import re
 import shutil
 import unicodedata
 from pathlib import Path
 
-from connaissance.core.paths import (DOCUMENTS_DIR, VIEWS_ROOT, require_paths,
-                                     symlink_avec_mtime)
+from connaissance.core.paths import (BASE_PATH, DOCUMENTS_DIR, VIEWS_ROOT,
+                                     require_paths, symlink_avec_mtime)
 from connaissance.core.schemas import SujetExport, SujetList, SujetView
 from connaissance.core.tracking import TrackingDB
 
@@ -38,6 +39,48 @@ def _resolve_source(rel_path: str) -> Path | None:
     """Chemin physique courant d'un document classé, ou None s'il a disparu."""
     p = DOCUMENTS_DIR / rel_path
     return p if p.exists() else None
+
+
+def _sans_accents(s: str) -> str:
+    d = unicodedata.normalize("NFD", s.lower())
+    return "".join(c for c in d if not unicodedata.combining(c))
+
+
+def _annees_par_document(db: TrackingDB, sujet: str,
+                         rels: list[str]) -> dict[str, str]:
+    """Année de regroupement par document pour un sujet ventilé par année.
+
+    L'année **du dossier d'origine** (chaîne ledger : « Package Impôts 2019/ »
+    d'avant le reclassement) fait autorité — un avis de cotisation daté 2025
+    appartient au package 2024. Repli : l'année de la date de classification.
+    Sans l'un ni l'autre : absent du dict (le lien reste à la racine du sujet).
+    """
+    # Chaîne des déplacements : new → origine première (suivie de proche en proche).
+    origine: dict[str, str] = {}
+    for r in db._conn.execute(
+            "SELECT old_path, new_path FROM file_ledger "
+            "WHERE status='applied' ORDER BY id"):
+        o = unicodedata.normalize("NFC", r["old_path"])
+        n = unicodedata.normalize("NFC", r["new_path"])
+        origine[n] = origine.pop(o, o)
+    mot = _sans_accents(sujet).rstrip("s")
+    motif = re.compile(
+        rf"{re.escape(mot)}s?[ -]?((?:19|20)\d{{2}})"
+        rf"|((?:19|20)\d{{2}})[ -]?{re.escape(mot)}s?")
+    dates = {r["rel_path"]: r["date"] for r in db._conn.execute(
+        "SELECT rel_path, date FROM doc_classification WHERE sujet = ?",
+        (sujet,))}
+    out: dict[str, str] = {}
+    for rel in rels:
+        abs_cur = unicodedata.normalize("NFC", str(BASE_PATH / "Documents" / rel))
+        m = motif.search(_sans_accents(origine.get(abs_cur, abs_cur)))
+        if m:
+            out[rel] = m.group(1) or m.group(2)
+            continue
+        d = dates.get(rel) or ""
+        if re.match(r"^(?:19|20)\d{2}", d):
+            out[rel] = d[:4]
+    return out
 
 
 def list_sujets(db: TrackingDB | None = None) -> SujetList:
@@ -59,6 +102,7 @@ def list_sujets(db: TrackingDB | None = None) -> SujetList:
 
 
 def view(apply: bool = False, clear: bool = False,
+         par_annee: list[str] | None = None,
          db: TrackingDB | None = None) -> SujetView:
     """Vue navigable par SUJET en raccourcis (symlinks), depuis les
     appartenances **multi-sujet** ``doc_sujets`` + ``doc_classification.sujet``
@@ -72,6 +116,10 @@ def view(apply: bool = False, clear: bool = False,
     - défaut : **dry-run** — renvoie la répartition sans rien écrire.
     - ``apply`` : (re)construit ``~/Connaissance/Vues/Sujets/`` à neuf (idempotent).
     - ``clear`` : supprime la vue (réversible — aucun fichier source touché).
+    - ``par_annee`` : sujets à ventiler en sous-dossiers ``<sujet>/<AAAA>/``
+      (ex. ``["impots"]`` reconstitue les packages d'impôts par année —
+      l'année du dossier d'ORIGINE via la chaîne ledger prime sur la date
+      du document ; sans année connue, le lien reste à la racine du sujet).
 
     Sous ``~/Connaissance/Vues/`` (hors ~/Documents : ni pollution iCloud, ni
     scan). Les raccourcis pointent le vrai fichier à son emplacement courant ;
@@ -91,20 +139,28 @@ def view(apply: bool = False, clear: bool = False,
         db = TrackingDB()
     try:
         rows = db.sujet_memberships()
+
+        by_sujet: dict[str, list[tuple[str, str, Path]]] = {}
+        missing_source = 0
+        for r in rows:
+            src = _resolve_source(r["rel_path"])
+            if src is None:
+                missing_source += 1
+                continue
+            # Nom de lien = nom du fichier (sans séparateur de chemin).
+            label = src.name.replace("/", "-")
+            by_sujet.setdefault(r["sujet"], []).append(
+                (r["rel_path"], label, src))
+
+        # Ventilation par année des sujets demandés (rel → "AAAA").
+        annees: dict[str, dict[str, str]] = {}
+        for sujet in (par_annee or []):
+            if sujet in by_sujet:
+                annees[sujet] = _annees_par_document(
+                    db, sujet, [rel for rel, _, _ in by_sujet[sujet]])
     finally:
         if owns:
             db.close()
-
-    by_sujet: dict[str, list[tuple[str, Path]]] = {}
-    missing_source = 0
-    for r in rows:
-        src = _resolve_source(r["rel_path"])
-        if src is None:
-            missing_source += 1
-            continue
-        # Nom de lien = nom du fichier (sans séparateur de chemin).
-        label = src.name.replace("/", "-")
-        by_sujet.setdefault(r["sujet"], []).append((label, src))
 
     counts = {s: len(v) for s, v in
               sorted(by_sujet.items(), key=lambda kv: -len(kv[1]))}
@@ -117,17 +173,20 @@ def view(apply: bool = False, clear: bool = False,
         for sujet, items in by_sujet.items():
             sdir = view_dir / _slug_dir(sujet)
             sdir.mkdir(parents=True, exist_ok=True)
-            for label, src in items:
-                link = sdir / label
+            for rel, label, src in items:
+                annee = annees.get(sujet, {}).get(rel)
+                ldir = sdir / annee if annee else sdir
+                ldir.mkdir(parents=True, exist_ok=True)
+                link = ldir / label
                 i = 1
                 while link.exists() or link.is_symlink():
                     p = Path(label)
-                    link = sdir / f"{p.stem} ({i}){p.suffix}"
+                    link = ldir / f"{p.stem} ({i}){p.suffix}"
                     i += 1
                 symlink_avec_mtime(link, src)
                 links_created += 1
 
-    return {
+    out: SujetView = {
         "sujets": counts,
         "total": sum(counts.values()),
         "missing_source": missing_source,
@@ -135,6 +194,15 @@ def view(apply: bool = False, clear: bool = False,
         "links_created": links_created,
         "view_dir": str(view_dir),
     }
+    if annees:
+        repartition: dict[str, dict[str, int]] = {}
+        for sujet, mapping in annees.items():
+            c: dict[str, int] = {}
+            for a in mapping.values():
+                c[a] = c.get(a, 0) + 1
+            repartition[sujet] = dict(sorted(c.items()))
+        out["par_annee"] = repartition
+    return out
 
 
 def export(name: str, dest: str | None = None, as_zip: bool = False,

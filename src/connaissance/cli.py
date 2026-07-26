@@ -455,7 +455,8 @@ def _cmd_duplicates(args) -> Any:
 def _cmd_sujet(args) -> Any:
     from connaissance.commands import sujets
     if args.verb == "view":
-        return sujets.view(apply=not args.dry_run, clear=args.clear)
+        return sujets.view(apply=not args.dry_run, clear=args.clear,
+                           par_annee=getattr(args, "par_annee", None))
     if args.verb == "export":
         return sujets.export(args.name, dest=args.dest, as_zip=args.zip)
     if args.verb == "list":
@@ -1046,6 +1047,10 @@ def build_parser() -> argparse.ArgumentParser:
                             help="(Re)construire la vue (défaut : dry-run / aperçu).")
     p_suj_view.add_argument("--clear", action="store_true",
                             help="Supprimer la vue Sujets (rien d'autre touché).")
+    p_suj_view.add_argument("--par-annee", dest="par_annee", action="append",
+                            default=None, metavar="SUJET",
+                            help="Ventiler ce sujet en sous-dossiers par année "
+                                 "(répétable, ex. --par-annee impots).")
     p_suj_exp = p_suj_verbs.add_parser("export")
     p_suj_exp.add_argument("name")
     p_suj_exp.add_argument("--dest", type=str, default=None,

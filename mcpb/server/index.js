@@ -1545,12 +1545,14 @@ server.registerTool(
     inputSchema: {
       apply: z.boolean().default(false).describe("(Re)build the symlink view."),
       clear: z.boolean().default(false).describe("Remove the Sujets view."),
+      par_annee: z.array(z.string()).optional().describe("Subjects to split into per-year subfolders (e.g. ['impots'] rebuilds the yearly tax packages — the ORIGIN folder year via the ledger chain wins over the document date)."),
     },
   },
   async (args) => {
     const a = [];
     if (args.clear) { a.push("--clear"); return runAndFormat("sujet", "view", a); }
     if (args.apply) a.push("--apply");
+    for (const s of args.par_annee || []) a.push("--par-annee", s);
     return runAndFormat("sujet", "view", a);
   }
 );

@@ -283,6 +283,7 @@ class SujetView(TypedDict, total=False):
     applied: bool
     links_created: int
     view_dir: str
+    par_annee: dict         # {sujet: {année: count}} si ventilation demandée
     cleared: bool           # présent en mode --clear
     existed: bool
 
