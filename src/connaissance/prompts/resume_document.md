@@ -65,6 +65,14 @@ Règles (appliquer dans l'ordre, s'arrêter à la première qui matche) :
 - Facture Hydro « émise le 2024-03-15, à payer avant le 2024-04-10 » → `2024-03-15` (PAS `2024-04-10`).
 - Relevé bancaire « période du 2024-02-01 au 2024-02-29, imprimé le 2024-03-05 » → `2024-02-01` (PAS `2024-03-05`, PAS `2024-02-29`).
 - Contrat signé le 2024-01-10 et prenant effet le 2024-02-01 → `2024-01-10` (signature, pas prise d'effet).
+- **Une DATE DE NAISSANCE n'est JAMAIS la date du document.** Les dates qui
+  identifient une *personne* (naissance, expiration d'une pièce) ne datent pas
+  le document qui les porte. Pièce d'identité ou carte (CNI, assurance
+  maladie, permis) → date de **délivrance/émission** si lisible ; document
+  médical (rendez-vous, réquisition, prescription) → date de **l'acte ou du
+  rendez-vous**. Si aucune date d'acte n'est lisible → règle 9 (`{{created}}`),
+  jamais la date de naissance. (Cas réel : une carte de rendez-vous datée de
+  la naissance du patient au lieu du rendez-vous.)
 
 ## Règles — section Actions
 
