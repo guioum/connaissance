@@ -338,7 +338,14 @@ def prepare(paths: list[str] | str = "all", mode: str = "batch",
             "date": str(fm.get("date", "")),
             "from": str(fm.get("from", "")),
             "message_id": str(fm.get("message-id", "")),
-            "content": body,
+            # Garde de fenêtre : un corps > ~200k caractères (~55k tokens)
+            # est tronqué avec mention — protège la fenêtre de contexte et
+            # plafonne le coût des queues (fil de l'eau : un gros doc non
+            # exclu ne fera jamais échouer ni exploser un batch).
+            "content": (body if len(body) <= 200_000 else
+                        body[:200_000]
+                        + "\n\n[TRANSCRIPTION TRONQUÉE à 200 000 caractères "
+                          "pour le résumé — document complet dans la source]"),
             "message_count": str(fm.get("message-count", "")),
             "message_ids_yaml": "",
             "preclassement": preclassement,
@@ -473,7 +480,12 @@ def _register_impl(custom_id: str, content: str,
             fm = {}
         body = parts[1].lstrip("\n")
 
-    source_rel = fm.get("source") or source_path
+    # PRIORITÉ à la vérité de la REQUÊTE (source_path, fourni par
+    # register_from_results_file depuis le fichier de prepare) sur ce que le
+    # modèle a recopié : l'A/B du 2026-07-26 a montré que des modèles peuvent
+    # réécrire/tronquer le champ `source` (16-21 % en local ; la classe
+    # d'erreur existe aussi en cloud). Le fm.source ne sert que de repli.
+    source_rel = source_path or fm.get("source")
     if not source_rel:
         return {
             "path": "",
@@ -505,6 +517,10 @@ def _register_impl(custom_id: str, content: str,
             trans_fm = {}
 
     propagated_fields: dict = {}
+    # Le champ `source` écrit sur disque est la vérité de la requête, pas la
+    # recopie du modèle (même défense que created/modified).
+    if source_path and fm.get("source") != source_path:
+        propagated_fields["source"] = source_path
     for key in ("created", "modified"):
         val = trans_fm.get(key)
         if val is None:
