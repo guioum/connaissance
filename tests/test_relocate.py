@@ -49,11 +49,13 @@ def test_relocate_uniquifies_mirror_collision(tmp_path, monkeypatch,
                             "organismes/caa/2014-08-15 carte.pdf",
                             Lmod.new_run_id("test"))
     assert "transcription" in out["moved"]
-    # A intacte, B uniquifiée à côté
+    # A intacte, B uniquifiée à côté (avec `source` frais dans son frontmatter)
     assert (tr / "organismes" / "caa" / "2014-08-15 carte.md").read_text(
         encoding="utf-8") == "transcription A"
-    assert (tr / "organismes" / "caa" / "2014-08-15 carte (2).md").read_text(
-        encoding="utf-8") == "transcription B"
+    tr_b = tr / "organismes" / "caa" / "2014-08-15 carte (2).md"
+    assert tr_b.read_text(encoding="utf-8").endswith("transcription B")
+    assert _read_fm(tr_b)["source"] == \
+        "Documents/organismes/caa/2014-08-15 carte.pdf"
 
 
 def _setup(tmp_path, monkeypatch):
@@ -102,9 +104,13 @@ def test_relocate_moves_full_graph_and_updates_refs(tmp_path, monkeypatch,
     # 1) source déplacé (accentué)
     assert (docs / "organismes" / "bn" / "x-développement.pdf").exists()
     assert not (docs / "organismes" / "bn" / "x-developpement.pdf").exists()
-    # 2) transcription RÉALIGNÉE (de vieux/ orphelin → bn/, accentuée)
-    assert (tr / "organismes" / "bn" / "x-développement.md").exists()
+    # 2) transcription RÉALIGNÉE (de vieux/ orphelin → bn/, accentuée) + son
+    #    propre `source` mis à jour vers le nouveau rel du fichier source
+    new_tr = tr / "organismes" / "bn" / "x-développement.md"
+    assert new_tr.exists()
     assert not (tr / "organismes" / "vieux" / "x-developpement.md").exists()
+    assert _read_fm(new_tr)["source"] == \
+        "Documents/organismes/bn/x-développement.pdf"
     # 3) résumé déplacé + son `source` mis à jour vers la nouvelle transcription
     new_res = res / "organismes" / "bn" / "x-développement.md"
     assert new_res.exists()

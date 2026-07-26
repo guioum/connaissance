@@ -35,6 +35,7 @@ from datetime import datetime
 from pathlib import Path
 
 from connaissance.core.paths import (BASE_PATH, CONNAISSANCE_ROOT,
+                                     SPECIAL_TOP_DIRS,
                                      require_connaissance_root)
 
 DB_PATH = CONNAISSANCE_ROOT / ".config" / "tracking.db"
@@ -1604,6 +1605,13 @@ class TrackingDB:
             # canonique est relatif au HOME (« Connaissance/… »).
             if d.get("path", "").startswith("Connaissance/"):
                 d["path"] = d["path"][len("Connaissance/"):]
+            # Miroirs des dossiers spéciaux (« - Protégés »…) : jamais de
+            # résumé — leurs transcriptions historiques (d'avant l'exclusion
+            # au balayage) ne doivent pas partir en batch cloud.
+            parts = {unicodedata.normalize("NFC", p)
+                     for p in Path(d.get("path", "")).parts}
+            if parts & SPECIAL_TOP_DIRS:
+                continue
             out.append(d)
         return out
 

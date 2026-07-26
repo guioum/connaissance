@@ -75,3 +75,22 @@ def test_missing_resumes_api_shape(monkeypatch, tmp_path, tracking_db):
         "transcription", source_type="document")
     rows = tracking_db.missing_resumes()
     assert [r["path"] for r in rows] == ["Transcriptions/Documents/x.md"]
+
+
+def test_missing_resumes_saute_dossiers_speciaux(monkeypatch, tmp_path,
+                                                 tracking_db):
+    """Les miroirs des dossiers spéciaux (« - Protégés »…) ne sont jamais
+    candidats au résumé — même si des transcriptions historiques existent
+    (NFD sur disque, comme APFS les renvoie)."""
+    import unicodedata
+    monkeypatch.setattr(tracking, "BASE_PATH", tmp_path)
+    prot_nfd = unicodedata.normalize("NFD", "- Protégés")
+    tracking_db.register_file(
+        str(tmp_path / "Connaissance/Transcriptions/Documents"
+            / prot_nfd / "impots.md"),
+        "transcription", source_type="document")
+    tracking_db.register_file(
+        str(tmp_path / "Connaissance/Transcriptions/Documents/ok.md"),
+        "transcription", source_type="document")
+    rows = tracking_db.missing_resumes()
+    assert [r["path"] for r in rows] == ["Transcriptions/Documents/ok.md"]

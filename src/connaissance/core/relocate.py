@@ -40,13 +40,14 @@ def _read_fm(md: Path) -> dict | None:
 
 
 def _set_fm_source(md: Path, new_source: str) -> None:
-    """Mettre à jour le champ ``source`` du frontmatter d'un résumé."""
+    """Mettre à jour le champ ``source`` du frontmatter d'un `.md` dérivé."""
     t = md.read_text(encoding="utf-8")
-    # NOTE : split_frontmatter peut retourner None (résumé sans frontmatter) —
-    # crash latent connu, non corrigé ici (annotation seule, pas de changement
-    # de comportement).
-    fm_text, body = split_frontmatter(t)  # pyright: ignore[reportGeneralTypeIssues]
-    fm = yaml.safe_load(fm_text) or {}
+    parts = split_frontmatter(t)
+    if parts is None:          # `.md` sans frontmatter : en créer un
+        fm, body = {}, t
+    else:
+        fm = yaml.safe_load(parts[0]) or {}
+        body = parts[1]
     fm["source"] = new_source
     write_frontmatter(md, fm, body)
 
@@ -137,6 +138,13 @@ def relocate_document(db, old_rel: str, new_rel: str, run_id: str,
         # réalignement (la transcription a bougé bien que le résumé non).
         if res_new.is_file() and tr_old is not None:
             _set_fm_source(res_new, tr_new_rel)
+        # source de la transcription → fichier source (rel ~) : sans cette mise
+        # à jour, tout déplacement laisse un `source` périmé dans la
+        # transcription (constaté en réel : 7 893 transcriptions périmées après
+        # le grand classement — cassait l'appariement des exclusions de
+        # résumés et propageait des chemins morts dans les requêtes de batch).
+        if tr_old is not None and tr_new.is_file():
+            _set_fm_source(tr_new, f"Documents/{new_rel}")
         # références DB (relink seulement si le doc change vraiment de chemin —
         # sinon old==new viderait la ligne).
         if old_rel != new_rel:
