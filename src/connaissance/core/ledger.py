@@ -21,8 +21,8 @@ from pathlib import Path
 import yaml
 
 from connaissance.core.frontmatter import split_frontmatter, write_frontmatter
-from connaissance.core.paths import (CONNAISSANCE_ROOT, DOCUMENTS_DIR,
-                                     documents_read_path)
+from connaissance.core.paths import (BASE_PATH, CONNAISSANCE_ROOT,
+                                     DOCUMENTS_DIR, documents_read_path)
 from connaissance.core.schemas import LedgerPurge, LedgerRevert, LedgerVerify
 from connaissance.core.tracking import LEDGER_JOURNAL_DIR, _append_jsonl
 
@@ -115,9 +115,16 @@ def safe_trash(db, path, reason: str, run_id: str,
     préservée sous le dossier de run (pas de collision de noms).
     """
     path = Path(path)
-    try:
-        rel = path.relative_to(CONNAISSANCE_ROOT)
-    except ValueError:
+    # Préserver la structure d'origine : rel à ~/Connaissance, sinon rel au
+    # HOME (« Documents/… » — avant, les fichiers hors Connaissance étaient
+    # aplatis au nom seul : 2 047 doublons à plat constatés le 2026-07-26).
+    for racine in (CONNAISSANCE_ROOT, BASE_PATH):
+        try:
+            rel = path.relative_to(racine)
+            break
+        except ValueError:
+            continue
+    else:
         rel = Path(path.name)
     dest = CONNAISSANCE_ROOT / ".trash" / run_id / rel
     return safe_move(db, path, dest, reason, run_id,

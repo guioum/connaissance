@@ -24,6 +24,25 @@ def test_safe_trash_moves_to_trash_with_op(tracking_db, tmp_path, monkeypatch):
     assert len(tracking_db.ledger_trash_ops()) == 1
 
 
+def test_safe_trash_preserve_structure_hors_connaissance(tracking_db, tmp_path,
+                                                         monkeypatch):
+    """Un fichier hors ~/Connaissance (ex. ~/Documents) garde son arborescence
+    relative au HOME dans la corbeille — avant, il était aplati au nom seul
+    (2 047 doublons à plat constatés en réel le 2026-07-26)."""
+    croot = tmp_path / "Connaissance"
+    croot.mkdir()
+    monkeypatch.setattr(Lmod, "CONNAISSANCE_ROOT", croot)
+    monkeypatch.setattr(Lmod, "BASE_PATH", tmp_path)
+    f = tmp_path / "Documents" / "organismes" / "acme" / "dup.pdf"
+    f.parent.mkdir(parents=True)
+    f.write_bytes(b"%PDF dup")
+    run = new_run_id("duplicates")
+    safe_trash(tracking_db, f, "dedup", run)
+    assert not f.exists()
+    trashed = croot / ".trash" / run / "Documents/organismes/acme/dup.pdf"
+    assert trashed.exists()                                  # structure préservée
+
+
 def test_trash_is_revertible(tracking_db, tmp_path, monkeypatch):
     _trash_root(monkeypatch, tmp_path)
     f = tmp_path / "Attachments" / "a.pdf"
