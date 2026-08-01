@@ -479,20 +479,29 @@ def repass_candidates(max_confidence: float = 0.55,
 
 def review_candidates(max_confidence: float = 0.85,
                       engine: str | None = "mistral",
+                      by: str = "min",
                       output_file: str | None = None,
                       db: TrackingDB | None = None) -> dict:
     """Lister les transcriptions à **confiance basse** (≤ seuil) pour REVUE.
 
     Flag qualité OCR : par défaut les transcriptions **Mistral** (moteur
     terminal — pas de repasse au-delà, mais un ``ocr_confidence`` bas signale un
-    OCR douteux à vérifier *avant* de s'y fier en classement/résumé). Lit
-    ``ocr_confidence`` (le minimum des pages) du frontmatter ; les transcriptions
-    sans score (p.ex. demandées sans ``confidence_scores``) sont ignorées.
-    ``engine=None`` → tous moteurs. N'écrit/ne déplace rien.
+    OCR douteux à vérifier *avant* de s'y fier en classement/résumé). Les
+    transcriptions sans score (p.ex. demandées sans ``confidence_scores``)
+    sont ignorées. ``engine=None`` → tous moteurs. N'écrit/ne déplace rien.
+
+    ``by`` : critère de filtre/tri. ``min`` = ``ocr_confidence`` (pire page) —
+    sensible : un tampon ou une signature suffit à le faire chuter sur un doc
+    par ailleurs excellent (constaté sur OCR 4 : min 0,004 / avg 0,95).
+    ``avg`` = ``ocr_confidence_avg`` (moyenne des pages) — le signal de
+    lisibilité GLOBALE, recommandé pour trouver les vrais douteux.
 
     Sortie **compacte par défaut** (total + distribution par tranche + par
     dossier + top-20 des pires) pour rester lisible même à plusieurs centaines de
     candidats. ``output_file`` écrit la **liste complète** sur disque."""
+    if by not in ("min", "avg"):
+        raise ValueError(f"by doit être 'min' ou 'avg' (reçu : {by})")
+    key_field = "ocr_confidence" if by == "min" else "ocr_confidence_avg"
     out: list[dict] = []
     for f in TRANSCRIPTIONS_DIR.rglob("*.md"):
         try:
@@ -501,7 +510,7 @@ def review_candidates(max_confidence: float = 0.85,
             continue
         if engine and fm.get("ocr_engine") != engine:
             continue
-        c = fm.get("ocr_confidence")
+        c = fm.get(key_field)
         if c is None:
             continue
         try:
@@ -510,16 +519,17 @@ def review_candidates(max_confidence: float = 0.85,
             continue
         if c <= max_confidence:
             out.append({"transcription": str(f.relative_to(TRANSCRIPTIONS_DIR)),
-                        "confidence": c,
+                        "confidence": fm.get("ocr_confidence"),
                         "confidence_avg": fm.get("ocr_confidence_avg"),
+                        "criterion": c,
                         "source": str(fm.get("source") or "")})
-    out.sort(key=lambda d: d["confidence"])
+    out.sort(key=lambda d: d["criterion"])
 
     # Agrégats pour une lecture d'un coup d'œil (où ça se concentre, les pires).
     buckets = {"≤0.3": 0, "0.3–0.5": 0, "0.5–0.7": 0, "0.7+": 0}
     by_folder: dict[str, int] = {}
     for d in out:
-        c = d["confidence"]
+        c = d["criterion"]
         key = ("≤0.3" if c <= 0.3 else "0.3–0.5" if c <= 0.5
                else "0.5–0.7" if c <= 0.7 else "0.7+")
         buckets[key] += 1
@@ -529,7 +539,7 @@ def review_candidates(max_confidence: float = 0.85,
 
     # Toujours compact inline (la liste brute dépasse vite la limite de tokens) ;
     # la liste complète ne part QUE dans output_file si demandé.
-    summary = {"engine": engine, "max_confidence": max_confidence,
+    summary = {"engine": engine, "max_confidence": max_confidence, "by": by,
                "total": len(out), "by_confidence": buckets,
                "by_folder": top_folders, "top_worst": out[:20]}
     if output_file:

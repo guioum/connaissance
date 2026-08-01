@@ -23,7 +23,7 @@ import re
 from pathlib import Path
 
 from connaissance.core.frontmatter import split_frontmatter
-from connaissance.core.paths import BASE_PATH, documents_read_path
+from connaissance.core.paths import BASE_PATH, DOCUMENTS_DIR, documents_read_path
 from connaissance.core.schemas import AuditReindex
 from connaissance.core.tracking import TrackingDB
 
@@ -527,6 +527,17 @@ def prune_orphans(db: TrackingDB, dry_run: bool) -> dict:
             counts["total"] += 1
     if not dry_run and orphans:
         db.delete_files(orphans)
+
+    # Tables documentaires (doc_signals/doc_classification/doc_sujets/
+    # doc_simhash) : un fichier déplacé HORS ledger (rangé à la main) y laisse
+    # des lignes fantômes que `transcribe-plan` régénère indéfiniment comme
+    # items à OCRiser (constaté le 2026-08-01 : 70 fantômes de « - Inbox »
+    # re-proposés batch après batch). On purge les rel_path sans fichier.
+    doc_orphans = [rel for rel in db.all_doc_rels()
+                   if not (DOCUMENTS_DIR / rel).exists()]
+    counts["doc_rels"] = len(doc_orphans)
+    if not dry_run and doc_orphans:
+        counts["doc_rows_deleted"] = db.delete_doc_rows(doc_orphans)
     return counts
 
 

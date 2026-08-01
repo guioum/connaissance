@@ -99,6 +99,7 @@ def _cmd_documents(args) -> Any:
         return ocr.review_candidates(max_confidence=args.max_confidence,
                                      engine=(None if args.engine == "all"
                                              else args.engine),
+                                     by=getattr(args, "by", "min"),
                                      output_file=args.output_file)
     if args.verb == "exclude":
         from connaissance.commands import documents
@@ -649,6 +650,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_doc_rev.add_argument("--engine", type=str, default="mistral",
                            help="Filtrer par moteur OCR (mistral, vision-local) "
                                 "ou 'all' pour tous (défaut mistral).")
+    p_doc_rev.add_argument("--by", choices=["min", "avg"], default="min",
+                           help="Critère : min (pire page — sensible, un tampon "
+                                "suffit à le couler) ou avg (moyenne — la "
+                                "lisibilité globale, recommandé sur OCR 4).")
     p_doc_rev.add_argument("--output-file", dest="output_file", default=None,
                            help="Écrire la liste complète des candidats ici "
                                 "(sinon : résumé compact inline).")

@@ -170,3 +170,26 @@ def test_dry_run_ne_modifie_pas_la_db(base, tracking_db):
     assert result["dry_run"] is True
     assert result["rescanned"] == 7
     assert _etat_files(tracking_db) == []
+
+
+def test_prune_purge_les_lignes_doc_fantomes(tmp_path, monkeypatch, tracking_db):
+    """Un fichier déplacé HORS ledger laisse des lignes doc_* fantômes que
+    transcribe-plan re-propose indéfiniment (constaté 2026-08-01). Le reindex
+    doit les purger ; les lignes des fichiers présents survivent."""
+    from connaissance.commands import audit_reindex as R
+    docs = tmp_path / "Documents"
+    docs.mkdir()
+    (docs / "present.pdf").write_bytes(b"%PDF")
+    monkeypatch.setattr(R, "DOCUMENTS_DIR", docs)
+    tracking_db.upsert_classification("present.pdf", {"status": "auto"})
+    tracking_db.upsert_classification("- Inbox/fantome.pdf", {"status": "auto"})
+    tracking_db.add_doc_sujets("- Inbox/fantome.pdf", ["impots"], "classify")
+
+    counts = R.prune_orphans(tracking_db, dry_run=True)
+    assert counts["doc_rels"] == 1
+    assert tracking_db.get_classification("- Inbox/fantome.pdf") is not None
+
+    counts = R.prune_orphans(tracking_db, dry_run=False)
+    assert counts["doc_rels"] == 1 and counts["doc_rows_deleted"] >= 2
+    assert tracking_db.get_classification("- Inbox/fantome.pdf") is None
+    assert tracking_db.get_classification("present.pdf") is not None

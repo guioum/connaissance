@@ -1711,6 +1711,40 @@ class TrackingDB:
             "cache_read_input_tokens": usage.get("cache_read_input_tokens") or 0,
             "units": None, "cost_usd": cost})
 
+    def all_doc_rels(self) -> list[str]:
+        """Tous les ``rel_path`` documentaires connus (union des tables
+        doc_signals / doc_classification / doc_sujets / doc_simhash).
+        Pour la purge des lignes fantômes (fichier parti hors ledger)."""
+        rels: set[str] = set()
+        for tbl in ("doc_signals", "doc_classification", "doc_sujets",
+                    "doc_simhash"):
+            try:
+                rels.update(r[0] for r in self._conn.execute(
+                    f"SELECT DISTINCT rel_path FROM {tbl}"))
+            except sqlite3.OperationalError:
+                continue   # table absente sur une vieille base
+        return sorted(rels)
+
+    def delete_doc_rows(self, rel_paths, *, commit: bool = True) -> int:
+        """Supprimer les lignes documentaires d'une liste de ``rel_path``
+        (doc_signals, doc_classification, doc_sujets, doc_simhash). Pour la
+        purge des fichiers disparus de ~/Documents **hors ledger** (déplacés
+        à la main) : sans elle, ``transcribe-plan`` régénère indéfiniment des
+        items fantômes. Retourne le nombre total de lignes supprimées."""
+        n = 0
+        for rel in rel_paths:
+            rel = _nfc(str(rel))
+            for tbl in ("doc_signals", "doc_classification", "doc_sujets",
+                        "doc_simhash"):
+                try:
+                    n += self._conn.execute(
+                        f"DELETE FROM {tbl} WHERE rel_path = ?", (rel,)).rowcount
+                except sqlite3.OperationalError:
+                    continue
+        if commit:
+            self._conn.commit()
+        return n
+
     def has_ocr_usage_today(self, dest_path: str,
                             operation: str = "ocr_mistral") -> bool:
         """Une ligne d'usage OCR existe-t-elle déjà AUJOURD'HUI pour cette

@@ -513,8 +513,9 @@ server.registerTool(
   {
     description: "List OCR transcriptions whose confidence score is at or below a threshold — a quality flag for human review BEFORE trusting them in classification/summaries. Reads ocr_confidence (the minimum page score) from the transcription frontmatter; transcriptions without a score (OCR'd without confidence_scores) are skipped. Defaults to Mistral transcriptions (the terminal engine: no re-pass beyond, but a low score means a dubious OCR). Read-only. COMPACT output by default (total + distribution by confidence band + by folder + top-20 worst); pass output_file to write the full candidate list to disk instead.",
     inputSchema: {
-      max_confidence: z.number().default(0.85).describe("List transcriptions with ocr_confidence <= this threshold (default 0.85)."),
+      max_confidence: z.number().default(0.85).describe("List transcriptions with the chosen criterion <= this threshold (default 0.85)."),
       engine: z.string().default("mistral").describe('Filter by OCR engine (mistral, vision-local) or "all" for any engine (default mistral).'),
+      by: z.enum(["min", "avg"]).optional().describe("Criterion: 'min' (worst page — noisy on OCR 4: one stamp sinks it) or 'avg' (page average — overall legibility, recommended)."),
       output_file: z.string().optional().describe("Write the full candidate list here (else: compact summary inline)."),
     },
     annotations: { readOnlyHint: true },
@@ -523,6 +524,7 @@ server.registerTool(
     const a = [];
     if (args.max_confidence != null) a.push("--max-confidence", String(args.max_confidence));
     if (args.engine) a.push("--engine", args.engine);
+    if (args.by) a.push("--by", args.by);
     if (args.output_file) a.push("--output-file", args.output_file);
     return runAndFormat("documents", "ocr-review", a);
   }
