@@ -52,7 +52,8 @@ def _cmd_documents(args) -> Any:
         return documents.register_existing_all()
     if args.verb == "register-batch":
         return documents.register_batch(args.from_scan, dry_run=args.dry_run,
-                                        ocr_engine=getattr(args, "ocr_engine", None))
+                                        ocr_engine=getattr(args, "ocr_engine", None),
+                                        ocr_model=getattr(args, "ocr_model", None))
     if args.verb == "category-view":
         return documents.category_view(apply=args.apply, clear=args.clear)
     if args.verb == "triage":
@@ -553,6 +554,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_doc_rb.add_argument("--dry-run", dest="dry_run", action="store_true")
     p_doc_rb.add_argument("--ocr-engine", dest="ocr_engine", default=None,
                           help="Provenance OCR estampillée au register (ex. mistral).")
+    p_doc_rb.add_argument("--ocr-model", dest="ocr_model", default=None,
+                          help="Modèle OCR journalisé dans llm_usage (ex. "
+                               "mistral-ocr-4-0). Sans lui, model=null.")
     p_doc_cv = p_doc_verbs.add_parser("category-view")
     p_doc_cv.add_argument("--apply", action="store_true",
                           help="(Re)construire la vue par catégorie en raccourcis.")

@@ -404,12 +404,14 @@ server.registerTool(
       from_scan: z.string().describe("Path to the JSON manifest produced by `documents scan --output-file` or `documents transcribe-plan --output-file`."),
       dry_run: z.boolean().optional().describe("Report what would be registered (and what's missing) without writing."),
       ocr_engine: z.string().optional().describe("OCR engine provenance stamped into each transcription's frontmatter (e.g. 'mistral')."),
+      ocr_model: z.string().optional().describe("OCR model id journaled into llm_usage cost entries (e.g. 'mistral-ocr-4-0'). Omit → model=null."),
     },
   },
   async (args) => {
     const a = ["--from-scan", args.from_scan];
     if (args.dry_run) a.push("--dry-run");
     if (args.ocr_engine) a.push("--ocr-engine", args.ocr_engine);
+    if (args.ocr_model) a.push("--ocr-model", args.ocr_model);
     return runAndFormat("documents", "register-batch", a);
   }
 );

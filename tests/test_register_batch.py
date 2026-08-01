@@ -45,3 +45,28 @@ def test_unreadable_manifest_raises(tmp_path, tracking_db):
     with pytest.raises(ValueError):
         documents.register_batch(str(tmp_path / "nope.json"), dry_run=True,
                                  db=tracking_db)
+
+
+def test_usage_pas_de_double_comptage_meme_jour(tmp_path, tracking_db,
+                                                monkeypatch):
+    """Garde anti-double-comptage (incident 2026-08-01) : re-register le même
+    manifeste le même jour (reprise, passe finale) ne re-journalise pas le
+    coût OCR ; le modèle passé est journalisé tel quel."""
+    # register_document est couplé à TRANSCRIPTIONS_DIR (testé ailleurs) —
+    # on le neutralise, l'objet du test est la journalisation d'usage.
+    monkeypatch.setattr(documents, "register_document", lambda *a, **k: None)
+    present = tmp_path / "t.md"
+    present.write_text("---\nsource: a.pdf\n---\ncorps", encoding="utf-8")
+    manifest = _manifest(tmp_path, [
+        {"source": str(tmp_path / "a.pdf"), "transcription": str(present),
+         "rel": "a.md", "hash": "h1", "pages": 3},
+    ])
+    documents.register_batch(manifest, ocr_engine="mistral",
+                             ocr_model="mistral-ocr-4-0", db=tracking_db)
+    documents.register_batch(manifest, ocr_engine="mistral",
+                             ocr_model="mistral-ocr-4-0", db=tracking_db)
+    rows = tracking_db._conn.execute(
+        "SELECT model, units FROM llm_usage WHERE operation='ocr_mistral'"
+    ).fetchall()
+    assert len(rows) == 1
+    assert rows[0]["model"] == "mistral-ocr-4-0" and rows[0]["units"] == 3

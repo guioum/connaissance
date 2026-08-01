@@ -794,6 +794,7 @@ def register_existing_all(db: TrackingDB | None = None) -> dict:
 
 def register_batch(scan_file: str, dry_run: bool = False,
                    ocr_engine: str | None = None,
+                   ocr_model: str | None = None,
                    db: TrackingDB | None = None) -> RegisterBatch:
     """Enregistrer en lot les documents d'un manifeste de `documents scan`.
 
@@ -838,12 +839,14 @@ def register_batch(scan_file: str, dry_run: bool = False,
             # du manifeste = compte pypdfium (exact pour un PDF, 1 pour une image),
             # soit la base de facturation Mistral. → `pipeline costs --real` voit
             # le coût OCR, pas seulement les résumés/classements Claude.
-            if ocr_engine == "mistral":
+            # Garde anti-double-comptage : un re-register du même jour (reprise,
+            # passe finale sur le manifeste complet) ne re-facture pas.
+            if ocr_engine == "mistral" and not db.has_ocr_usage_today(transcription):
                 db.log_ocr_usage(operation="ocr_mistral",
                                  pages=it.get("pages") or 1,
                                  source_path=it.get("source"),
                                  dest_path=transcription,
-                                 model="mistral-ocr-latest", mode="batch")
+                                 model=ocr_model, mode="batch")
         registered.append(transcription)
 
     # Doublons de CONTENU (même hash qu'un représentant déjà OCRisé) : on COPIE

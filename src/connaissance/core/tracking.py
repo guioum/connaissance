@@ -1711,6 +1711,20 @@ class TrackingDB:
             "cache_read_input_tokens": usage.get("cache_read_input_tokens") or 0,
             "units": None, "cost_usd": cost})
 
+    def has_ocr_usage_today(self, dest_path: str,
+                            operation: str = "ocr_mistral") -> bool:
+        """Une ligne d'usage OCR existe-t-elle déjà AUJOURD'HUI pour cette
+        transcription ? Garde anti-double-comptage de ``register-batch`` :
+        re-register (reprise, passe finale d'un run) ne doit pas re-facturer
+        (incident du 2026-08-01 : journal doublé par une passe sur le
+        manifeste complet après les chunks). Une vraie repasse un autre jour
+        journalise, elle, normalement."""
+        row = self._conn.execute(
+            "SELECT 1 FROM llm_usage WHERE operation=? AND dest_path=? "
+            "AND date(timestamp) = date('now','localtime') LIMIT 1",
+            (operation, str(dest_path))).fetchone()
+        return row is not None
+
     def log_ocr_usage(self, operation: str, pages: int,
                       source_path: str | None = None,
                       dest_path: str | None = None,
@@ -1720,7 +1734,7 @@ class TrackingDB:
 
         Écrit une ligne ``llm_usage`` avec ``units=pages`` et les compteurs de
         tokens à 0 (l'OCR ne consomme pas de tokens Claude). Le coût suit
-        ``MISTRAL_PAGE_COST_USD`` ($1/1000 p, déjà tarif batch). Sert à ce que
+        ``MISTRAL_PAGE_COST_USD`` (OCR 4 batch : $2/1000 p). Sert à ce que
         ``pipeline costs --real`` reflète le coût OCR de bout en bout, pas
         seulement les résumés/classements Claude.
         """
