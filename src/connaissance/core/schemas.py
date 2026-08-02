@@ -50,6 +50,7 @@ class ResumesManquants(TypedDict):
 class ResumesPerimes(TypedDict):
     total: int
     fichiers: list[dict]  # [{resume, transcription}]
+    mtime_only_ignores: NotRequired[int]  # candidats mtime écartés par le hash de contenu
 
 
 class NonOrganises(TypedDict):

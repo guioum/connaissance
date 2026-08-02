@@ -12,6 +12,7 @@ Les écritures passent par :func:`connaissance.core.fsio.atomic_write_text`
 """
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 
 import yaml
@@ -74,3 +75,18 @@ def dump_frontmatter(fm: dict, body: str) -> str:
 def write_frontmatter(path: Path | str, fm: dict, body: str) -> None:
     """Écrire (atomiquement) un document recomposé frontmatter + body."""
     atomic_write_text(path, dump_frontmatter(fm, body))
+
+
+def body_sha256(content: str) -> str:
+    """Hash SHA-256 du **corps** d'un ``.md`` (frontmatter exclu).
+
+    La vérité de CONTENU, insensible aux retouches de métadonnées :
+    ``register-batch``/``reindex-db`` réécrivent le frontmatter des
+    transcriptions sans toucher au texte OCR, ce qui périmait à tort les
+    résumés tant que la détection comparait des mtimes (constaté le
+    2026-08-02 : 8 075 « périmés » dont ~6 600 de bruit). Le corps est
+    ``strip()``-é pour neutraliser les sauts de ligne de bord.
+    """
+    parts = split_frontmatter(content)
+    body = parts[1] if parts is not None else content
+    return "sha256:" + hashlib.sha256(body.strip().encode("utf-8")).hexdigest()

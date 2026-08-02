@@ -23,7 +23,7 @@ from pathlib import Path
 import yaml
 
 from connaissance.core import filtres as _filtres
-from connaissance.core.frontmatter import split_frontmatter
+from connaissance.core.frontmatter import body_sha256, split_frontmatter
 from connaissance.core.fsio import atomic_write_text
 from connaissance.core.paths import CONNAISSANCE_ROOT
 from connaissance.core.resolution import slugify
@@ -521,6 +521,15 @@ def _register_impl(custom_id: str, content: str,
     # recopie du modèle (même défense que created/modified).
     if source_path and fm.get("source") != source_path:
         propagated_fields["source"] = source_path
+    # Estampille de contenu : hash du CORPS de la transcription au moment du
+    # résumé. La détection de péremption compare ce hash (pas les mtimes) —
+    # une retouche de frontmatter de la transcription ne périme plus le résumé.
+    if trans_abs.exists():
+        try:
+            propagated_fields["source_content_hash"] = body_sha256(
+                trans_abs.read_text(encoding="utf-8"))
+        except OSError:
+            pass
     for key in ("created", "modified"):
         val = trans_fm.get(key)
         if val is None:

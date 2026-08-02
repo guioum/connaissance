@@ -215,14 +215,43 @@ def estimer_couts(db, mode="batch", since=None, until=None) -> Couts:
 
 
 def resumes_perimes(db) -> ResumesPerimes:
-    """Résumés dont la transcription source a été modifiée depuis."""
+    """Résumés dont la transcription source a été modifiée depuis.
+
+    Deux étages. Préfiltre **mtime** (rapide, en DB) puis, pour chaque
+    candidat dont le résumé porte ``source_content_hash`` (estampillé au
+    register depuis 2026-08-02, backfillé sur l'existant), VÉRITÉ par hash
+    du corps de la transcription : une retouche de frontmatter
+    (``register-batch``, ``reindex-db``) ne périme plus un résumé — seul un
+    changement du TEXTE compte. Sans estampille : comportement mtime
+    historique (conservateur). ``mtime_only_ignores`` compte les faux
+    positifs écartés par le hash.
+    """
+    from connaissance.core.frontmatter import body_sha256, read_frontmatter
+    from connaissance.core.tracking import resolve_file_path
+
     rows = db.stale_resumes()
+    stale: list = []
+    mtime_only = 0
+    for r in rows:
+        resume_p = resolve_file_path(r["resume_path"])
+        trans_p = resolve_file_path(r["trans_path"])
+        stamp = (read_frontmatter(resume_p) or {}).get("source_content_hash")
+        if stamp:
+            try:
+                current = body_sha256(trans_p.read_text(encoding="utf-8"))
+            except OSError:
+                current = None
+            if current == stamp:
+                mtime_only += 1
+                continue
+        stale.append(r)
     return {
-        "total": len(rows),
+        "total": len(stale),
         "fichiers": [
             {"resume": r["resume_path"], "transcription": r["trans_path"]}
-            for r in rows
+            for r in stale
         ],
+        "mtime_only_ignores": mtime_only,
     }
 
 
