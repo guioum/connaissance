@@ -40,6 +40,17 @@ def test_snapshot_chain_survives_mixed_normalization(tmp_path, monkeypatch,
     que fournis) doit quand même se résoudre — constaté en réel le 2026-07-25 :
     914 « introuvables » dans la vue snapshot après l'apply tranche 1."""
     import unicodedata
+
+    import pytest
+
+    # Le scénario suppose un filesystem insensible à la normalisation (APFS —
+    # Mac natif comme VM cowork via VirtioFS). Sur ext4 (CI Linux), NFD et NFC
+    # sont deux noms distincts : le mélange testé n'existe pas en prod là-bas.
+    probe = tmp_path / unicodedata.normalize("NFD", "é.probe")
+    probe.write_text("x", encoding="utf-8")
+    if not (tmp_path / unicodedata.normalize("NFC", "é.probe")).exists():
+        pytest.skip("filesystem sensible à la normalisation (ext4) — "
+                    "scénario APFS uniquement")
     docs = _setup(tmp_path, monkeypatch)
     nfd = unicodedata.normalize("NFD", "Téléchargés")
     nfc = unicodedata.normalize("NFC", "Téléchargés")
