@@ -87,7 +87,8 @@ class Couts(TypedDict):
     resumes: dict
     synthese: dict
     moc: dict
-    total: float
+    total: float                   # barème statique (borne haute)
+    empirique: NotRequired[dict]   # projection aux coûts unitaires observés (llm_usage)
     date_range: NotRequired[dict]  # {since, until} si une plage est passée
 
 

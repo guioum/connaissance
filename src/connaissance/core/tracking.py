@@ -1711,6 +1711,38 @@ class TrackingDB:
             "cache_read_input_tokens": usage.get("cache_read_input_tokens") or 0,
             "units": None, "cost_usd": cost})
 
+    def observed_unit_costs(self, min_samples: int = 30) -> dict:
+        """Coûts unitaires OBSERVÉS ($/unité) par opération depuis ``llm_usage``.
+
+        La calibration empirique de l'estimateur (``pipeline detect`` step
+        couts) : les coûts réels intègrent le cache prompt (~70 % de hits en
+        batch) et le mix Haiku/Sonnet de ``model_selection``, que le barème
+        statique surestime systématiquement (constaté le 2026-08-02 :
+        résumés estimés 15 $/1000, réels 4,8 $/1000 ; synthèse barème
+        50 $/1000 entités, réel 16 $/1000).
+
+        Structure : ``{operation: {"unit_cost", "n", "par_source":
+        {source_type: {"unit_cost", "n"}}}}``. Seuls les groupes d'au moins
+        ``min_samples`` lignes sont retenus (pas de calibration sur 3 points).
+        """
+        out: dict = {}
+        for op, n, total in self._conn.execute(
+                """SELECT operation, COUNT(*), SUM(cost_usd)
+                   FROM llm_usage WHERE cost_usd IS NOT NULL
+                   GROUP BY operation HAVING COUNT(*) >= ?""", (min_samples,)):
+            out[op] = {"unit_cost": round((total or 0) / n, 6), "n": n,
+                       "par_source": {}}
+        for op, st, n, total in self._conn.execute(
+                """SELECT operation, source_type, COUNT(*), SUM(cost_usd)
+                   FROM llm_usage
+                   WHERE cost_usd IS NOT NULL AND source_type IS NOT NULL
+                   GROUP BY operation, source_type
+                   HAVING COUNT(*) >= ?""", (min_samples,)):
+            if op in out:
+                out[op]["par_source"][st] = {
+                    "unit_cost": round((total or 0) / n, 6), "n": n}
+        return out
+
     def all_doc_rels(self) -> list[str]:
         """Tous les ``rel_path`` documentaires connus (union des tables
         doc_signals / doc_classification / doc_sujets / doc_simhash).

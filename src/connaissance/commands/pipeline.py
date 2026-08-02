@@ -166,6 +166,26 @@ def estimer_couts(db, mode="batch", since=None, until=None) -> Couts:
 
     cout_total = cout_resumes + cout_synthese + cout_moc
 
+    # Projection EMPIRIQUE : mêmes volumes, mais aux coûts unitaires réellement
+    # observés dans llm_usage (cache + mix Haiku/Sonnet inclus — le barème
+    # statique ci-dessus les ignore et surestime ~3×). Repli par étage :
+    # (operation, source_type) → operation → barème.
+    observed = db.observed_unit_costs()
+    res_obs = observed.get("resume", {})
+    emp_resumes = 0.0
+    for st, n in by_source.items():
+        per_src = (res_obs.get("par_source") or {}).get(st)
+        if per_src:
+            emp_resumes += n * per_src["unit_cost"]
+        elif res_obs:
+            emp_resumes += n * res_obs["unit_cost"]
+        else:
+            emp_resumes += n * PRIX.get(st, PRIX["document"]) * facteur
+    syn_obs = observed.get("synthesis", {})
+    emp_synthese = (len(stale) * syn_obs["unit_cost"] if syn_obs
+                    else cout_synthese)
+    emp_moc = cout_moc   # pas d'historique MOC dédié : barème conservé
+
     return {
         "mode": mode,
         "resumes": {
@@ -182,6 +202,15 @@ def estimer_couts(db, mode="batch", since=None, until=None) -> Couts:
             "cout": round(cout_moc, 2),
         },
         "total": round(cout_total, 2),
+        "empirique": {
+            "resumes": round(emp_resumes, 2),
+            "synthese": round(emp_synthese, 2),
+            "moc": round(emp_moc, 2),
+            "total": round(emp_resumes + emp_synthese + emp_moc, 2),
+            "calibration": {op: {"unit_cost": v["unit_cost"], "n": v["n"]}
+                            for op, v in observed.items()
+                            if op in ("resume", "synthesis")},
+        },
     }
 
 
