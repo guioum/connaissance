@@ -44,9 +44,22 @@ Trois sources, trois commandes :
   `mac-automations` via `anotes export --incremental --git`). `scan` et
   `backlog-count` rapportent une sonde de fraîcheur `export`
   (`{last_export, age_days, stale}`, seuil 7 jours) : un export en panne se
-  voit, au lieu d'ingérer un instantané périmé en silence. Les dossiers
-  *vivants* du système minimaliste (zones Perso / Finances / Entreprise,
-  Notes rapides) ont vocation à être exclus via `filtres.yaml`
+  voit, au lieu d'ingérer un instantané périmé en silence. **« Déjà copiée ? »
+  se décide dans `tracking.db`**, pas par l'existence d'un miroir
+  `Transcriptions/Notes/<rel>` (`organize apply` range les transcriptions par
+  entité, le miroir disparaît) : `files` (`source_type='note'`) donne
+  l'emplacement ACTUEL (`path`) et la note d'origine (`source_path`, toutes
+  conventions historiques confondues). Une note connue est « modifiée » si le
+  **hash de son corps** diffère de celui enregistré — ou, pour une copie
+  d'avant le hash, si son *texte nu* diffère (les deux exporteurs ne rendent
+  pas le Markdown pareil : `a_jour_rendu` compte ces faux positifs écartés).
+  `copy` réécrit alors la transcription **sur place** (frontmatter enrichi
+  conservé, corps de la note), et remet `files.mtime`/`hash` au présent, ce
+  qui périme le résumé comme pour un document (`resumes_perimes` : préfiltre
+  mtime puis hash vs `source_content_hash`). Statuts : `nouveau`, `modifie`,
+  `manquante` (transcription disparue, recréée à l'emplacement enregistré).
+  Les dossiers *vivants* du système minimaliste (zones Perso / Finances /
+  Entreprise, Notes rapides) ont vocation à être exclus via `filtres.yaml`
   (`notes.dossiers_ignores`) — voir [memoire.md](memoire.md).
 
 ## 2. Résumer — texte → résumé IA

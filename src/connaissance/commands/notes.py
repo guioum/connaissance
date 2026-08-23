@@ -17,13 +17,15 @@ import sys
 
 import re
 import shutil
+import unicodedata
 from datetime import datetime, timezone
 from pathlib import Path
 
-from connaissance.core.frontmatter import split_frontmatter
+from connaissance.core.frontmatter import (body_sha256, dump_frontmatter,
+                                           parse_frontmatter, split_frontmatter)
 from connaissance.core.paths import BASE_PATH, NOTES_EXPORT_DIR, require_paths
 from connaissance.core.schemas import NotesCopy
-from connaissance.core.tracking import TrackingDB
+from connaissance.core.tracking import TrackingDB, resolve_file_path
 from connaissance.core.filtres import Filtres
 
 NOTES_DIR = NOTES_EXPORT_DIR
@@ -64,18 +66,98 @@ def export_status(notes_dir: Path | None = None) -> dict:
     }
 
 
+_FM_DATE_RE = r"(\d{4}-\d{2}-\d{2})(?:[ T](\d{2}:\d{2}:\d{2}))?"
+
+
 def _parse_frontmatter_dates(content: str) -> dict[str, str]:
-    """Extraire created/modified du frontmatter YAML."""
+    """Extraire created/modified du frontmatter YAML, en ISO.
+
+    L'export anotes écrit ``modified: 2026-01-06 03:34:27`` ; on normalise en
+    ``2026-01-06T03:34:27`` (la forme stockée dans ``files.modified``). Sans
+    heure, la date seule est conservée.
+    """
     dates = {}
     parts = split_frontmatter(content)
     if parts is None:
         return dates
     fm_text = parts[0]
     for field in ("created", "modified"):
-        match = re.search(rf'^{field}:\s*(\d{{4}}-\d{{2}}-\d{{2}})', fm_text, re.MULTILINE)
+        match = re.search(rf"^{field}:\s*['\"]?{_FM_DATE_RE}", fm_text, re.MULTILINE)
         if match:
-            dates[field] = match.group(1)
+            day, clock = match.group(1), match.group(2)
+            dates[field] = f"{day}T{clock}" if clock else day
     return dates
+
+
+# Préfixes sous lesquels `files.source_path` a historiquement désigné une note
+# de l'export (relatifs au home, cf. `canon_file_path`). `Connaissance/Notes/`
+# vient de l'ancien export `~/Notes/` re-préfixé par `_CONN_TOPS`.
+_SOURCE_PREFIXES = ("Archives/Notes/", "Connaissance/Notes/", "Notes/")
+
+
+def _nfc(s: str) -> str:
+    return unicodedata.normalize("NFC", s)
+
+
+def note_rel_from_source(source_path: str | None) -> str | None:
+    """Chemin d'une note RELATIF à la racine de l'export, d'après la valeur
+    ``files.source_path`` — quelle que soit la convention avec laquelle elle a
+    été écrite (absolue `~/Notes/…` ou `~/Archives/Notes/…`, relative
+    `Connaissance/Notes/…`, `Notes/…`, `Archives/Notes/…`). ``None`` si la
+    valeur ne désigne pas une note de l'export."""
+    if not source_path:
+        return None
+    s = _nfc(str(source_path))
+    for root in (NOTES_DIR, BASE_PATH / "Notes"):
+        r = _nfc(str(root)) + "/"
+        if s.startswith(r):
+            return s[len(r):]
+    for pfx in _SOURCE_PREFIXES:
+        if s.startswith(pfx):
+            return s[len(pfx):]
+    return None
+
+
+def _known_notes(db: TrackingDB | None) -> dict[str, dict]:
+    """Index ``rel → ligne files`` des notes déjà ingérées (vide sans DB)."""
+    if db is None:
+        return {}
+    idx: dict[str, dict] = {}
+    for row in db.note_transcriptions():
+        rel = note_rel_from_source(row.get("source_path"))
+        if rel:
+            idx[_nfc(rel)] = row
+    return idx
+
+
+def _local_iso_to_ts(value: str | None) -> float | None:
+    """``files.updated_at`` (``YYYY-MM-DDTHH:MM:SS``, heure locale) → epoch."""
+    if not value:
+        return None
+    try:
+        return datetime.strptime(value[:19], "%Y-%m-%dT%H:%M:%S").timestamp()
+    except ValueError:
+        return None
+
+
+def _norm_text(body: str) -> str:
+    """Texte « nu » d'un corps Markdown, pour comparer deux rendus.
+
+    L'export `~/Notes/` (exporteur d'avant mars 2026) et `anotes export` ne
+    rendent pas une même note à l'identique : emphase placée autrement
+    (``**🚀 Lointain:**`` / ``🚀 **Lointain:**``), liens de tags présents ou
+    non, échappements. Pour une transcription héritée (sans ``files.hash``),
+    comparer les hashs bruts classerait « modifiée » toute note jamais
+    retouchée — et périmerait son résumé pour rien (constaté le 2026-08-23 :
+    14 des 42 « modifiées » n'étaient que du rendu). On neutralise : liens →
+    leur texte, marqueurs d'emphase / titres / listes / échappements retirés,
+    blancs repliés, lignes vides ignorées. Les mots restent : une case cochée,
+    une ligne ajoutée, un chiffre changé se voient toujours.
+    """
+    t = re.sub(r"!?\[([^\]]*)\]\([^)]*\)", r"\1", body)
+    t = re.sub(r"[*_`\\#>|-]", "", t)
+    lines = (re.sub(r"\s+", " ", line).strip() for line in t.splitlines())
+    return "\n".join(line for line in lines if line)
 
 
 def _extract_attachment_refs(content: str) -> set[str]:
@@ -89,7 +171,7 @@ def _extract_attachment_refs(content: str) -> set[str]:
     return refs
 
 
-def backlog_count(since=None, until=None) -> dict:
+def backlog_count(since=None, until=None, db: TrackingDB | None = None) -> dict:
     """Compte rapide de notes à copier/mettre à jour, sans lire les contenus.
 
     **Ne lit AUCUN contenu Markdown** — contrairement à `scan`, qui lit
@@ -100,13 +182,21 @@ def backlog_count(since=None, until=None) -> dict:
     - `f.stat().st_mtime` pour le filtre `since/until` (approximation du
       champ `created` du frontmatter, mais cohérent avec la sémantique
       « quelque chose à (re)copier »).
-    - Existence + mtime de la destination miroir.
+    - `tracking.db` (``files``, ``source_type='note'``) pour les notes déjà
+      ingérées : une note connue compte « à mettre à jour » si le fichier de
+      l'export (réécrit par `anotes export --incremental` quand la note
+      change) est plus récent que l'enregistrement (``updated_at``) ;
+      sinon elle est à jour. Le miroir `Transcriptions/Notes/<rel>` ne sert
+      qu'aux notes inconnues de la DB : `organize apply` déplace les
+      transcriptions par entité, son existence ne prouve rien.
 
     Retourne un count (`to_copy`, `to_update`) sans parser les notes.
     Trade-off : le filtre par date utilise `mtime` et non `created` du
     frontmatter ; une note ancienne modifiée récemment compte comme
-    récente. Pour un compte exact via frontmatter, utiliser `scan`.
+    récente. Pour un compte exact (hash de contenu), utiliser `scan`.
     """
+    if db is None:
+        db = TrackingDB()
     if not NOTES_DIR.exists():
         return {
             "total_to_copy": 0,
@@ -144,6 +234,7 @@ def backlog_count(since=None, until=None) -> dict:
     to_copy = 0
     to_update = 0
     skipped = 0
+    known = _known_notes(db)
 
     for f in NOTES_DIR.rglob("*.md"):
         if not f.is_file() or "Attachments" in f.parts:
@@ -166,6 +257,18 @@ def backlog_count(since=None, until=None) -> dict:
         except ValueError:
             skipped += 1
             continue
+
+        row = known.get(_nfc(str(rel)))
+        if row is not None:
+            registered = _local_iso_to_ts(row.get("updated_at"))
+            # `updated_at` est à la seconde : tolérance d'une seconde pour
+            # qu'une note enregistrée dans la même seconde ne repasse pas.
+            if registered is not None and mtime > registered + 1:
+                to_update += 1
+            else:
+                skipped += 1
+            continue
+
         dest = TRANSCRIPTIONS_DIR / rel
         if not dest.exists():
             to_copy += 1
@@ -183,23 +286,41 @@ def backlog_count(since=None, until=None) -> dict:
         "to_copy": to_copy,
         "to_update": to_update,
         "skipped_total": skipped,
+        "known_in_db": len(known),
         "export": export_status(),
         "note": (
             "Borne approximative du backlog notes : filtre par mtime du "
-            "fichier au lieu du champ `created` du frontmatter. Pour un "
-            "compte exact, lancer `notes_scan`."
+            "fichier au lieu du champ `created` du frontmatter ; « à mettre "
+            "à jour » = export plus récent que l'enregistrement en DB, sans "
+            "lire le contenu. Pour un compte exact (hash), lancer `notes_scan`."
         ),
     }
 
 
-def scan_notes(since=None, until=None):
-    """Scanner l'export Apple Notes et retourner les notes à copier/mettre à jour."""
+def scan_notes(since=None, until=None, db: TrackingDB | None = None):
+    """Scanner l'export Apple Notes et retourner les notes à copier/mettre à jour.
+
+    Trois statuts :
+
+    - ``nouveau`` — note inconnue de ``tracking.db`` et sans miroir : copie
+      brute vers `Transcriptions/Notes/<rel>`.
+    - ``modifie`` — note connue dont le **corps** (hash, frontmatter exclu)
+      diffère de la transcription ACTUELLE (``files.path``, là où `organize
+      apply` l'a rangée) : réécriture sur place, frontmatter enrichi préservé.
+    - ``manquante`` — note connue dont la transcription a disparu du disque :
+      recréée à l'emplacement enregistré (la DB reste cohérente).
+
+    Une note connue au corps identique est « à jour », même si le miroir
+    `Transcriptions/Notes/<rel>` n'existe plus — c'est le cas de toutes les
+    notes rangées par entité.
+    """
     if not NOTES_DIR.exists():
         return [], {}
 
     filtres = Filtres()
     to_process = []
     skipped = {}
+    known = _known_notes(db)
 
     for f in sorted(NOTES_DIR.rglob("*.md")):
         if not f.is_file():
@@ -220,18 +341,48 @@ def scan_notes(since=None, until=None):
             skipped[reason] = skipped.get(reason, 0) + 1
             continue
 
-        # Chemin de destination (miroir)
         rel = f.relative_to(NOTES_DIR)
-        dest = TRANSCRIPTIONS_DIR / rel
+        note_hash = body_sha256(content)
+        row = known.get(_nfc(str(rel)))
 
-        # Mode incrémental
-        status = "nouveau"
-        if dest.exists():
-            if f.stat().st_mtime > dest.stat().st_mtime:
-                status = "modifie"
+        if row is not None:
+            # Déjà ingérée : la vérité est la transcription ACTUELLE.
+            dest = resolve_file_path(row["path"])
+            if not dest.exists():
+                status = "manquante"
             else:
-                skipped["a_jour"] = skipped.get("a_jour", 0) + 1
-                continue
+                current = row.get("hash")
+                if current:
+                    same = current == note_hash
+                else:
+                    # Ligne héritée (copie d'avant le hash) : la transcription
+                    # vient peut-être d'un autre exporteur → comparer le texte
+                    # nu, pas le rendu.
+                    try:
+                        old_body = split_frontmatter(
+                            dest.read_text(encoding="utf-8"))
+                        old_body = old_body[1] if old_body else ""
+                        same = _norm_text(old_body) == _norm_text(
+                            (split_frontmatter(content) or ("", content))[1])
+                    except (OSError, UnicodeDecodeError):
+                        same = False
+                    if same and body_sha256(old_body) != note_hash:
+                        skipped["a_jour_rendu"] = skipped.get("a_jour_rendu", 0) + 1
+                        continue
+                if same:
+                    skipped["a_jour"] = skipped.get("a_jour", 0) + 1
+                    continue
+                status = "modifie"
+        else:
+            # Inconnue de la DB : miroir (copies antérieures au suivi).
+            dest = TRANSCRIPTIONS_DIR / rel
+            status = "nouveau"
+            if dest.exists():
+                if f.stat().st_mtime > dest.stat().st_mtime:
+                    status = "modifie"
+                else:
+                    skipped["a_jour"] = skipped.get("a_jour", 0) + 1
+                    continue
 
         # Attachements référencés
         att_refs = _extract_attachment_refs(content)
@@ -249,6 +400,8 @@ def scan_notes(since=None, until=None):
             "destination": str(dest),
             "rel": str(rel),
             "status": status,
+            "tracked": row is not None,
+            "hash": note_hash,
             "size": f.stat().st_size,
             "attachments": attachments,
             "created": dates.get("created"),
@@ -256,6 +409,37 @@ def scan_notes(since=None, until=None):
         })
 
     return to_process, skipped
+
+
+# Clés du frontmatter de la note qui priment sur celles de la transcription
+# lors d'une mise à jour ; le reste (``date``, enrichissements d'`organize`)
+# est conservé.
+_NOTE_FM_KEYS = ("title", "apple_id", "source")
+
+
+def _write_update(src: Path, dest: Path, content: str, dates: dict) -> None:
+    """Réécrire une transcription existante avec le corps de la note.
+
+    Le frontmatter de la transcription (enrichi après la copie : ``date``,
+    formes ISO quotées) est conservé ; seuls ``title``/``apple_id``/``source``
+    et les dates ``created``/``modified`` sont rafraîchis depuis la note. Si
+    la transcription n'existe plus (``manquante``), copie brute.
+    """
+    if not dest.exists():
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(str(src), str(dest))
+        return
+    note_parts = split_frontmatter(content)
+    note_fm = parse_frontmatter(content) or {}
+    body = note_parts[1] if note_parts is not None else "\n" + content
+    fm = parse_frontmatter(dest.read_text(encoding="utf-8")) or {}
+    for key in _NOTE_FM_KEYS:
+        if key in note_fm:
+            fm[key] = note_fm[key]
+    for key in ("created", "modified"):
+        if dates.get(key):
+            fm[key] = dates[key]
+    dest.write_text(dump_frontmatter(fm, body), encoding="utf-8")
 
 
 def copy_notes(items, db, dry_run=False):
@@ -270,7 +454,8 @@ def copy_notes(items, db, dry_run=False):
         status = item["status"]
 
         if dry_run:
-            label = "→ copier" if status == "nouveau" else "→ mettre à jour"
+            label = {"nouveau": "→ copier", "manquante": "→ recréer"}.get(
+                status, "→ mettre à jour")
             print(f"  {label} : {item['rel']}", file=sys.stderr)
 
             if item["attachments"]:
@@ -283,9 +468,18 @@ def copy_notes(items, db, dry_run=False):
             att_copied += len(item["attachments"])
             continue
 
-        # Copier la note (cp -p préserve les dates)
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(str(src), str(dest))
+        if status == "nouveau":
+            # Copier la note (cp -p préserve les dates)
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(str(src), str(dest))
+        else:
+            # Transcription existante (rangée par entité ou non) : corps de la
+            # note, frontmatter enrichi conservé. `files.mtime` passe au
+            # présent ci-dessous → `resumes_perimes` voit le résumé périmé
+            # (préfiltre mtime, puis hash vs `source_content_hash`).
+            _write_update(src, dest, src.read_text(encoding="utf-8"),
+                          {"created": item.get("created"),
+                           "modified": item.get("modified")})
 
         # Copier les attachements référencés
         att_src_dir = src.parent / "Attachments"
@@ -304,12 +498,20 @@ def copy_notes(items, db, dry_run=False):
         except ValueError:
             rel_path = str(dest)
 
+        try:
+            st = dest.stat()
+            mtime, size = st.st_mtime, st.st_size
+        except OSError:
+            mtime, size = None, None
         db.register_file(rel_path, "transcription",
                          source_type="note",
                          source_path=str(src),
                          created=item.get("created"),
-                         modified=item.get("modified"))
-        db.log("connaissance", "copy_note",
+                         modified=item.get("modified"),
+                         hash=item.get("hash"),
+                         mtime=mtime, size=size)
+        db.log("connaissance",
+               "copy_note" if status == "nouveau" else "update_note",
                source_type="note",
                source_path=str(src),
                dest_path=rel_path)
@@ -333,7 +535,8 @@ def _parse_dates(since, until):
     return since, until
 
 
-def scan(since=None, until=None, output_file: str | None = None) -> dict:
+def scan(since=None, until=None, output_file: str | None = None,
+         db: TrackingDB | None = None) -> dict:
     """Lister les notes à copier (schema dict avec to_copy + skipped).
 
     Si ``output_file`` est fourni, le payload complet (~700 Ko sur un Apple
@@ -343,11 +546,17 @@ def scan(since=None, until=None, output_file: str | None = None) -> dict:
     """
     require_paths(NOTES_DIR, context="notes scan")
     since, until = _parse_dates(since, until)
-    to_process, skipped = scan_notes(since, until)
+    if db is None:
+        db = TrackingDB()
+    to_process, skipped = scan_notes(since, until, db=db)
     skipped_list = [{"reason": k, "count": v} for k, v in sorted(skipped.items())]
+    by_status: dict[str, int] = {}
+    for it in to_process:
+        by_status[it["status"]] = by_status.get(it["status"], 0) + 1
     payload = {
         "to_copy": to_process,
         "skipped": skipped_list,
+        "by_status": dict(sorted(by_status.items())),
         "export": export_status(),
     }
     from connaissance.core.output_file import write_or_inline
@@ -367,6 +576,7 @@ def scan(since=None, until=None, output_file: str | None = None) -> dict:
             "total_to_copy": len(items),
             "total_skipped": sum(x["count"] for x in p["skipped"]),
             "skipped": p["skipped"],
+            "by_status": p["by_status"],
             "by_year": by_year,
             "sample_to_copy": sample,
             "export": p["export"],
@@ -382,7 +592,7 @@ def copy(dry_run: bool = False, since=None, until=None,
     since, until = _parse_dates(since, until)
     if db is None:
         db = TrackingDB()
-    to_process, _ = scan_notes(since, until)
+    to_process, _ = scan_notes(since, until, db=db)
     if not to_process:
         return {"copied": 0, "skipped": 0, "errors": []}
     copied, updated, att_copied = copy_notes(to_process, db, dry_run=dry_run)

@@ -672,6 +672,22 @@ class TrackingDB:
             (canon_file_path(path),)).fetchone()
         return dict(row) if row else None
 
+    def note_transcriptions(self) -> list[dict]:
+        """Transcriptions issues d'Apple Notes (``source_type='note'``).
+
+        Sert à `notes scan` pour savoir si une note de l'export est DÉJÀ
+        ingérée : ``files.path`` est l'emplacement ACTUEL de la transcription
+        (mis à jour par ``move_file`` quand `organize apply` la range par
+        entité), ``source_path`` le chemin de la note d'origine (plusieurs
+        conventions historiques : `Connaissance/Notes/…`, `Notes/…`,
+        `Archives/Notes/…`, absolu). ``hash`` = corps de la note au dernier
+        copy (NULL pour les copies antérieures à 2026-08-23).
+        """
+        return [dict(r) for r in self._conn.execute(
+            """SELECT path, source_path, created, modified, hash, mtime, updated_at
+               FROM files
+               WHERE file_type = 'transcription' AND source_type = 'note'""")]
+
     def rename_text_simhash(self, old_rel, new_rel, *, commit: bool = True) -> int:
         """Repointer la clé d'une transcription dans text_simhash (rel relatif à
         CONNAISSANCE_ROOT) après déplacement. ``UPDATE OR IGNORE`` (collision →
