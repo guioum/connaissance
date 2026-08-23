@@ -51,6 +51,13 @@ mcpb/                    → MCPB Node.js, installé dans Claude Desktop
   tables **additives** en `CREATE TABLE IF NOT EXISTS` (`text_simhash`,
   `file_ledger`, `doc_signals`, `doc_classification` — la « fiche d'identité »
   par document). Aucune migration destructive.
+- **Par entité partout.** `Transcriptions/`, `Résumés/` et `Synthèse/` sont
+  rangés `<Source>/<type>/<slug>/` pour les trois sources (documents via
+  `classify apply`, courriels et notes via `organize apply`). Le chemin ne dit
+  donc plus d'où vient une transcription : **l'identité d'origine est dans son
+  frontmatter** (`source` / `message-id` + `source_path` / `apple_id` +
+  `source_path`), d'où `reindex-db` reconstruit `files.source_path`,
+  `source_id`, `hash` et `entity_*`. Voir [docs/data-model.md](docs/data-model.md).
 - **La DB est un index dérivé, reconstructible depuis le disque.** Source de
   vérité = le **frontmatter** des `.md` (contenu/métadonnées métier) +, pour les
   **journaux primaires** non dérivables du frontmatter (`file_ledger`,

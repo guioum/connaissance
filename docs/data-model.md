@@ -5,13 +5,15 @@
 ```
 ~/Connaissance/
 ├── Transcriptions/        texte brut (OCR, extraction, copie)
-│   ├── Documents/         {divers, promus, personnes, organismes}
-│   ├── Courriels/         {Fastmail/<compte>/<dossier>}
-│   └── Notes/             {divers, personnes, organismes}
-├── Résumés/               résumés IA (1 par source résumable)
-│   ├── Documents/         {divers, promus, personnes, organismes}
-│   ├── Courriels/         {personnes, organismes, …}
-│   └── Notes/             {divers, personnes, organismes}
+│   ├── Documents/         {organismes, personnes, divers}/<slug>/ (+ promus, - Inbox, Classer
+│   │                      en attente de classement)
+│   ├── Courriels/         {organismes, personnes, divers}/<slug>/ (+ Fastmail/<compte>/<dossier>
+│   │                      en attente d'attribution)
+│   └── Notes/             {organismes, personnes, divers}/<slug>/ (+ <dossier Apple>/ en attente)
+├── Résumés/               résumés IA (1 par source résumable) — même chemin que la transcription
+│   ├── Documents/         idem
+│   ├── Courriels/         idem
+│   └── Notes/             idem
 ├── Synthèse/              fiches & chronologies par entité
 │   ├── personnes/<slug>/  fiche.md, chronologie, …
 │   ├── organismes/<slug>/
@@ -20,7 +22,6 @@
 │   └── inconnus/          entités non encore résolues
 ├── Vues/                  vues symlink régénérables (Sujets, Catégories,
 │                          Historique, Snapshots) — hors iCloud
-├── Mémoire/               mémoire perso en Markdown (format OKF, voir memoire.md)
 ├── .trash/                corbeille ledger (<run_id>/…), réversible,
 │                          vidée par `ledger purge`
 ├── .config/               tracking.db, scoring-courriels.yaml, filtres.yaml
@@ -33,21 +34,30 @@ automatiquement (voir [environments.md](environments.md)).
 
 ## Le triplet
 
-Une source traverse jusqu'à trois représentations miroirs, au **même chemin
-relatif** d'un arbre à l'autre :
+Une source traverse jusqu'à trois représentations. **Transcription et résumé
+sont au même chemin relatif l'un de l'autre** ; ce chemin est **par entité**
+(voir ci-dessous), pas un miroir de la source :
 
 ```
-source brute            ~/Documents/promus/ABC.pdf      (ou mbox, ou note Apple)
+source brute            ~/Documents/organismes/fmrq/2026-03 contrat.pdf
+                        ~/Archives/Courriels/Fastmail/Guillaume/INBOX.mbox   (un message)
+                        ~/Archives/Notes/Notes/AI en local.md                (export Apple Notes)
    │ transcrire
    ▼
-Transcriptions/Documents/promus/ABC.md                  texte OCR brut
+Transcriptions/<Source>/organismes/fmrq/<date> titre.md   texte brut
    │ résumer
    ▼
-Résumés/Documents/promus/ABC.md                         résumé IA structuré
-   │ organiser + synthétiser
+Résumés/<Source>/organismes/fmrq/<date> titre.md          résumé IA structuré
+   │ synthétiser
    ▼
-Synthèse/organismes/<entité>/fiche.md                   agrégation par entité
+Synthèse/organismes/fmrq/fiche.md                         agrégation par entité
 ```
+
+Une transcription naît là où sa source la met (`promus/`, `- Inbox/`,
+`Fastmail/<compte>/<dossier>/`, `<dossier Apple>/`) puis est **rangée une
+fois** par entité (`classify apply` pour les documents — qui range aussi
+l'original dans `~/Documents` —, `organize apply` pour les courriels et les
+notes). Le backlog « non organisé » est une notion permanente du système.
 
 - **Transcription** : fidèle à la source, aucune interprétation. Pour les
   courriels, plusieurs courriels d'un fil peuvent être regroupés.
@@ -94,14 +104,38 @@ Les fiches d'entité portent en plus `aliases` (noms/adresses alternatifs) et
 > `None`, pas `[]`. Itérer dessus sans garde plante — voir le fix historique
 > dans `verifier_liens_casses` et le point dette dans [roadmap.md](roadmap.md).
 
-## L'organisation par entité
+## Par entité partout
 
-Les sous-dossiers `personnes/` `organismes/` `sujets/` `divers/` structurent
-Résumés et Synthèse. Le classement est déterministe
-([`core/resolution.py`](../src/connaissance/core/resolution.py)), avec un
-enrichissement sémantique qmd pour les cas ambigus (`organize enrich`). Les
-résumés non encore classables tombent dans `divers/` ou `inconnus/`. `promus/`
-contient les documents promus depuis des pièces jointes (`optimize`).
+**Décision du 2026-08-24.** Les sous-dossiers `organismes/` `personnes/`
+`divers/` structurent `Transcriptions/`, `Résumés/` et `Synthèse/` pour les
+trois sources — un seul modèle mental, entité-d'abord, navigable au Finder,
+dans Obsidian et dans les résultats qmd (le chemin dit l'entité). La synthèse
+et `entity_paths` lisent cet axe dans l'arborescence. Le classement est
+déterministe ([`core/resolution.py`](../src/connaissance/core/resolution.py)),
+avec un enrichissement sémantique qmd pour les cas ambigus (`organize
+enrich`). `promus/` contient les documents promus depuis des pièces jointes
+(`optimize`).
+
+Ce choix a un prix, borné par trois règles :
+
+1. **L'identité d'origine vit dans le frontmatter de la transcription**,
+   puisque son chemin ne la porte plus : `source` (chemin) pour un document ;
+   `message-id` + `folder` + `source_path` (mbox canonique) pour un courriel ;
+   `apple_id` (identité stable, survit au renommage) + `source_path` (chemin
+   relatif à l'export) pour une note. `audit reindex-db` reconstruit
+   `files.source_path` / `source_id` / `hash` / `entity_*` depuis ces champs
+   et le chemin — la DB reste un index dérivé.
+2. **Un chemin par entité est instable** : l'entité est un jugement
+   révisable (`confidence`, fusions, renommages). Tout déplacement passe par
+   `organize` / `entities` et le ledger (réversible), jamais à la main ; après
+   une fusion, `audit check --steps liens_casses` et la régénération des
+   fiches touchées font partie de l'opération.
+3. **Un fichier, une seule entité.** Les relations entre entités vivent dans
+   `Synthèse/` (relations), pas dans l'arborescence.
+
+Le lien source ↔ transcription ne passe donc jamais par le chemin : hash de
+contenu pour les documents, `message-id` pour les courriels, `apple_id` puis
+chemin d'export pour les notes (`notes scan`).
 
 > **Entité vs catégorie.** `~/Documents/` est rangé physiquement par **entité**
 > (`<type>/<slug>/<date> titre.ext`) ; la **catégorie** (`banque`, `impots`…) du

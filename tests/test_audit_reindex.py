@@ -193,3 +193,83 @@ def test_prune_purge_les_lignes_doc_fantomes(tmp_path, monkeypatch, tracking_db)
     assert counts["doc_rels"] == 1 and counts["doc_rows_deleted"] >= 2
     assert tracking_db.get_classification("- Inbox/fantome.pdf") is None
     assert tracking_db.get_classification("present.pdf") is not None
+
+
+# --- Par entité partout : origine et entité reconstruites (2026-08-24) ---
+
+
+def test_reindex_origine_et_entite_depuis_frontmatter_et_chemin(base, tracking_db, monkeypatch, tmp_path):
+    """Transcriptions rangées par entité : `files.source_path` / `source_id`
+    viennent du frontmatter (le chemin ne dit plus d'où elles viennent), et
+    `files.entity_*` du chemin `<type>/<slug>/`."""
+    monkeypatch.setattr(audit_reindex, "NOTES_EXPORT_DIR", tmp_path / "Archives" / "Notes")
+    trans_c = base / "Transcriptions" / "Courriels" / "organismes" / "fmrq" / "2026-03-30 routeur.md"
+    trans_c.parent.mkdir(parents=True)
+    trans_c.write_text(textwrap.dedent("""\
+        ---
+        type: courriel
+        message-id: <m9@exemple.org>
+        folder: INBOX
+        source_path: Archives/Courriels/Fastmail/Guillaume/INBOX.mbox
+        created: 2026-03-30
+        ---
+        Corps.
+        """), encoding="utf-8")
+    trans_n = base / "Transcriptions" / "Notes" / "divers" / "ia-locale" / "2026-01-02 ai-en-local.md"
+    trans_n.parent.mkdir(parents=True)
+    trans_n.write_text(textwrap.dedent("""\
+        ---
+        title: AI en local
+        apple_id: E64FDC08-D082-4D85-A1A8-E0CF3069A5C8
+        source: Apple Notes
+        source_path: Notes/AI en local.md
+        created: 2026-01-02
+        ---
+        Ollama.
+        """), encoding="utf-8")
+    resume_n = base / "Résumés" / "Notes" / "divers" / "ia-locale" / "2026-01-02 ai-en-local.md"
+    resume_n.parent.mkdir(parents=True)
+    resume_n.write_text("---\nsource: Transcriptions/Notes/divers/ia-locale/2026-01-02 ai-en-local.md\n---\nR.\n",
+                        encoding="utf-8")  # sans entity_* : le chemin fait foi
+
+    audit_reindex.reindex(dry_run=False, skip_hashes=True, db=tracking_db)
+
+    c = tracking_db.get_file(str(trans_c))
+    assert c["source_path"] == "Archives/Courriels/Fastmail/Guillaume/INBOX.mbox"
+    assert c["message_id"] == "<m9@exemple.org>"
+    assert (c["entity_type"], c["entity_slug"]) == ("organismes", "fmrq")
+
+    n = tracking_db.get_file(str(trans_n))
+    assert n["source_path"] == "Archives/Notes/Notes/AI en local.md"
+    assert n["source_id"] == "E64FDC08-D082-4D85-A1A8-E0CF3069A5C8"
+    assert (n["entity_type"], n["entity_slug"]) == ("divers", "ia-locale")
+    from connaissance.core.frontmatter import body_sha256
+    assert n["hash"] == body_sha256(trans_n.read_text())
+
+    r = tracking_db.get_file(str(resume_n))
+    assert (r["entity_type"], r["entity_slug"]) == ("divers", "ia-locale")
+
+
+def test_reindex_backfill_source_path_depuis_la_db_une_fois(base, tracking_db, monkeypatch, tmp_path):
+    """Transition : une transcription d'avant `source_path` en frontmatter,
+    mais connue de la DB, reçoit la clé (une fois) ; ensuite le frontmatter
+    fait foi. Pour une note, la valeur DB héritée `Connaissance/Notes/<rel>`
+    devient le chemin relatif à l'export."""
+    monkeypatch.setattr(audit_reindex, "NOTES_EXPORT_DIR", tmp_path / "Archives" / "Notes")
+    trans_n = base / "Transcriptions" / "Notes" / "divers" / "x" / "2026-01-02 n.md"
+    trans_n.parent.mkdir(parents=True)
+    trans_n.write_text("---\ntitle: N\napple_id: ABCDEF12-0000-0000-0000-000000000000\n---\nCorps.\n",
+                       encoding="utf-8")
+    tracking_db.register_file(str(trans_n), "transcription", source_type="note",
+                              source_path="Connaissance/Notes/Journal/n.md")
+
+    out = audit_reindex.reindex(dry_run=False, skip_hashes=True, db=tracking_db)
+    assert out["details"]["transcriptions"]["frontmatter_backfilled"] == 1
+    assert "source_path: Journal/n.md" in trans_n.read_text()
+    n = tracking_db.get_file(str(trans_n))
+    assert n["source_path"] == "Archives/Notes/Journal/n.md"
+    assert n["source_id"] == "ABCDEF12-0000-0000-0000-000000000000"
+
+    # Idempotent : deuxième passage, rien à backfiller.
+    out = audit_reindex.reindex(dry_run=False, skip_hashes=True, db=tracking_db)
+    assert out["details"]["transcriptions"]["frontmatter_backfilled"] == 0

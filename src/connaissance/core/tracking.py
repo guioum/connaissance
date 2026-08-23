@@ -193,8 +193,13 @@ CREATE TABLE IF NOT EXISTS files (
     hash TEXT,
     mtime REAL,
     size INTEGER,
+    source_id TEXT,
     updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%S', 'now', 'localtime'))
 );
+-- source_id : identité STABLE de la source quand son chemin ne l'est pas —
+-- `apple_id` d'une note Apple (survit au renommage de la note, donc du
+-- fichier d'export). Les courriels ont déjà `message_id`. Ajoutée le
+-- 2026-08-24 (index dans _migrate, colonne migrée par _expected_columns).
 
 CREATE INDEX IF NOT EXISTS idx_files_path ON files(path);
 CREATE INDEX IF NOT EXISTS idx_files_file_type ON files(file_type);
@@ -460,7 +465,7 @@ class TrackingDB:
         ``INSERT`` est généré dynamiquement — sans migration, il planterait).
         """
         return {
-            "files": {"size": "INTEGER"},
+            "files": {"size": "INTEGER", "source_id": "TEXT"},
             "doc_classification": {c: self._COL_TYPES.get(c, "TEXT")
                                    for c in self._CLS_COLS},
             "llm_usage": {"units": "INTEGER"},
@@ -489,6 +494,8 @@ class TrackingDB:
         # potentiellement ajoutées par les ALTER ci-dessus : sur une base
         # ancienne, les créer dans SCHEMA échouerait (colonne inexistante).
         self._conn.execute("CREATE INDEX IF NOT EXISTS idx_files_size ON files(size)")
+        self._conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_files_source_id ON files(source_id)")
         self._conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_doc_cls_status "
             "ON doc_classification(status)")
@@ -635,7 +642,7 @@ class TrackingDB:
     def register_file(self, path, file_type, source_type=None, source_path=None,
                       entity_type=None, entity_slug=None, created=None,
                       modified=None, message_id=None, hash=None, mtime=None,
-                      size=None, *, commit: bool = True):
+                      size=None, source_id=None, *, commit: bool = True):
         """Enregistrer ou mettre à jour un fichier suivi."""
         # Normalize message_id : strip whitespace au cas où le frontmatter YAML
         # aurait été parsé avec un header multi-ligne (RFC 5322 folded header).
@@ -644,8 +651,9 @@ class TrackingDB:
             message_id = message_id.strip()
         self._conn.execute(
             """INSERT INTO files (path, file_type, source_type, source_path,
-               entity_type, entity_slug, created, modified, message_id, hash, mtime, size)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+               entity_type, entity_slug, created, modified, message_id, hash, mtime, size,
+               source_id)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                ON CONFLICT(path) DO UPDATE SET
                file_type=excluded.file_type,
                source_type=COALESCE(excluded.source_type, source_type),
@@ -658,10 +666,12 @@ class TrackingDB:
                hash=COALESCE(excluded.hash, hash),
                mtime=COALESCE(excluded.mtime, mtime),
                size=COALESCE(excluded.size, size),
+               source_id=COALESCE(excluded.source_id, source_id),
                updated_at=strftime('%Y-%m-%dT%H:%M:%S', 'now', 'localtime')""",
             (canon_file_path(path), file_type, source_type,
              canon_file_path(source_path) if source_path else None,
-             entity_type, entity_slug, created, modified, message_id, hash, mtime, size))
+             entity_type, entity_slug, created, modified, message_id, hash, mtime, size,
+             source_id))
         if commit:
             self._conn.commit()
 
@@ -684,7 +694,8 @@ class TrackingDB:
         copy (NULL pour les copies antérieures à 2026-08-23).
         """
         return [dict(r) for r in self._conn.execute(
-            """SELECT path, source_path, created, modified, hash, mtime, updated_at
+            """SELECT path, source_path, source_id, created, modified, hash, mtime,
+                      updated_at
                FROM files
                WHERE file_type = 'transcription' AND source_type = 'note'""")]
 

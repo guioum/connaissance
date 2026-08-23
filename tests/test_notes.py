@@ -354,3 +354,59 @@ def test_scan_saute_les_zones(export):
     reasons = {s["reason"]: s["count"] for s in out["skipped"]}
     assert reasons["dossier_vivant:Entreprise"] == 1
     assert reasons["dossier_vivant:Notes rapides"] == 1
+
+
+# --- Identité stable : apple_id, source_path dans le frontmatter (2026-08-24) ---
+
+
+def test_copy_nouvelle_note_ecrit_source_path_et_source_id(export, tracking_db):
+    src, dest_root = export
+    note = src / "Notes" / "Toiture.md"
+    _note_full(note, "Toiture", "Devis reçu.")
+    notes.copy(db=tracking_db)
+    trans = dest_root / "Notes" / "Toiture.md"
+    fm = notes.parse_frontmatter(trans.read_text(encoding="utf-8"))
+    assert fm["source_path"] == "Notes/Toiture.md"
+    assert fm["apple_id"] == "E64FDC08-D082-4D85-A1A8-E0CF3069A5C8"
+    assert "Devis reçu." in trans.read_text(encoding="utf-8")
+    row = tracking_db.get_file(str(trans))
+    assert row["source_id"] == "E64FDC08-D082-4D85-A1A8-E0CF3069A5C8"
+    assert row["source_path"].endswith("Archives/Notes/Notes/Toiture.md")
+
+
+def test_note_renommee_est_reconnue_par_apple_id(connue, tracking_db):
+    """Renommée dans Apple Notes → autre nom de fichier dans l'export, même
+    apple_id : pas une nouvelle note. Statut `renommee`, puis `source_path`
+    rafraîchi (frontmatter + DB) sans toucher au corps."""
+    src, note, trans = connue
+    tracking_db.register_file(str(trans), "transcription",
+                              source_id="E64FDC08-D082-4D85-A1A8-E0CF3069A5C8")
+    nouveau = src / "Notes" / "IA locale.md"
+    note.rename(nouveau)
+    out = notes.scan(db=tracking_db)
+    it = {i["rel"]: i for i in out["to_copy"]}.get("Notes/IA locale.md")
+    assert it is not None and it["status"] == "renommee"
+    assert it["destination"] == str(trans)
+    assert out["by_status"] == {"nouveau": 1, "renommee": 1}
+
+    corps_avant = notes.split_frontmatter(trans.read_text(encoding="utf-8"))[1]
+    notes.copy(db=tracking_db)
+    texte = trans.read_text(encoding="utf-8")
+    assert notes.split_frontmatter(texte)[1] == corps_avant
+    assert notes.parse_frontmatter(texte)["source_path"] == "Notes/IA locale.md"
+    assert tracking_db.get_file(str(trans))["source_path"].endswith("Notes/IA locale.md")
+    # Et la note n'est plus à copier ensuite.
+    out = notes.scan(db=tracking_db)
+    assert "Notes/IA locale.md" not in {i["rel"] for i in out["to_copy"]}
+
+
+def test_note_renommee_et_modifiee_est_modifiee(connue, tracking_db):
+    src, note, trans = connue
+    tracking_db.register_file(str(trans), "transcription",
+                              source_id="E64FDC08-D082-4D85-A1A8-E0CF3069A5C8")
+    nouveau = src / "Notes" / "IA locale.md"
+    note.rename(nouveau)
+    _note_full(nouveau, "IA locale", "Nouveau corps.")
+    out = notes.scan(db=tracking_db)
+    it = {i["rel"]: i for i in out["to_copy"]}["Notes/IA locale.md"]
+    assert it["status"] == "modifie" and it["destination"] == str(trans)

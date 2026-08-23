@@ -57,7 +57,13 @@ Trois sources, trois commandes :
   conservé, corps de la note), et remet `files.mtime`/`hash` au présent, ce
   qui périme le résumé comme pour un document (`resumes_perimes` : préfiltre
   mtime puis hash vs `source_content_hash`). Statuts : `nouveau`, `modifie`,
-  `manquante` (transcription disparue, recréée à l'emplacement enregistré).
+  `manquante` (transcription disparue, recréée à l'emplacement enregistré),
+  `renommee` (même `apple_id`, autre chemin dans l'export : `source_path`
+  rafraîchi, corps intact). L'appariement se fait par `apple_id`
+  (`files.source_id`) d'abord, par chemin relatif ensuite ; chaque
+  transcription de note porte `source_path` (relatif à l'export) dans son
+  frontmatter, et `organize apply` la range ensuite par entité (voir
+  [data-model.md](data-model.md), « Par entité partout »).
   Les dossiers *vivants* du système minimaliste (zones Perso / Finances /
   Entreprise, Notes rapides) sont **exclus** via `filtres.yaml`
   (`notes.dossiers_vivants`, premier niveau de l'export seulement — un

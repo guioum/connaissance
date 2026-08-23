@@ -118,16 +118,46 @@ def note_rel_from_source(source_path: str | None) -> str | None:
     return None
 
 
-def _known_notes(db: TrackingDB | None) -> dict[str, dict]:
-    """Index ``rel → ligne files`` des notes déjà ingérées (vide sans DB)."""
-    if db is None:
-        return {}
-    idx: dict[str, dict] = {}
-    for row in db.note_transcriptions():
-        rel = note_rel_from_source(row.get("source_path"))
-        if rel:
-            idx[_nfc(rel)] = row
-    return idx
+class _Known:
+    """Notes déjà ingérées, indexées par identité stable (``apple_id`` →
+    ``files.source_id``) et par chemin relatif à l'export.
+
+    L'``apple_id`` prime : une note renommée dans Apple Notes change de nom de
+    fichier dans l'export, mais pas d'identité. Le chemin sert aux lignes
+    héritées (copies d'avant ``source_id``)."""
+
+    def __init__(self, rows):
+        self.by_id: dict[str, dict] = {}
+        self.by_rel: dict[str, dict] = {}
+        for row in rows:
+            sid = row.get("source_id")
+            if sid:
+                self.by_id[str(sid)] = row
+            rel = note_rel_from_source(row.get("source_path"))
+            if rel:
+                self.by_rel[_nfc(rel)] = row
+
+    def __len__(self) -> int:
+        return len({id(r) for r in (*self.by_id.values(), *self.by_rel.values())})
+
+    def lookup(self, apple_id: str | None, rel: str) -> dict | None:
+        if apple_id and apple_id in self.by_id:
+            return self.by_id[apple_id]
+        return self.by_rel.get(_nfc(rel))
+
+
+def _known_notes(db: TrackingDB | None) -> _Known:
+    """Notes déjà ingérées (vide sans DB)."""
+    return _Known(db.note_transcriptions() if db is not None else [])
+
+
+def _note_apple_id(content: str) -> str | None:
+    """``apple_id`` du frontmatter d'une note de l'export (regex, sans YAML)."""
+    parts = split_frontmatter(content)
+    if parts is None:
+        return None
+    m = re.search(r"^apple_id:\s*['\"]?([0-9A-Fa-f-]{8,})", parts[0], re.MULTILINE)
+    return m.group(1) if m else None
 
 
 def _local_iso_to_ts(value: str | None) -> float | None:
@@ -258,7 +288,7 @@ def backlog_count(since=None, until=None, db: TrackingDB | None = None) -> dict:
             skipped += 1
             continue
 
-        row = known.get(_nfc(str(rel)))
+        row = known.by_rel.get(_nfc(str(rel)))
         if row is not None:
             registered = _local_iso_to_ts(row.get("updated_at"))
             # `updated_at` est à la seconde : tolérance d'une seconde pour
@@ -343,7 +373,14 @@ def scan_notes(since=None, until=None, db: TrackingDB | None = None):
 
         rel = f.relative_to(NOTES_DIR)
         note_hash = body_sha256(content)
-        row = known.get(_nfc(str(rel)))
+        apple_id = _note_apple_id(content)
+        row = known.lookup(apple_id, str(rel))
+        # Même identité, autre chemin dans l'export : la note a été renommée
+        # ou déplacée dans Apple Notes → rafraîchir `source_path` (frontmatter
+        # + DB) même si le corps n'a pas changé.
+        renamed = (row is not None
+                   and note_rel_from_source(row.get("source_path")) is not None
+                   and _nfc(note_rel_from_source(row.get("source_path"))) != _nfc(str(rel)))
 
         if row is not None:
             # Déjà ingérée : la vérité est la transcription ACTUELLE.
@@ -366,13 +403,16 @@ def scan_notes(since=None, until=None, db: TrackingDB | None = None):
                             (split_frontmatter(content) or ("", content))[1])
                     except (OSError, UnicodeDecodeError):
                         same = False
-                    if same and body_sha256(old_body) != note_hash:
+                    if same and not renamed and body_sha256(old_body) != note_hash:
                         skipped["a_jour_rendu"] = skipped.get("a_jour_rendu", 0) + 1
                         continue
-                if same:
+                if same and renamed:
+                    status = "renommee"
+                elif same:
                     skipped["a_jour"] = skipped.get("a_jour", 0) + 1
                     continue
-                status = "modifie"
+                else:
+                    status = "modifie"
         else:
             # Inconnue de la DB : miroir (copies antérieures au suivi).
             dest = TRANSCRIPTIONS_DIR / rel
@@ -401,6 +441,7 @@ def scan_notes(since=None, until=None, db: TrackingDB | None = None):
             "rel": str(rel),
             "status": status,
             "tracked": row is not None,
+            "apple_id": apple_id,
             "hash": note_hash,
             "size": f.stat().st_size,
             "attachments": attachments,
@@ -417,28 +458,38 @@ def scan_notes(since=None, until=None, db: TrackingDB | None = None):
 _NOTE_FM_KEYS = ("title", "apple_id", "source")
 
 
-def _write_update(src: Path, dest: Path, content: str, dates: dict) -> None:
-    """Réécrire une transcription existante avec le corps de la note.
+def _write_transcription(src: Path, dest: Path, content: str, dates: dict,
+                         rel: str) -> None:
+    """Écrire (ou réécrire) la transcription d'une note.
 
-    Le frontmatter de la transcription (enrichi après la copie : ``date``,
-    formes ISO quotées) est conservé ; seuls ``title``/``apple_id``/``source``
-    et les dates ``created``/``modified`` sont rafraîchis depuis la note. Si
-    la transcription n'existe plus (``manquante``), copie brute.
+    Toujours par recomposition — jamais de copie brute — pour que le
+    frontmatter porte ``source_path`` : le chemin de la note RELATIF à la
+    racine de l'export. C'est l'identité d'origine qui permet à
+    ``audit reindex-db`` de reconstruire ``files.source_path`` une fois la
+    transcription rangée par entité (son chemin ne dit plus d'où elle vient).
+    ``apple_id`` (déjà dans le frontmatter de l'export) est l'identité stable.
+
+    Transcription existante : son frontmatter enrichi (``date``, formes ISO
+    quotées) est conservé ; ``title``/``apple_id``/``source``, les dates et
+    ``source_path`` sont rafraîchis depuis la note ; le corps est celui de la
+    note. Transcription absente : frontmatter de la note + ``source_path``.
     """
-    if not dest.exists():
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(str(src), str(dest))
-        return
     note_parts = split_frontmatter(content)
     note_fm = parse_frontmatter(content) or {}
     body = note_parts[1] if note_parts is not None else "\n" + content
-    fm = parse_frontmatter(dest.read_text(encoding="utf-8")) or {}
+    fm: dict = {}
+    if dest.exists():
+        fm = parse_frontmatter(dest.read_text(encoding="utf-8")) or {}
+    else:
+        fm = dict(note_fm)
     for key in _NOTE_FM_KEYS:
         if key in note_fm:
             fm[key] = note_fm[key]
     for key in ("created", "modified"):
         if dates.get(key):
             fm[key] = dates[key]
+    fm["source_path"] = rel
+    dest.parent.mkdir(parents=True, exist_ok=True)
     dest.write_text(dump_frontmatter(fm, body), encoding="utf-8")
 
 
@@ -454,8 +505,8 @@ def copy_notes(items, db, dry_run=False):
         status = item["status"]
 
         if dry_run:
-            label = {"nouveau": "→ copier", "manquante": "→ recréer"}.get(
-                status, "→ mettre à jour")
+            label = {"nouveau": "→ copier", "manquante": "→ recréer",
+                     "renommee": "→ renommée (origine)"}.get(status, "→ mettre à jour")
             print(f"  {label} : {item['rel']}", file=sys.stderr)
 
             if item["attachments"]:
@@ -468,18 +519,15 @@ def copy_notes(items, db, dry_run=False):
             att_copied += len(item["attachments"])
             continue
 
-        if status == "nouveau":
-            # Copier la note (cp -p préserve les dates)
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(str(src), str(dest))
-        else:
-            # Transcription existante (rangée par entité ou non) : corps de la
-            # note, frontmatter enrichi conservé. `files.mtime` passe au
-            # présent ci-dessous → `resumes_perimes` voit le résumé périmé
-            # (préfiltre mtime, puis hash vs `source_content_hash`).
-            _write_update(src, dest, src.read_text(encoding="utf-8"),
-                          {"created": item.get("created"),
-                           "modified": item.get("modified")})
+        # Nouveau : frontmatter de la note + source_path. Existante (rangée
+        # par entité ou non) : corps de la note, frontmatter enrichi conservé.
+        # `files.mtime` passe au présent ci-dessous → `resumes_perimes` voit
+        # le résumé périmé (préfiltre mtime, puis hash vs source_content_hash).
+        # Renommée : même corps, seul `source_path` change.
+        _write_transcription(src, dest, src.read_text(encoding="utf-8"),
+                             {"created": item.get("created"),
+                              "modified": item.get("modified")},
+                             item["rel"])
 
         # Copier les attachements référencés
         att_src_dir = src.parent / "Attachments"
@@ -509,7 +557,8 @@ def copy_notes(items, db, dry_run=False):
                          created=item.get("created"),
                          modified=item.get("modified"),
                          hash=item.get("hash"),
-                         mtime=mtime, size=size)
+                         mtime=mtime, size=size,
+                         source_id=item.get("apple_id"))
         db.log("connaissance",
                "copy_note" if status == "nouveau" else "update_note",
                source_type="note",

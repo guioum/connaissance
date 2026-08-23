@@ -22,8 +22,10 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from connaissance.core.frontmatter import split_frontmatter
-from connaissance.core.paths import BASE_PATH, DOCUMENTS_DIR, documents_read_path
+from connaissance.core.frontmatter import (body_sha256, dump_frontmatter,
+                                           split_frontmatter)
+from connaissance.core.paths import (BASE_PATH, DOCUMENTS_DIR, NOTES_EXPORT_DIR,
+                                     documents_read_path)
 from connaissance.core.schemas import AuditReindex
 from connaissance.core.tracking import TrackingDB
 
@@ -78,6 +80,70 @@ def _parse_frontmatter_regex(raw: str) -> dict:
             value = m.group(2).strip().strip("'\"")
             result[key] = value
     return result
+
+
+# Axe entité = convention de chemin `<Source>/<type>/<slug>/…` (par entité
+# partout, décision du 2026-08-24). `reindex-db` en dérive `files.entity_*`.
+ENTITY_TYPES = ("organismes", "personnes", "divers")
+
+
+def entity_from_path(rel_under_source: Path) -> tuple[str | None, str | None]:
+    """``(entity_type, entity_slug)`` d'après le chemin relatif au dossier
+    de source (``organismes/fmrq/2026-… .md`` → ``("organismes", "fmrq")``),
+    ``(None, None)`` si le fichier n'est pas rangé par entité."""
+    parts = rel_under_source.parts
+    if len(parts) >= 3 and parts[0] in ENTITY_TYPES:
+        return parts[0], parts[1]
+    return None, None
+
+
+def _origin_from_frontmatter(source_type: str, fm: dict) -> tuple[str | None, str | None]:
+    """``(source_path, source_id)`` — l'identité d'origine d'une transcription,
+    lue dans son frontmatter (son chemin ne la porte plus une fois rangée par
+    entité) :
+
+    - document : ``source`` (chemin relatif au home) ;
+    - courriel : ``source_path`` (mbox canonique) ; l'identité est ``message-id`` ;
+    - note : ``source_path`` (relatif à la racine de l'export) → sous
+      ``NOTES_EXPORT_DIR`` ; identité stable = ``apple_id``.
+    """
+    if source_type == "document":
+        return (str(fm["source"]) if fm.get("source") else None), None
+    if source_type == "courriel":
+        return (str(fm["source_path"]) if fm.get("source_path") else None), None
+    if source_type == "note":
+        rel = fm.get("source_path")
+        sp = str(NOTES_EXPORT_DIR / str(rel)) if rel else None
+        aid = fm.get("apple_id")
+        return sp, (str(aid) if aid else None)
+    return None, None
+
+
+def _backfill_origin_from_db(db: TrackingDB, f: Path, source_type: str,
+                             fm: dict, content: str) -> dict:
+    """Transition (une fois par fichier) : une transcription de courriel ou de
+    note d'AVANT `source_path` en frontmatter — mais que la DB connaît encore —
+    reçoit la clé depuis ``files.source_path``. Ensuite, la DB se reconstruit
+    depuis le frontmatter, plus jamais l'inverse. Idempotent : ne réécrit que
+    si la clé manque et que la DB sait quelque chose."""
+    if source_type not in ("courriel", "note") or fm.get("source_path"):
+        return fm
+    row = db.get_file(relpath(f))
+    known = (row or {}).get("source_path")
+    if not known:
+        return fm
+    if source_type == "note":
+        from connaissance.commands.notes import note_rel_from_source
+        known = note_rel_from_source(known)
+        if not known:
+            return fm
+    parts = split_frontmatter(content)
+    if parts is None:
+        return fm
+    fm = dict(fm)
+    fm["source_path"] = known
+    f.write_text(dump_frontmatter(fm, parts[1]), encoding="utf-8")
+    return fm
 
 
 def is_trackable_md(path: Path) -> bool:
@@ -197,11 +263,29 @@ def reindex_transcriptions(db: TrackingDB, dry_run: bool) -> dict:
                     fm = parse_frontmatter(after)
 
             message_id = fm.get("message-id") or fm.get("message_id") if source_type == "courriel" else None
+            try:
+                raw = f.read_text(encoding="utf-8", errors="ignore")
+            except OSError:
+                raw = ""
+            before = fm.get("source_path")
+            fm = _backfill_origin_from_db(db, f, source_type, fm, raw)
+            if fm.get("source_path") != before:
+                counts["frontmatter_backfilled"] += 1
+            source_path, source_id = _origin_from_frontmatter(source_type, fm)
+            entity_type, entity_slug = entity_from_path(f.relative_to(src_dir))
+            # Notes : hash du corps = clé de la détection « modifiée »
+            # (notes scan) ; recalculé ici pour survivre à un rebuild.
+            content_hash = body_sha256(raw) if source_type == "note" and raw else None
             db.register_file(
                 relpath(f),
                 file_type="transcription",
                 source_type=source_type,
+                source_path=source_path,
+                source_id=source_id,
+                entity_type=entity_type,
+                entity_slug=entity_slug,
                 message_id=message_id,
+                hash=content_hash,
                 created=_fm_date(fm, "created"),
                 modified=_fm_date(fm, "modified"),
                 mtime=safe_mtime(f),
@@ -229,6 +313,10 @@ def reindex_resumes(db: TrackingDB, dry_run: bool) -> dict:
                 pass
             entity_type = fm.get("entity_type") or None
             entity_slug = fm.get("entity_slug") or None
+            if not (entity_type and entity_slug):
+                # Par entité partout : le chemin fait foi quand le frontmatter
+                # ne dit rien (résumés rangés avant l'écriture d'entity_*).
+                entity_type, entity_slug = entity_from_path(f.relative_to(src_dir))
             source_rel = fm.get("source") or None
             message_id = fm.get("message-id") or fm.get("message_id") or None
             if entity_type and entity_slug:

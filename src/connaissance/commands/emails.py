@@ -30,7 +30,7 @@ from connaissance.core.paths import BASE_PATH, require_paths
 from connaissance.core.schemas import (EmailsCalibrate, EmailsCleanupObsolete,
                                        EmailsExtract, EmailsStats,
                                        EmailsThreads, EmailThread)
-from connaissance.core.tracking import TrackingDB
+from connaissance.core.tracking import TrackingDB, canon_file_path
 from connaissance.core.filtres import Filtres
 
 # --- Configuration ---
@@ -558,6 +558,10 @@ def _parse_message(msg: email.message.Message, mbox_path: Path,
         "is_html_only": is_html_only,
         "attachments": attachments,
         "folder": mbox_path.stem,
+        # Identité d'origine : le mbox (chemin canonique, relatif au home).
+        # Une fois la transcription rangée par entité, son chemin ne dit plus
+        # d'où elle vient ; `audit reindex-db` relit ce champ.
+        "mbox": canon_file_path(mbox_path),
         "msg_hash": msg_hash,
         "headers": {"list-unsubscribe": list_unsub},
     }
@@ -681,6 +685,8 @@ def format_email(msg: dict) -> str:
         "message-id": _clean(msg["message_id"]),
         "folder": _clean(msg["folder"]),
     }
+    if msg.get("mbox"):
+        frontmatter["source_path"] = msg["mbox"]
     if msg.get("cc"):
         frontmatter["cc"] = _clean(msg["cc"])
     if msg.get("in_reply_to"):
