@@ -97,6 +97,14 @@ def _extract_attachment_filenames(md_path):
     return filenames
 
 
+def _collision_suffix(resume_path: Path) -> str:
+    """Suffixe court et stable pour désambiguïser un nom cible : les 6
+    premiers caractères alphanumériques du nom d'origine du résumé (hash de
+    message pour un courriel, UUID pour un document promu, titre sinon)."""
+    stem = re.sub(r"[^0-9A-Za-z]", "", resume_path.stem).lower()
+    return stem[:6] or "bis"
+
+
 def _move_with_attachments(src, dst, source_type="documents",
                            db=None, run_id=None, reason=""):
     """Déplacer un fichier .md et ses attachements référencés.
@@ -273,6 +281,23 @@ def _apply_manifest_impl(entries: list, dry_run: bool, db: TrackingDB) -> dict:
         # Destinations (structure entité)
         dest_resume = RESUMES / source_label / entity_type / entity_slug / f"{new_name}.md"
         dest_trans = TRANSCRIPTIONS / source_label / entity_type / entity_slug / f"{new_name}.md"
+
+        # Collision de nom : deux sources distinctes peuvent produire le même
+        # `<date> titre` (deux « confirmation de virement » le même jour, deux
+        # courriels d'un même fil). Désambiguïser par le nom d'origine
+        # (hash du message, UUID du document) plutôt qu'ignorer — le second
+        # est une donnée réelle, pas un doublon. Constaté le 2026-08-24 : 4
+        # courriels sur 517 laissés sous Fastmail/ pour cette raison.
+        if dest_resume.exists() and dest_resume.resolve() != resume_path.resolve():
+            suffix = _collision_suffix(resume_path)
+            candidate = f"{new_name}-{suffix}"
+            cand_resume = dest_resume.with_name(f"{candidate}.md")
+            cand_trans = dest_trans.with_name(f"{candidate}.md")
+            if not cand_resume.exists() and not cand_trans.exists():
+                new_name = candidate
+                dest_resume, dest_trans = cand_resume, cand_trans
+                print(f"    ~ collision de nom, suffixe « -{suffix} »",
+                      file=sys.stderr)
 
         # Affichage
         label = f"  [{confidence}] " if confidence == "low" else "  "

@@ -181,3 +181,54 @@ def test_apply_public_expose_sync_warnings(base, tmp_path, tracking_db):
     result = organize.apply(str(manifest), dry_run=False)
 
     assert "sync_warnings" in result
+
+
+def test_apply_collision_de_nom_suffixe_plutot_qu_ignorer(base, tmp_path, tracking_db):
+    """Deux courriels distincts → même `<date> titre` : le second n'est pas
+    ignoré, il reçoit un suffixe tiré de son nom d'origine (hash)."""
+    resume, trans = _peupler(base, tracking_db)
+    # Un second courriel, même sujet, même jour.
+    trans2 = base / "Transcriptions" / "Courriels" / "def456.md"
+    trans2.write_text("---\nfrom: alice@exemple.org\n---\nSecond corps.\n", encoding="utf-8")
+    resume2 = base / "Résumés" / "Courriels" / "def456.md"
+    resume2.write_text("---\nsource: Transcriptions/Courriels/def456.md\nentity_type: personnes\n---\nRésumé 2.\n",
+                       encoding="utf-8")
+    tracking_db.register_file("Transcriptions/Courriels/def456.md", "transcription", source_type="courriel")
+    tracking_db.register_file("Résumés/Courriels/def456.md", "resume", source_type="courriel")
+
+    entries = json.loads(_manifeste(tmp_path, resume).read_text(encoding="utf-8"))
+    entries.append(dict(entries[0], resume_path=str(resume2)))
+    path = tmp_path / "manifeste2.json"
+    path.write_text(json.dumps(entries, ensure_ascii=False), encoding="utf-8")
+
+    result = organize._apply_manifest(path, dry_run=False)
+    assert result["moved"] == 2 and result["skipped"] == 0
+
+    d = base / "Résumés" / "Courriels" / "personnes" / "jean-dupont"
+    assert (d / "2026-01-15 sujet-test.md").exists()
+    assert (d / "2026-01-15 sujet-test-def456.md").exists()
+    t = base / "Transcriptions" / "Courriels" / "personnes" / "jean-dupont"
+    assert (t / "2026-01-15 sujet-test-def456.md").exists()
+    assert "Second corps." in (t / "2026-01-15 sujet-test-def456.md").read_text(encoding="utf-8")
+    # Le champ source: du second résumé pointe vers SA transcription suffixée.
+    assert ("source: Transcriptions/Courriels/personnes/jean-dupont/2026-01-15 sujet-test-def456.md"
+            in (d / "2026-01-15 sujet-test-def456.md").read_text(encoding="utf-8"))
+    assert tracking_db.get_file(
+        "Résumés/Courriels/personnes/jean-dupont/2026-01-15 sujet-test-def456.md") is not None
+
+
+def test_apply_meme_fichier_deja_a_destination_est_ignore(base, tmp_path, tracking_db):
+    """Re-appliquer un manifeste dont l'entrée est déjà rangée : ignoré, pas
+    de suffixe fantôme."""
+    resume, trans = _peupler(base, tracking_db)
+    manifest = _manifeste(tmp_path, resume)
+    organize._apply_manifest(manifest, dry_run=False)
+    # Le manifeste pointe désormais vers un résumé qui n'existe plus à la
+    # source (déplacé) ; on le refait pointer vers la destination.
+    dest = base / "Résumés" / "Courriels" / "personnes" / "jean-dupont" / "2026-01-15 sujet-test.md"
+    entries = json.loads(manifest.read_text(encoding="utf-8"))
+    entries[0]["resume_path"] = str(dest)
+    manifest.write_text(json.dumps(entries, ensure_ascii=False), encoding="utf-8")
+    result = organize._apply_manifest(manifest, dry_run=False)
+    assert result["skipped"] == 1 and result["moved"] == 0
+    assert not dest.with_name("2026-01-15 sujet-test-202601.md").exists()
