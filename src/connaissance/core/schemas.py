@@ -581,6 +581,7 @@ class ScoringMutation(TypedDict, total=False):
     add_domain_personnel: list[str]
     add_pattern_actionnable: list[str]
     add_pattern_promotionnel: list[str]
+    add_pattern_marketing: list[str]
     set_weight: dict[str, int]
     set_seuil: dict[str, int]
 

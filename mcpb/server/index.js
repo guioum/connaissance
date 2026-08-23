@@ -1365,6 +1365,7 @@ server.registerTool(
       remove_domain_personnel: z.string().optional().describe("Comma-separated domains to remove from domaines_personnels."),
       add_pattern_actionnable: z.string().optional().describe("Regex pattern."),
       add_pattern_promotionnel: z.string().optional().describe("Regex pattern."),
+      add_pattern_marketing: z.string().optional().describe("Regex on the SENDER ADDRESS (patterns_marketing) — target one promotional sender of a domain you cannot block, e.g. ^community@buddyboss\\.com$."),
       set_weight: z.string().optional().describe("key1=val1,key2=val2"),
       set_seuil: z.string().optional().describe("capturer=0,ignorer=-1"),
       dry_run: z.boolean().default(true).describe("Pass false to actually write."),
@@ -1378,6 +1379,7 @@ server.registerTool(
     pushFlag(a, "remove-domain-personnel", args.remove_domain_personnel);
     pushFlag(a, "add-pattern-actionnable", args.add_pattern_actionnable);
     pushFlag(a, "add-pattern-promotionnel", args.add_pattern_promotionnel);
+    pushFlag(a, "add-pattern-marketing", args.add_pattern_marketing);
     pushFlag(a, "set-weight", args.set_weight);
     pushFlag(a, "set-seuil", args.set_seuil);
     // dry_run=true is the CLI's argparse default. Push --apply only to flip it.

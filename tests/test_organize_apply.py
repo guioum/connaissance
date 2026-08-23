@@ -232,3 +232,19 @@ def test_apply_meme_fichier_deja_a_destination_est_ignore(base, tmp_path, tracki
     result = organize._apply_manifest(manifest, dry_run=False)
     assert result["skipped"] == 1 and result["moved"] == 0
     assert not dest.with_name("2026-01-15 sujet-test-202601.md").exists()
+
+
+def test_apply_aligne_entity_frontmatter_sur_le_chemin(base, tmp_path, tracking_db):
+    """Entrée confirmée à la main vers une autre entité que celle du
+    frontmatter : après le déplacement, le frontmatter dit l'entité du chemin."""
+    resume, trans = _peupler(base, tracking_db)
+    resume.write_text(resume.read_text(encoding="utf-8").replace(
+        "entity_type: personnes\n", "entity_type: inconnus\nentity_slug: jean-dupont\n"), encoding="utf-8")
+    manifest = _manifeste(tmp_path, resume)   # entité : personnes/jean-dupont
+    organize._apply_manifest(manifest, dry_run=False)
+    dest = base / "Résumés" / "Courriels" / "personnes" / "jean-dupont" / "2026-01-15 sujet-test.md"
+    txt = dest.read_text(encoding="utf-8")
+    assert "entity_type: personnes\n" in txt and "entity_type: inconnus" not in txt
+    assert "entity_slug: jean-dupont\n" in txt
+    assert "entity_name: Jean Dupont\n" in txt
+    assert txt.rstrip().endswith("Résumé.")

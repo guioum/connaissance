@@ -93,6 +93,7 @@ def scoring_set(dry_run: bool = True,
                 remove_domain_personnel: list[str] | None = None,
                 add_pattern_actionnable: list[str] | None = None,
                 add_pattern_promotionnel: list[str] | None = None,
+                add_pattern_marketing: list[str] | None = None,
                 set_weight: dict[str, int] | None = None,
                 set_seuil: dict[str, int] | None = None) -> ScoringSet:
     """Appliquer des mutations atomiques à scoring-courriels.yaml.
@@ -154,6 +155,8 @@ def scoring_set(dry_run: bool = True,
         _validate_patterns(add_pattern_actionnable)
     if add_pattern_promotionnel:
         _validate_patterns(add_pattern_promotionnel)
+    if add_pattern_marketing:
+        _validate_patterns(add_pattern_marketing)
     if regex_errors:
         return {
             "diff": [],
@@ -175,6 +178,11 @@ def scoring_set(dry_run: bool = True,
         _append_to_list("patterns_sujet_actionnable", add_pattern_actionnable)
     if add_pattern_promotionnel:
         _append_to_list("patterns_sujet_promotionnel", add_pattern_promotionnel)
+    if add_pattern_marketing:
+        # Regex sur l'ADRESSE d'expéditeur (pas le domaine entier) : cible un
+        # émetteur promotionnel d'un domaine qu'on ne peut pas bloquer
+        # (`^community@buddyboss\\.com$`, `^reserve-noreply@google\\.com$`).
+        _append_to_list("patterns_marketing", add_pattern_marketing)
 
     if set_weight:
         poids = data.get("poids") or {}

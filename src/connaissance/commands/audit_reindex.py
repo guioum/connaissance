@@ -311,12 +311,14 @@ def reindex_resumes(db: TrackingDB, dry_run: bool) -> dict:
                 fm = parse_frontmatter(f.read_text(encoding="utf-8", errors="ignore"))
             except OSError:
                 pass
-            entity_type = fm.get("entity_type") or None
-            entity_slug = fm.get("entity_slug") or None
+            # Par entité partout : un résumé RANGÉ (`<type>/<slug>/`) tient son
+            # entité de son chemin — c'est ce que `organize`/`entities`
+            # déplacent, et le frontmatter suit (sync à l'apply). Le
+            # frontmatter ne fait foi que pour un résumé pas encore rangé.
+            entity_type, entity_slug = entity_from_path(f.relative_to(src_dir))
             if not (entity_type and entity_slug):
-                # Par entité partout : le chemin fait foi quand le frontmatter
-                # ne dit rien (résumés rangés avant l'écriture d'entity_*).
-                entity_type, entity_slug = entity_from_path(f.relative_to(src_dir))
+                entity_type = fm.get("entity_type") or None
+                entity_slug = fm.get("entity_slug") or None
             source_rel = fm.get("source") or None
             message_id = fm.get("message-id") or fm.get("message_id") or None
             if entity_type and entity_slug:

@@ -63,10 +63,21 @@ YAML composé par l'appelant :
 
 ```bash
 connaissance config scoring-show
-connaissance config scoring-set --add-domain-marketing exemple.fr --dry-run
+connaissance config scoring-set --add-domain-marketing exemple.fr,autre.org --dry-run
+connaissance config scoring-set --add-pattern-marketing '^community@buddyboss\.com$' --dry-run
 connaissance config scoring-diff       # ce que l'atome changerait
 connaissance config scoring-validate   # cohérence du fichier
 ```
+
+Les flags de domaines prennent une liste **séparée par des virgules** (un
+flag répété ne garde que la dernière valeur). `--add-pattern-marketing` est
+une regex sur l'**adresse** d'expéditeur (`patterns_marketing`, −1) : pour
+pénaliser un émetteur promotionnel d'un domaine qu'on ne peut pas mettre en
+liste marketing parce qu'il envoie aussi du légitime (`community@buddyboss.com`
+contre les tickets `support@buddyboss.com`). `domaines_marketing` est un match
+exact du domaine, pesé `adresse_marketing` (−5 depuis le 2026-08-24 : un
+domaine en liste marketing doit l'emporter sur « sujet actionnable » +3, sinon
+les hameçonnages « your invoice / payment approved » passent).
 
 `ruamel.yaml` préserve les commentaires utilisateur lors de l'écriture. Voir le
 contrat #3 dans [architecture.md](architecture.md).

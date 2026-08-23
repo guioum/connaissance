@@ -364,6 +364,8 @@ def _cmd_config(args) -> Any:
             atoms["add_pattern_actionnable"] = [args.add_pattern_actionnable]
         if args.add_pattern_promotionnel:
             atoms["add_pattern_promotionnel"] = [args.add_pattern_promotionnel]
+        if args.add_pattern_marketing:
+            atoms["add_pattern_marketing"] = [args.add_pattern_marketing]
         if args.set_weight:
             atoms["set_weight"] = {k: int(v) for k, v in [p.split("=") for p in args.set_weight.split(",")]}
         if args.set_seuil:
@@ -1001,6 +1003,9 @@ def build_parser() -> argparse.ArgumentParser:
                            dest="add_pattern_actionnable")
     p_cfg_set.add_argument("--add-pattern-promotionnel", type=str, default=None,
                            dest="add_pattern_promotionnel")
+    p_cfg_set.add_argument("--add-pattern-marketing", type=str, default=None,
+                           dest="add_pattern_marketing",
+                           help="Regex sur l'adresse d'expéditeur (patterns_marketing)")
     p_cfg_set.add_argument("--set-weight", type=str, default=None, dest="set_weight",
                            help="k1=v1,k2=v2")
     p_cfg_set.add_argument("--set-seuil", type=str, default=None, dest="set_seuil",

@@ -97,6 +97,27 @@ def _extract_attachment_filenames(md_path):
     return filenames
 
 
+def _sync_entity_frontmatter(content: str, entity_type: str, entity_slug: str,
+                             entity_name: str | None = None) -> str:
+    """Aligner `entity_type` / `entity_slug` (/ `entity_name`) du frontmatter
+    d'un résumé sur l'entité de son chemin. Remplace la clé si présente,
+    l'ajoute avant le `---` fermant sinon ; corps intact."""
+    parts = content.split("\n---", 1) if content.startswith("---") else None
+    if parts is None or len(parts) < 2:
+        return content
+    fm_text = parts[0]
+    values = {"entity_type": entity_type, "entity_slug": entity_slug}
+    if entity_name:
+        values["entity_name"] = entity_name
+    for key, val in values.items():
+        line = f"{key}: {val}"
+        if re.search(rf"^{key}:.*$", fm_text, flags=re.MULTILINE):
+            fm_text = re.sub(rf"^{key}:.*$", line, fm_text, count=1, flags=re.MULTILINE)
+        else:
+            fm_text = fm_text.rstrip("\n") + "\n" + line
+    return fm_text + "\n---" + parts[1]
+
+
 def _collision_suffix(resume_path: Path) -> str:
     """Suffixe court et stable pour désambiguïser un nom cible : les 6
     premiers caractères alphanumériques du nom d'origine du résumé (hash de
@@ -356,7 +377,12 @@ def _apply_manifest_impl(entries: list, dry_run: bool, db: TrackingDB) -> dict:
                 if "source:" in content:
                     content = re.sub(r'^source: .*$', f'source: {new_trans_rel}',
                                      content, count=1, flags=re.MULTILINE)
-                    atomic_write_text(dest_resume, content)
+                # Par entité partout : le frontmatter doit dire la même entité
+                # que le chemin (une entrée confirmée à la main peut différer
+                # de la proposition initiale — `inconnus/` → `organismes/`).
+                content = _sync_entity_frontmatter(content, entity_type,
+                                                   entity_slug, entry.get("entity_name"))
+                atomic_write_text(dest_resume, content)
             except Exception as e:
                 print(f"    ⚠ frontmatter source: non mis à jour : {e}",
                       file=sys.stderr)
