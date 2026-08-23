@@ -489,10 +489,24 @@ def apply_manifest(manifest_path: str, dry_run: bool = True,
             lines = [f"\n## Tri de Classer — {stamp}\n",
                      "| famille | unité source (~/Documents) | destination | fichiers | run ledger |",
                      "|---|---|---|---|---|"]
+            esc = lambda s: str(s).replace("|", "\\|")
             for fam, f in families.items():
+                # Unités « dossier » : une ligne chacune. Unités « fichier »
+                # (vrac déplacé fichier par fichier) : agrégées par
+                # (source niveau 3, destination niveau 2) — sinon l'index
+                # compte des milliers de lignes (constaté : 20 000).
+                agg: dict[tuple, int] = {}
                 for u in f["units"]:
-                    dest = f"~/Archives/{u['dest']}" if u["dest"] else "corbeille ledger"
-                    lines.append(f"| {fam} | `{u['source']}` | `{dest}` | {u['files']} | `{f['run_id']}` |")
+                    if u["files"] > 1 or not (DOCUMENTS_LOCAL / u["source"]).suffix:
+                        dest = f"{root}/{u['dest']}" if u["dest"] else "corbeille ledger"
+                        lines.append(f"| {fam} | `{esc(u['source'])}` | `{esc(dest)}` | {u['files']} | `{f['run_id']}` |")
+                    else:
+                        src_top = "/".join(u["source"].split("/")[:3]) + "/…"
+                        dest_top = (f"{root}/" + "/".join(u["dest"].split("/")[:2]) + "/…"
+                                    if u["dest"] else "corbeille ledger")
+                        agg[(src_top, dest_top)] = agg.get((src_top, dest_top), 0) + 1
+                for (s, d), n in agg.items():
+                    lines.append(f"| {fam} | `{esc(s)}` | `{esc(d)}` | {n} | `{f['run_id']}` |")
             with open(index_path, "a", encoding="utf-8") as fh:
                 fh.write("\n".join(lines) + "\n")
             # Élagage des dossiers vidés (jamais au-dessus de Classer, jamais protégés).

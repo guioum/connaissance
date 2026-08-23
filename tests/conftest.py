@@ -44,6 +44,10 @@ def _isole_config_reelle(tmp_path, monkeypatch):
     from connaissance.core import resolution
     resolution.invalidate_alias_cache()
 
+    # Transit (manifestes de préparation) : jamais dans le vrai dossier
+    # ~/Library/Application Support/connaissance/transit (résidus constatés).
+    monkeypatch.setattr(paths, "TRANSIT_DIR", tmp_path / "_transit_isole")
+
     vues = tmp_path / "_vues_isole"
     monkeypatch.setattr(paths, "VIEWS_ROOT", vues)
     monkeypatch.setattr(paths, "SNAPSHOTS_DIR", cfg / "snapshots")
