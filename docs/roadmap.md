@@ -3,53 +3,35 @@
 Liste vivante de ce qu'il reste à faire. Cocher quand c'est livré, retirer
 quand c'est obsolète. Priorités indicatives : 🔴 haute · 🟡 moyenne · 🟢 basse.
 
-## ⏯️ REPRISE (point de session 2026-06-19)
+## ⏯️ REPRISE (point de session 2026-08-24)
 
-**Vague 1 OCR (scannés + images) : TERMINÉE** — 2 780 docs Mistral, $3,83.
+**Le pipeline amont est terminé.** Collecte ✅ (9 280 transcriptions — cascades
+OCR finies le 2026-07-25), résumés ✅ (8 206), organisation ✅ (**par entité
+partout**, décision et exécution 2026-08-23/24 : 11 522 documents classés en
+juillet, 554 courriels rangés/archivés — `Fastmail/` vide —, 119 notes ;
+identité d'origine en frontmatter, DB régénérable ; voir la section
+« Par entité partout » ci-dessous et [data-model.md](data-model.md)).
 
-**Vague 2 OCR (born-digital) : PRÊTE, pas lancée.** Manifeste frais déjà dédupliqué
-par contenu : `~/Connaissance/.config/repass-borndigital.json` = **4 175 docs à
-OCRiser + 957 doublons-contenu (copie, 0 OCR) → ~$16,49**. Flux (lots ≤350 MB par
-TAILLE, `image_annotations`+`table_format markdown`, **PAS confidence**) :
-`ocr_batch_submit(files_from_json=…)` → `ocr_batch_results(extract_images=true)` →
-`documents register-batch --ocr-engine mistral` (propage aussi les content_dupes).
-Script de boucle réutilisable : `~/Connaissance/.config/repass-chunks/run.sh`.
-Pièges API : upload <512 MB (chunker par taille), 50 MB/fichier max, confidence
-rejeté en batch. Avant de lancer : **finir le tri d'exclusion ci-dessous**.
+**Prochaine étape maîtresse : la SYNTHÈSE.** 14 fiches / 14 chronologies sur
+~900 entités, 0 MOC, 0 digest — et ces 14 sont périmées (produites avant que
+les courriels soient visibles des fiches). Flux : skill `synthetiser` par lots
+d'entités actives, en commençant par régénérer les 14.
 
-**EN COURS — tri d'exclusion des gros docs** (décision utilisateur en attente) :
-les longs born-digital (manuels/livres/whitepapers/archive dormante 2020-2021)
-sont de mauvais candidats Mistral (born-digital = texte déjà propre). Rapports
-HTML de tri générés : `~/Connaissance/.config/longs-a-trier.html` (>10 p, 357 docs)
-et `longs-a-trier-20.html` (>20 p, 186 docs, dont ~171/$5,40 = archive dormante).
-L'utilisateur coche → me donne la liste → `documents exclude --add-from-file` →
-régénérer le manifeste. **Aucune exclusion ajoutée pour l'instant.**
+**Décisions utilisateur en attente :**
 
-**Snapshot pris avant tout** : `20260619T093401-avant-reorg` (photo DB + vue
-`~/Connaissance/Vues/Snapshots/`).
+1. **1 690 anciennes notes jamais ingérées** (`notes scan`) : `notes copy` sans
+   `--since` les prendrait toutes → ~1 700 résumés à payer. Ventiler par
+   année/dossier avant de trancher. (Les 28 notes modifiées seront reprises au
+   même moment — résumés périmés par hash.)
+2. **Gisement « attente » du pré-classement** : 3 321 documents (notes sans
+   émetteur) laissés de côté au grand classement de juillet — flux dédié
+   jamais construit.
+3. **`duplicates apply` / `media apply`** : l'outillage (v2.35.0) n'a jamais
+   été appliqué au corpus (dédup des doublons ~/Documents, rangement des
+   9,4k médias sous `- Médias/`).
 
-**Ensuite (ordre) :** ~~(1) lancer vague 2 par lots~~ **FAIT 2026-07-24/25**
-(cascade v2.69, 5 410 transcrits en local, reliquat Mistral 0,11 $) ; ~~(2)
-correctifs `classify apply`~~ **FAIT (v2.70.0)** — retrofit `relocate_document`
-(le graphe complet bouge : source + transcription + résumé + refs, fini les
-orphelines), relink inverse au revert (`_revert_refs` : fiche/simhash/files +
-`source` des résumés en post-passe), réconciliation post-crash idempotente
-(`deja_applique`/`relink_repare`, compteur `reconciled`), garde `old==new`
-(`deja_en_place` — sans elle, `unique_dest` renommait un doc déjà en place en
-« (2) ») ; ~~(3) pré-classement complet~~ **FAIT
-2026-07-25** : 11 522 docs classés en 6 tranches Haiku + pilote (~20 $, cache
-batch 74 %) — 8 201 auto (71 %) / 3 321 attente (notes sans émetteur) ; repli
-date par CHEMIN (segment daté le plus profond) + date fs hors archives
-restaurées (calibrés en cours de run, +254 autos re-registrés gratuitement) ;
-~~(4) grand déplacement~~ **FAIT 2026-07-25** : ~7 900 déplacements ledger en
-6 applies vérifiés (0 lien cassé, vues Snapshots/Historique rafraîchies après
-chaque tranche, photos avant/après prises). Incidents attrapés par le
-pilote/les tranches et corrigés : miroir complet des transcriptions
-(`7ce0536`), fuite NFD `- Protégés` (`65344ff`, 154 docs retirés du manifeste,
-extraits partis au batch — divulgué), résolution de chaîne NFC (`d722f0f`),
-collision de miroir (`1452c0d`). RESTE : passe `entities candidates/merge`
-(fragmentation : 1 015 organismes, doublons type 2a-design/2adesign), gisement
-attente (notes → flux dédié), bug `snapshots diff` (zéros systématiques).
+Le détail du sprint juin-juillet (vagues OCR, classement, grand déplacement)
+est archivé dans les sections Phase B et « Grand chantier » ci-dessous.
 
 ## Extraction de texte born-digital élargie (Phase B)
 
@@ -138,7 +120,14 @@ attente (notes → flux dédié), bug `snapshots diff` (zéros systématiques).
   (2026-06, cf. bloc REPRISE en tête) : 2 780 docs Mistral, $3,83, flux 100 % DB
   → CLI → MCP (`transcribe-plan --output-file` → `ocr_batch_submit` en lots →
   `ocr_batch_results` → `register-batch --ocr-engine mistral`).
-- [ ] 🟡 **Vague 2 — Born-digital → Mistral aussi** (décision 2026-06, un seul moteur/
+- [x] **Vague 2 — Born-digital : réglée par la cascade locale, PAS par Mistral**
+  (2026-07-24) : l'item ci-dessous prévoyait d'envoyer les born-digital à
+  Mistral (~$22,76) ; la cascade v2.69 (born-digital → Vision `--fuse` →
+  Mistral en reliquat sous seuil) a transcrit les 5 410 docs en local à ~0 $
+  (reliquat Mistral : 20 docs, 0,11 $). Le « tri d'exclusion des gros docs »
+  (rapports `.config/longs-a-trier*.html`) est **caduc** — plus rien à exclure
+  d'un envoi payant. Item d'origine conservé pour l'historique :
+  ~~🟡 **Vague 2 — Born-digital → Mistral aussi**~~ (décision 2026-06, un seul moteur/
   format pour toute la base plutôt qu'un second flux d'extraction couche-texte) :
   `transcribe-plan --include-born-digital` (CLI + MCP, compte
   `born_digital_included`) les embarque dans le même flux. Mesuré sur la base :
@@ -515,6 +504,63 @@ grande réorg tant que ce n'est pas validé.
   (ledger) et corbeille la fiche perdante. Validé sur le vrai registre (111
   entités → 16 paires : ville-de/ville-montreal, monteillet-conseil(-inc)…).
 
+## Par entité partout & système minimaliste (2026-08)
+
+Décidé le 2026-08-24 : `Transcriptions/` et `Résumés/` rangés
+`<Source>/<type>/<slug>/` pour les TROIS sources, comme `Synthèse/` — le
+principe « miroir au même chemin que la source » est abandonné (il n'était
+vrai que pour les documents). Règles et rationale :
+[data-model.md](data-model.md) § « Par entité partout ».
+
+- [x] **Pré-classement complet** (2026-07-25) : 11 522 docs classés en
+  6 tranches Haiku + pilote (~20 $, cache batch 74 %) — 8 201 auto (71 %) /
+  3 321 attente (notes sans émetteur) ; replis de date calibrés en cours de
+  run (+254 autos gratuits).
+- [x] **Grand déplacement** (2026-07-25) : ~7 900 déplacements ledger en
+  6 applies vérifiés (0 lien cassé, vues et photos avant/après). Incidents
+  corrigés au fil : miroir complet des transcriptions (`7ce0536`), fuite NFD
+  `- Protégés` (`65344ff`), chaîne NFC (`d722f0f`), collision de miroir
+  (`1452c0d`).
+- [x] **Fusions d'entités** (2026-07-26) : passe `entities candidates/merge`
+  faite — ~910 organismes consolidés (fragmentation 1 015 → registre propre).
+- [x] **Courriels par entité** (2026-08-23/24) : `organize apply` sur les 554 —
+  513 auto (`organize-0d1e76b664a2`), 4 collisions de nom (corrigé `0e2901a` :
+  suffixe du nom d'origine), 11 confirmés à la main (`organize-417e0d27ce3b`),
+  26 pourriels/promos archivés (`cleanup-courriel-015f31b7571d` + `892d…`)
+  après calibrage (14 domaines d'hameçonnage, `adresse_marketing` −5, atome
+  `--add-pattern-marketing`). **`Fastmail/` est vide.** Les fiches voient
+  enfin les courriels (`entity_paths` : FMRQ 225 docs + 64 courriels + 10 notes).
+- [x] **Identité d'origine en frontmatter + DB régénérable** (`a677744`) :
+  `source_path` (mbox canonique / chemin d'export) + `apple_id`
+  (`files.source_id`) ; `reindex-db` reconstruit source/identité/hash/entité
+  (le chemin prime pour un résumé rangé) ; backfill unique fait (674
+  frontmatters). `organize apply` synchronise `entity_*` du résumé déplacé ;
+  1 541 frontmatters divergents réalignés (liste-signal conservée :
+  `.config/divergences-entite-frontmatter-chemin-2026-08-24.csv`).
+- [x] **Notes : ingestion sur l'export vivant** (`0b354bd` + `910240c`) :
+  source `~/Archives/Notes/` (mac-automations, quotidien) au lieu du `~/Notes`
+  figé de mars ; sonde de fraîcheur `export` ; « déjà copiée ? » par
+  `tracking.db` + hash du corps (plus le miroir, que l'organisation déplace) ;
+  appariement par `apple_id` (renommage ≠ nouvelle note) ; repli « texte nu »
+  pour les copies d'avant-hash (14 faux « modifiées » de rendu écartés).
+  Zones vivantes du système minimaliste (Perso/Finances/Entreprise, Notes
+  rapides) **exclues** (`notes.dossiers_vivants`, 1er niveau) ; collection qmd
+  `notes` sur l'export (embeddings faits).
+- [x] **Système minimaliste** (2026-08-23) : spec v2 (sujets, zones, dates de
+  réveil) ; plugin `minimaliste` publié (guioum-plugins PR #10, 5 skills :
+  systeme/capture/revue/audit/migration) ; mémoire OKF retirée
+  ([memoire.md](memoire.md)).
+- [ ] 🔴 **Synthèse : fiches / chronologies / MOC** — le gros morceau restant
+  (14/~900 entités, 0 MOC, 0 digest ; les 14 périmées, à régénérer en
+  premier). Skill `synthetiser`, par lots d'entités actives.
+- [ ] 🟡 **Vocabulaire de sujets contrôlé** : seed du `hint_sujet` de
+  `classify` avec les titres des notes-sujets des zones (~30) ; normaliser les
+  639 sujets existants (des entités s'y sont glissées : `banque-nationale`,
+  `québecor` ; doublons `productivité`/`organisation`).
+- [ ] 🟡 **Gisement « attente »** : cf. décision n° 2 du bloc REPRISE.
+- [ ] 🟢 **2 notes héritées sans origine en DB** (`source_path` null avant
+  backfill) — à réapparier ou purger.
+
 ## Améliorations
 
 ### Déduplication (suite de la v2.15.0)
@@ -559,6 +605,9 @@ grande réorg tant que ce n'est pas validé.
   des `promus/` fraîchement écrits) — laissé tel quel, documenté.
 
 ## Corrections & dette technique (v2.16.1)
+
+- [ ] 🟡 **Bug `snapshots diff`** : zéros systématiques (constaté au grand
+  déplacement de juillet) — le diff entre photos DB ne compte rien.
 
 - [x] **Bug None-iteration** (même classe que `liens_casses`) : `resolution.py`
   itérait `fm.get("aliases", [])` qui vaut `None` si le champ YAML est vide
