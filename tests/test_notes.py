@@ -320,3 +320,37 @@ def test_scan_ligne_avec_hash_compare_exactement(connue, tracking_db):
     out = notes.scan(db=tracking_db)
     it = {i["rel"]: i for i in out["to_copy"]}.get("Notes/AI en local.md")
     assert it is not None and it["status"] == "modifie"
+
+
+def test_dossiers_vivants_exclus_au_premier_niveau_seulement(tmp_path):
+    """Les zones du système minimaliste (Perso, Finances, Entreprise, Notes
+    rapides) ne sont jamais ingérées — mais seulement à la racine de l'export :
+    `Partagés/Partage Parents/Finances` n'est pas une zone."""
+    from connaissance.core.filtres import Filtres
+
+    root = tmp_path / "Archives" / "Notes"
+    f = Filtres()
+    assert set(f.notes_config.get("dossiers_vivants", [])) >= {
+        "Perso", "Finances", "Entreprise", "Notes rapides"}
+    zone = root / "Finances" / "Impôts.md"
+    partage = root / "Partagés" / "Partage Parents" / "Finances" / "Budget.md"
+    _note(zone)
+    _note(partage)
+    assert f.filter_note(zone, content=zone.read_text(), root=root) == (False, "dossier_vivant:Finances")
+    assert f.filter_note(partage, content=partage.read_text(), root=root)[0] is True
+    # Sans racine (chemin absolu) : la règle ne s'applique pas — pas de faux
+    # rejet d'un dossier `Perso` ailleurs sur le disque.
+    ailleurs = tmp_path / "Ailleurs" / "Perso" / "x.md"
+    _note(ailleurs)
+    assert f.filter_note(ailleurs, content=ailleurs.read_text())[0] is True
+
+
+def test_scan_saute_les_zones(export):
+    src, _ = export
+    _note(src / "Entreprise" / "Comptes admin FMRQ.md")
+    _note(src / "Notes rapides" / "Idée.md")
+    out = notes.scan()
+    assert {it["rel"] for it in out["to_copy"]} == {"Journal/a.md"}
+    reasons = {s["reason"]: s["count"] for s in out["skipped"]}
+    assert reasons["dossier_vivant:Entreprise"] == 1
+    assert reasons["dossier_vivant:Notes rapides"] == 1

@@ -57,20 +57,29 @@ de `doc_classification` ↔ la vue `~/Connaissance/Vues/Sujets/toiture/`.
   *candidatures* pour la capture, pas une liste parallèle.
 - **Ingestion** : `notes copy` lit l'export `~/Archives/Notes/` (voir
   [pipeline.md](pipeline.md)). Les dossiers *vivants* du système (zones Perso /
-  Finances / Entreprise, Notes rapides) ont vocation à en être **exclus**
-  (`filtres.yaml`, `notes.dossiers_ignores`) : ce sont de l'authored à état, pas
-  des documents — ils restent cherchables via une collection qmd dédiée sur
-  l'export. Les anciens dossiers (imports, archives) restent ingérés.
+  Finances / Entreprise, Notes rapides) en sont **exclus**
+  (`filtres.yaml`, `notes.dossiers_vivants`, premier niveau de l'export
+  seulement — fait le 2026-08-23) : ce sont de l'authored à état, pas des
+  documents — ils restent cherchables via la collection qmd `notes`. Les
+  anciens dossiers (imports, archives) restent ingérés.
 
-## Collections qmd (à faire)
+## Collections qmd
 
-qmd n'a qu'une collection `connaissance` sur tout `~/Connaissance`. Cible :
-une collection `notes` sur `~/Archives/Notes/` (l'export anotes) pour que la
-mémoire authored soit cherchable sans passer par le pipeline, puis — plus tard —
-découper `connaissance` par couche (`transcriptions` / `resumes` / `synthese`)
-pour éviter les quasi-doublons du triplet. Touche les skills du plugin
-`connaissance` qui codent `["connaissance"]` en dur. Config :
-`~/.config/qmd/index.yml`, CLI `qmd collection add`, embeddings locaux.
+Deux collections (`~/.config/qmd/index.yml`) :
+
+- `connaissance` — tout `~/Connaissance/**/*.md` (le dérivé : transcriptions,
+  résumés, synthèses).
+- `notes` — `~/Archives/Notes/**/*.md`, l'export anotes (l'authored), avec
+  `ignore: smart/**, tags/**` (pages d'index générées, doublons). Ajoutée le
+  2026-08-23. C'est par là que la mémoire authored est cherchable sans passer
+  par le pipeline ; les zones vivantes du système minimaliste en sont
+  exclues côté ingestion (`filtres.yaml`, `notes.dossiers_vivants`) mais
+  présentes ici.
+
+Plus tard : découper `connaissance` par couche (`transcriptions` / `resumes` /
+`synthese`) pour éviter les quasi-doublons du triplet — touche les skills du
+plugin `connaissance` qui codent `["connaissance"]` en dur. Embeddings locaux
+(`qmd embed`), pas de coût API.
 
 ## Historique des approches écartées
 

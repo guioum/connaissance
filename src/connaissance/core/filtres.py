@@ -524,15 +524,27 @@ class Filtres:
 
         # Dossiers ignorés (sur les segments relatifs à la racine de l'export)
         parts = path.parts
+        relative = False
         if root is not None:
             try:
                 parts = path.relative_to(root).parts
+                relative = True
             except ValueError:
                 pass
         ignored = cfg.get("dossiers_ignores", [])
         for d in ignored:
             if d in parts:
                 return False, f"dossier_ignore:{d}"
+
+        # Dossiers VIVANTS du système minimaliste (zones Perso / Finances /
+        # Entreprise, Notes rapides) : de l'authored à état, pas des documents
+        # — jamais ingérés. Premier niveau SEULEMENT (un dossier partagé
+        # `Partagés/…/Finances` n'est pas une zone), donc uniquement quand le
+        # chemin est relatif à la racine de l'export.
+        if relative and parts:
+            vivants = cfg.get("dossiers_vivants", [])
+            if parts[0] in vivants:
+                return False, f"dossier_vivant:{parts[0]}"
 
         # Date : pour les notes Apple, la vraie date (création dans Apple Notes)
         # vit dans le frontmatter `created:`/`modified:`. Le mtime du fichier

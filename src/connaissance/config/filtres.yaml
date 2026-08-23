@@ -78,3 +78,12 @@ notes:
     - Archives
     - smart
     - tags
+  # Dossiers VIVANTS du système minimaliste (plugin `minimaliste`) : une note
+  # par sujet, état en tête, historique en bas — de l'authored qui change, pas
+  # des documents. Jamais ingérés (premier niveau de l'export seulement) ;
+  # cherchables via la collection qmd `notes` sur ~/Archives/Notes/.
+  dossiers_vivants:
+    - Perso
+    - Finances
+    - Entreprise
+    - Notes rapides

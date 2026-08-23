@@ -59,8 +59,11 @@ Trois sources, trois commandes :
   mtime puis hash vs `source_content_hash`). Statuts : `nouveau`, `modifie`,
   `manquante` (transcription disparue, recréée à l'emplacement enregistré).
   Les dossiers *vivants* du système minimaliste (zones Perso / Finances /
-  Entreprise, Notes rapides) ont vocation à être exclus via `filtres.yaml`
-  (`notes.dossiers_ignores`) — voir [memoire.md](memoire.md).
+  Entreprise, Notes rapides) sont **exclus** via `filtres.yaml`
+  (`notes.dossiers_vivants`, premier niveau de l'export seulement — un
+  `Partagés/…/Finances` n'est pas une zone ; motif `dossier_vivant:<zone>`
+  dans `skipped`) et cherchables par la collection qmd `notes` — voir
+  [memoire.md](memoire.md).
 
 ## 2. Résumer — texte → résumé IA
 
