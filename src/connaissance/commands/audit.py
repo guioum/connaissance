@@ -374,8 +374,15 @@ def repair_attachments(dry_run: bool = False) -> AuditRepairAttachments:
     return audit_attachments.repair(dry_run=dry_run)
 
 
-def archive_non_documents(dry_run: bool = True) -> AuditArchiveNonDocuments:
+def archive_non_documents(dry_run: bool = True,
+                          from_manifest: str | None = None,
+                          archives_root: str | None = None) -> AuditArchiveNonDocuments:
     """Archiver les non-documents hors du périmètre (wrapper audit_archive).
-    Dry-run par défaut — passer dry_run=False / `--apply` en CLI pour exécuter."""
+    Dry-run par défaut — passer dry_run=False / `--apply` en CLI pour exécuter.
+    ``from_manifest`` : appliquer un manifeste de tri explicite (décisions
+    utilisateur) au lieu du plan dérivé du scope."""
     from connaissance.commands import audit_archive
+    if from_manifest:
+        return audit_archive.apply_manifest(from_manifest, dry_run=dry_run,
+                                            archives_root=archives_root)
     return audit_archive.archive(dry_run=dry_run)

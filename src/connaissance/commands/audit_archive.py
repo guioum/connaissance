@@ -388,3 +388,130 @@ def archive(dry_run: bool = True,
     if moved:
         result["ledger_run"] = run_id   # pour `ledger revert`
     return result
+
+
+# ── Manifeste de tri explicite (décisions utilisateur) ──────────────────────
+
+def _expand_unit(src: Path):
+    """Fichiers d'une unité du manifeste (un fichier, ou tout un dossier)."""
+    if src.is_file():
+        return [src]
+    if src.is_dir():
+        return sorted(p for p in src.rglob("*") if p.is_file() and p.name != ".DS_Store")
+    return []
+
+
+def apply_manifest(manifest_path: str, dry_run: bool = True,
+                   archives_root: str | None = None,
+                   db: TrackingDB | None = None) -> AuditArchiveNonDocuments:
+    """Appliquer un manifeste de tri **explicite** (décisions utilisateur).
+
+    Format : ``{"archives_root": "...", "entries": [{"action", "source", "dest"}]}``
+    — ``source`` relatif à ``~/Documents``, ``dest`` relatif à ``archives_root``.
+    ``ARCHIVER`` → ``safe_move`` (ledger, réversible) ; ``POUBELLE`` → corbeille
+    ledger (``safe_trash``) ; toute autre action est ignorée. Une unité de
+    manifeste peut être un fichier ou un dossier entier (déplacé fichier par
+    fichier, structure relative préservée — le ledger reste au grain fichier).
+
+    Un run ledger **par famille** (1ᵉʳ niveau de destination, ou ``corbeille``)
+    pour que ``ledger revert`` puisse annuler une famille sans les autres.
+    Écrit ``<archives_root>/_index.md`` (provenance : quoi, d'où, quand, run).
+    Élague ensuite les dossiers devenus vides sous ``Classer`` (jamais les
+    dossiers protégés). Refuse d'écraser : une destination existante est une
+    erreur remontée, pas un écrasement.
+    """
+    require_paths(DOCUMENTS_LOCAL, context="archive --from-manifest")
+    path = Path(manifest_path).expanduser()
+    try:
+        manifest = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        return {"archived": 0, "list": [], "dry_run": dry_run,
+                "error": f"manifeste illisible : {exc}"}
+    root = Path(archives_root or manifest.get("archives_root")
+                or (BASE_PATH / "Archives")).expanduser()
+
+    owns_db = db is None
+    if db is None:
+        db = TrackingDB()
+    stamp = datetime.now().strftime("%Y-%m-%d")
+    families: dict[str, dict] = {}
+    errors: list[dict] = []
+    touched_dirs: set[Path] = set()
+    archived = trashed = 0
+    try:
+        for e in manifest.get("entries") or []:
+            action = e.get("action")
+            if action not in ("ARCHIVER", "POUBELLE"):
+                continue
+            src = DOCUMENTS_LOCAL / e["source"]
+            files = _expand_unit(src)
+            if not files:
+                errors.append({"source": e["source"], "error": "source introuvable"})
+                continue
+            fam = (e["dest"].split("/")[0] if action == "ARCHIVER" else "corbeille")
+            f = families.setdefault(fam, {
+                "run_id": _ledger.new_run_id("classer-tri"), "files": 0,
+                "bytes": 0, "units": []})
+            f["units"].append({"source": e["source"], "dest": e.get("dest"),
+                               "files": len(files)})
+            for fp in files:
+                try:
+                    size = fp.stat().st_size
+                except OSError:
+                    size = 0
+                if action == "ARCHIVER":
+                    rel_in_unit = fp.relative_to(src) if src.is_dir() else None
+                    dest = root / e["dest"]
+                    if rel_in_unit is not None:
+                        dest = dest / rel_in_unit
+                    if dest.exists():
+                        errors.append({"source": str(fp.relative_to(DOCUMENTS_LOCAL)),
+                                       "error": f"destination existe : {dest}"})
+                        continue
+                    if not dry_run:
+                        _ledger.safe_move(db, fp, dest, f"classer-tri archiver → {fam}",
+                                          f["run_id"], commit=False)
+                    archived += 1
+                else:
+                    if not dry_run:
+                        _ledger.safe_trash(db, fp, "classer-tri poubelle",
+                                           f["run_id"], commit=False)
+                    trashed += 1
+                f["files"] += 1
+                f["bytes"] += size
+                touched_dirs.add(fp.parent)
+            if not dry_run:
+                db.commit()
+
+        index_path = root / "_index.md"
+        if not dry_run and families:
+            root.mkdir(parents=True, exist_ok=True)
+            lines = [f"\n## Tri de Classer — {stamp}\n",
+                     "| famille | unité source (~/Documents) | destination | fichiers | run ledger |",
+                     "|---|---|---|---|---|"]
+            for fam, f in families.items():
+                for u in f["units"]:
+                    dest = f"~/Archives/{u['dest']}" if u["dest"] else "corbeille ledger"
+                    lines.append(f"| {fam} | `{u['source']}` | `{dest}` | {u['files']} | `{f['run_id']}` |")
+            with open(index_path, "a", encoding="utf-8") as fh:
+                fh.write("\n".join(lines) + "\n")
+            # Élagage des dossiers vidés (jamais au-dessus de Classer, jamais protégés).
+            classer = DOCUMENTS_LOCAL / "Classer"
+            for d in sorted(touched_dirs, key=lambda p: -len(p.parts)):
+                if d.exists() and classer in d.parents:
+                    cleanup_empty_parents(d / "x", classer)
+    finally:
+        if owns_db:
+            db.close()
+
+    return {
+        "archived": archived,
+        "trashed": trashed,
+        "list": [{"famille": fam, "files": f["files"], "bytes": f["bytes"],
+                  "units": len(f["units"]), "ledger_run": f["run_id"]}
+                 for fam, f in families.items()],
+        "dry_run": dry_run,
+        "errors": errors,
+        "archives_root": str(root),
+        "index": str(root / "_index.md"),
+    }

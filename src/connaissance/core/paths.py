@@ -64,6 +64,18 @@ SNAPSHOTS_DIR = CONNAISSANCE_ROOT / ".config" / "snapshots"
 # fichiers peuvent être `dataless`, leur contenu rechargé à la lecture).
 DOCUMENTS_DIR = BASE_PATH / "Documents"
 
+# Archives brutes produites par `mac-automations` (jobs launchd quotidiens) :
+# `Courriels/` (imap-backup, mbox), `Notes/` (export Markdown d'Apple Notes
+# via `anotes export --incremental --git`), `Rappels/` (areminders). Chaque
+# sous-dossier est un dépôt git ; le pipeline les lit, ne les écrit jamais.
+ARCHIVES_ROOT = BASE_PATH / "Archives"
+
+# Export Apple Notes lu par `notes scan/copy`. Historique : l'ancien export
+# `~/Notes/` (figé en mars 2026) a été remplacé par celui de mac-automations,
+# rafraîchi chaque jour (`.export_state.json` à la racine = date du dernier
+# export ; sert de sonde de fraîcheur).
+NOTES_EXPORT_DIR = ARCHIVES_ROOT / "Notes"
+
 # Dossiers top-level SPÉCIAUX sous ~/Documents, exclus de tout balayage de
 # documents source. Depuis le déménagement des vues vers VIEWS_ROOT, seuls
 # « - Médias » (médias relocalisés) et « - Protégés » (sensibles) sont des vrais

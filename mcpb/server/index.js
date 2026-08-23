@@ -653,7 +653,7 @@ server.registerTool(
 server.registerTool(
   "connaissance_notes_scan",
   {
-    description: "Scan ~/Notes/ and list Apple Notes markdown files to copy into the knowledge base. " +
+    description: "Scan the daily Apple Notes export (~/Archives/Notes/, produced by mac-automations via anotes) and list markdown files to copy into the knowledge base. Returns an `export` freshness probe ({last_export, age_days, stale}) — if `stale` is true, the export job is not running and the listing reflects an outdated snapshot. " +
       "The full scan is always written to a JSON file (auto-generated path by default). The response contains compact metadata (total_to_copy, by_year, sample_to_copy). Never bash/python the file from a sandbox — use the `Read` MCP tool or pass the 'output_file' to a downstream tool that reads it directly.",
     inputSchema: {
       ...dateRangeSchema,
@@ -683,7 +683,7 @@ server.registerTool(
 server.registerTool(
   "connaissance_notes_backlog_count",
   {
-    description: "FAST count of Apple Notes to copy/update from ~/Notes/ WITHOUT reading any file contents. Walks the tree, filters by file mtime (approximation of frontmatter `created`), and checks destination mirror existence + mtime. Returns {total_to_copy, to_copy, to_update, skipped_total}. Timeout-safe alternative to notes_scan for pipeline overviews. Trade-off: the date filter uses mtime instead of the frontmatter `created` field (an old note modified recently is counted as recent). For exact frontmatter-based filtering, use notes_scan.",
+    description: "FAST count of Apple Notes to copy/update from the daily export (~/Archives/Notes/) WITHOUT reading any file contents. Includes the `export` freshness probe ({last_export, age_days, stale}). Walks the tree, filters by file mtime (approximation of frontmatter `created`), and checks destination mirror existence + mtime. Returns {total_to_copy, to_copy, to_update, skipped_total}. Timeout-safe alternative to notes_scan for pipeline overviews. Trade-off: the date filter uses mtime instead of the frontmatter `created` field (an old note modified recently is counted as recent). For exact frontmatter-based filtering, use notes_scan.",
     inputSchema: {
       ...dateRangeSchema,
     },

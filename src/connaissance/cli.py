@@ -319,7 +319,10 @@ def _cmd_audit(args) -> Any:
     if args.verb == "repair-attachments":
         return audit.repair_attachments(dry_run=args.dry_run)
     if args.verb == "archive-non-documents":
-        return audit.archive_non_documents(dry_run=args.dry_run)
+        return audit.archive_non_documents(
+            dry_run=args.dry_run,
+            from_manifest=getattr(args, "from_manifest", None),
+            archives_root=getattr(args, "archives_root", None))
     raise SystemExit(f"verbe inconnu : audit {args.verb}")
 
 
@@ -947,6 +950,13 @@ def build_parser() -> argparse.ArgumentParser:
         if verb == "archive-non-documents":
             # mutation destructive (déplace des dossiers) : sûre par défaut.
             add_apply_flag(vp)
+            vp.add_argument("--from-manifest", dest="from_manifest", default=None,
+                            help="Manifeste de tri explicite {entries:[{action, "
+                                 "source, dest}]} (décisions utilisateur) au lieu "
+                                 "du plan dérivé du scope.")
+            vp.add_argument("--archives-root", dest="archives_root", default=None,
+                            help="Racine des archives (défaut : celle du manifeste, "
+                                 "sinon ~/Archives).")
         else:
             # reindex-db / repair-attachments : action primaire, dry-run opt-in.
             vp.add_argument("--dry-run", action="store_true")

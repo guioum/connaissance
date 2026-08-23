@@ -511,15 +511,27 @@ class Filtres:
 
     # --- Notes ---
 
-    def filter_note(self, path, content=None, since=None, until=None):
-        """Filtrer une note. Retourne (accepté, raison_rejet)."""
+    def filter_note(self, path, content=None, since=None, until=None, root=None):
+        """Filtrer une note. Retourne (accepté, raison_rejet).
+
+        ``root`` : racine de l'export ; les `dossiers_ignores` sont testés sur
+        le chemin **relatif** à cette racine, jamais sur le chemin absolu —
+        l'export vit sous `~/Archives/Notes/` et `Archives` est un dossier
+        ignoré : tester l'absolu rejetterait toutes les notes.
+        """
         path = Path(path)
         cfg = self.notes_config
 
-        # Dossiers ignorés
+        # Dossiers ignorés (sur les segments relatifs à la racine de l'export)
+        parts = path.parts
+        if root is not None:
+            try:
+                parts = path.relative_to(root).parts
+            except ValueError:
+                pass
         ignored = cfg.get("dossiers_ignores", [])
         for d in ignored:
-            if d in path.parts:
+            if d in parts:
                 return False, f"dossier_ignore:{d}"
 
         # Date : pour les notes Apple, la vraie date (création dans Apple Notes)

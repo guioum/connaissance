@@ -39,8 +39,15 @@ Trois sources, trois commandes :
 - **Courriels** (`emails extract`) : lit les archives mbox, **score** chaque
   courriel (multi-signaux), ne capture que ce qui dépasse le seuil, regroupe
   les fils. Voir [emails.md](emails.md).
-- **Notes** (`notes scan` → `copy`) : copie incrémentale des notes Apple
-  exportées.
+- **Notes** (`notes scan` → `copy`) : copie incrémentale de l'export Markdown
+  quotidien d'Apple Notes (`~/Archives/Notes/`, job `export-apple-notes` de
+  `mac-automations` via `anotes export --incremental --git`). `scan` et
+  `backlog-count` rapportent une sonde de fraîcheur `export`
+  (`{last_export, age_days, stale}`, seuil 7 jours) : un export en panne se
+  voit, au lieu d'ingérer un instantané périmé en silence. Les dossiers
+  *vivants* du système minimaliste (zones Perso / Finances / Entreprise,
+  Notes rapides) ont vocation à être exclus via `filtres.yaml`
+  (`notes.dossiers_ignores`) — voir [memoire.md](memoire.md).
 
 ## 2. Résumer — texte → résumé IA
 

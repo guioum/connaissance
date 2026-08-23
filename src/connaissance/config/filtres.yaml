@@ -73,7 +73,7 @@ courriels:
   min_attachment_size: 50000
 
 notes:
-  # Dossiers à ignorer dans ~/Notes/
+  # Dossiers à ignorer dans l'export Apple Notes (~/Archives/Notes/)
   dossiers_ignores:
     - Archives
     - smart

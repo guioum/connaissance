@@ -785,11 +785,14 @@ class AuditRepairAttachments(TypedDict):
 
 class AuditArchiveNonDocuments(TypedDict):
     archived: int
-    list: list  # dry-run/apply : [{source, dest}]
+    list: list  # scope : [{source, dest}] ; manifeste : [{famille, files, bytes, units, ledger_run}]
     dry_run: bool
     errors: NotRequired[list]
     ledger_run: NotRequired[str]
     error: NotRequired[str]
+    trashed: NotRequired[int]          # --from-manifest : fichiers envoyés en corbeille ledger
+    archives_root: NotRequired[str]    # --from-manifest
+    index: NotRequired[str]            # --from-manifest : chemin de _index.md
 
 
 # --- scope ---

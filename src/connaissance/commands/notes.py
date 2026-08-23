@@ -1,7 +1,15 @@
 """Module commands/notes : scan et copie des notes Apple.
 
+Source : l'export Markdown quotidien d'Apple Notes produit par `mac-automations`
+(`anotes export --incremental --git`) sous `~/Archives/Notes/` — voir
+`core/paths.py` (`NOTES_EXPORT_DIR`). Un `.export_state.json` à sa racine est
+réécrit à chaque export : son mtime sert de **sonde de fraîcheur**, rapportée
+par `scan` et `backlog_count` (`export`), pour qu'un job d'export en panne ne
+fasse pas ingérer un instantané périmé en silence.
+
 Expose :
 - `scan(since, until) -> dict`
+- `backlog_count(since, until) -> dict`
 - `copy(dry_run=False, since=None, until=None, db=None) -> NotesCopy`
 """
 from __future__ import annotations
@@ -13,13 +21,47 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from connaissance.core.frontmatter import split_frontmatter
-from connaissance.core.paths import BASE_PATH, require_paths
+from connaissance.core.paths import BASE_PATH, NOTES_EXPORT_DIR, require_paths
 from connaissance.core.schemas import NotesCopy
 from connaissance.core.tracking import TrackingDB
 from connaissance.core.filtres import Filtres
 
-NOTES_DIR = BASE_PATH / "Notes"
+NOTES_DIR = NOTES_EXPORT_DIR
 TRANSCRIPTIONS_DIR = BASE_PATH / "Connaissance" / "Transcriptions" / "Notes"
+
+# Marqueur écrit par `anotes export` à chaque passage (gitignoré dans l'export).
+EXPORT_STATE_FILE = ".export_state.json"
+# Au-delà de cet âge, l'export est signalé périmé (le job est quotidien).
+EXPORT_STALE_DAYS = 7
+
+
+def export_status(notes_dir: Path | None = None) -> dict:
+    """État de fraîcheur de l'export Apple Notes.
+
+    Retourne ``{last_export, age_days, stale, source}`` :
+    - ``last_export`` : date ISO (UTC) du dernier export, d'après le mtime de
+      `.export_state.json` ; ``None`` si le marqueur est absent (export jamais
+      fait, ou dossier qui n'est pas un export anotes) ;
+    - ``age_days`` : jours écoulés depuis ``last_export`` (``None`` si inconnu) ;
+    - ``stale`` : ``True`` si l'âge dépasse ``EXPORT_STALE_DAYS`` **ou** si le
+      marqueur manque — dans les deux cas, l'ingestion travaille sur un
+      instantané dont personne ne garantit la fraîcheur.
+    """
+    root = notes_dir if notes_dir is not None else NOTES_DIR
+    marker = root / EXPORT_STATE_FILE
+    try:
+        mtime = marker.stat().st_mtime
+    except OSError:
+        return {"last_export": None, "age_days": None, "stale": True,
+                "source": str(root)}
+    last = datetime.fromtimestamp(mtime, tz=timezone.utc)
+    age = (datetime.now(tz=timezone.utc) - last).days
+    return {
+        "last_export": last.isoformat(timespec="seconds"),
+        "age_days": age,
+        "stale": age > EXPORT_STALE_DAYS,
+        "source": str(root),
+    }
 
 
 def _parse_frontmatter_dates(content: str) -> dict[str, str]:
@@ -54,7 +96,7 @@ def backlog_count(since=None, until=None) -> dict:
     chaque `.md` pour extraire le frontmatter YAML et filtrer par dates
     `created/modified`. Ici, on se base uniquement sur :
 
-    - `rglob("*.md")` sur `~/Notes/`
+    - `rglob("*.md")` sur l'export `~/Archives/Notes/`
     - `f.stat().st_mtime` pour le filtre `since/until` (approximation du
       champ `created` du frontmatter, mais cohérent avec la sémantique
       « quelque chose à (re)copier »).
@@ -71,7 +113,8 @@ def backlog_count(since=None, until=None) -> dict:
             "to_copy": 0,
             "to_update": 0,
             "skipped_total": 0,
-            "note": "~/Notes n'existe pas.",
+            "note": f"L'export Apple Notes {NOTES_DIR} n'existe pas.",
+            "export": export_status(),
         }
 
     # Bornes de date en epoch pour éviter de re-parser à chaque fichier.
@@ -140,6 +183,7 @@ def backlog_count(since=None, until=None) -> dict:
         "to_copy": to_copy,
         "to_update": to_update,
         "skipped_total": skipped,
+        "export": export_status(),
         "note": (
             "Borne approximative du backlog notes : filtre par mtime du "
             "fichier au lieu du champ `created` du frontmatter. Pour un "
@@ -149,7 +193,7 @@ def backlog_count(since=None, until=None) -> dict:
 
 
 def scan_notes(since=None, until=None):
-    """Scanner ~/Notes/ et retourner les notes à copier/mettre à jour."""
+    """Scanner l'export Apple Notes et retourner les notes à copier/mettre à jour."""
     if not NOTES_DIR.exists():
         return [], {}
 
@@ -170,7 +214,8 @@ def scan_notes(since=None, until=None):
             skipped["erreur_lecture"] = skipped.get("erreur_lecture", 0) + 1
             continue
 
-        ok, reason = filtres.filter_note(f, content=content, since=since, until=until)
+        ok, reason = filtres.filter_note(f, content=content, since=since,
+                                            until=until, root=NOTES_DIR)
         if not ok:
             skipped[reason] = skipped.get(reason, 0) + 1
             continue
@@ -303,6 +348,7 @@ def scan(since=None, until=None, output_file: str | None = None) -> dict:
     payload = {
         "to_copy": to_process,
         "skipped": skipped_list,
+        "export": export_status(),
     }
     from connaissance.core.output_file import write_or_inline
 
@@ -323,6 +369,7 @@ def scan(since=None, until=None, output_file: str | None = None) -> dict:
             "skipped": p["skipped"],
             "by_year": by_year,
             "sample_to_copy": sample,
+            "export": p["export"],
         }
 
     return write_or_inline(payload, output_file=output_file, summary_fn=_summary)
