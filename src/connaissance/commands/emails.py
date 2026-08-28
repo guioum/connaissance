@@ -28,7 +28,8 @@ from html.parser import HTMLParser
 
 from connaissance.core.paths import BASE_PATH, require_paths
 from connaissance.core.schemas import (EmailsCalibrate, EmailsCleanupObsolete,
-                                       EmailsExtract, EmailsStats,
+                                       EmailsExtract, EmailsScore,
+                                       EmailsScoreEntry, EmailsStats,
                                        EmailsThreads, EmailThread)
 from connaissance.core.tracking import TrackingDB, canon_file_path
 from connaissance.core.filtres import Filtres
@@ -1425,6 +1426,94 @@ def senders(sample: int = 500, since=None, until=None, account=None) -> dict:
             "revue": rapport.get("candidats_revue", []),
         },
         "rapport_path": str(rapport_path),
+    }
+
+
+def _normalize_from(raw) -> tuple[str, str]:
+    """Ramener un expéditeur à (adresse nue, nom affiché), quelle que soit sa forme.
+
+    `score_courriel` attend dans `from` une **adresse nue** — c'est ce que
+    `_parse_message` y met, via `email.utils.parseaddr`. Lui passer un en-tête
+    « Nom <adresse> » laisse un « > » collé au domaine, et TOUS les signaux de
+    domaine — marketing, réseaux sociaux, personnel, gouvernemental —
+    disparaissent en silence : le message devient capturable par défaut. Le
+    résultat n'a l'air de rien, il est simplement faux.
+
+    Les clients MCP rendent l'expéditeur sous trois formes : chaîne (en-tête
+    complet ou adresse seule), dict {name, email}, ou liste d'un seul dict
+    (Fastmail).
+    """
+    if isinstance(raw, list):
+        raw = raw[0] if raw else ""
+    if isinstance(raw, dict):
+        addr = (raw.get("email") or raw.get("address") or "").strip()
+        return addr, (raw.get("name") or "").strip()
+    text = str(raw or "")
+    name, addr = email.utils.parseaddr(text)
+    return (addr or text).strip(), name.strip()
+
+
+def score_messages(messages: list[dict]) -> EmailsScore:
+    """Scorer des courriels fournis par l'appelant, sans lire aucun mbox.
+
+    `filtres.score_courriel()` est une fonction pure sur un dict ; cette
+    commande l'expose telle quelle pour une boîte VIVANTE (skill `capture`),
+    là où `calibrate` et `senders` la nourrissent depuis les archives.
+    La config de scoring reste la source de vérité unique — l'appelant n'en
+    duplique aucune liste.
+
+    Les signaux de corps (corps quasi vide, corps substantiel, pieds de page
+    d'infolettre) exigent le vrai corps : un aperçu de 200 caractères les fait
+    tous mentir. `sans_corps` compte les messages concernés pour que l'appelant
+    sache quand relire les corps avant de trancher.
+    """
+    filtres = Filtres()
+    cfg = filtres.scoring_config or {}
+    seuils = cfg.get("seuils", {})
+    seuil_capturer = seuils.get("capturer", 0)
+    seuil_ignorer = seuils.get("ignorer", -1)
+
+    results: list[EmailsScoreEntry] = []
+    repartition = {"capturer": 0, "revue": 0, "ignorer": 0}
+    sans_corps = 0
+
+    for i, raw in enumerate(messages or []):
+        if not isinstance(raw, dict):
+            continue
+        body = raw.get("body") or ""
+        if not body:
+            sans_corps += 1
+        from_addr, from_display = _normalize_from(raw.get("from"))
+        msg = {
+            "from": from_addr,
+            "from_display": from_display,
+            "subject": raw.get("subject") or "",
+            "body": body,
+            "folder": raw.get("folder") or "",
+            "attachments": raw.get("attachments") or [],
+            "headers": raw.get("headers") or {},
+            "is_html_only": bool(raw.get("is_html_only", False)),
+        }
+        score, reasons = filtres.score_courriel(msg)
+        if score >= seuil_capturer:
+            decision = "capturer"
+        elif score <= seuil_ignorer:
+            decision = "ignorer"
+        else:
+            decision = "revue"
+        repartition[decision] += 1
+        results.append({
+            "id": str(raw.get("id") or i),
+            "score": score,
+            "decision": decision,
+            "reasons": reasons,
+        })
+
+    return {
+        "seuils": {"capturer": seuil_capturer, "ignorer": seuil_ignorer},
+        "repartition": repartition,
+        "results": results,
+        "sans_corps": sans_corps,
     }
 
 

@@ -5,7 +5,7 @@
 ```
 ┌─────────────────────────────────────────────────────────┐
 │  Claude Desktop / cowork                                 │
-│     └── mcpb/server/index.js  (82 outils MCP)            │
+│     └── mcpb/server/index.js  (83 outils MCP)            │
 │            │  shell-out + parse JSON                      │
 │            ▼                                              │
 │  binaire `connaissance`  (entry point cli.py)            │

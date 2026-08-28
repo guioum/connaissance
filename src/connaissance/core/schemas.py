@@ -595,6 +595,20 @@ class EmailsCalibrate(TypedDict):
     rapport_path: str
 
 
+class EmailsScoreEntry(TypedDict):
+    id: str
+    score: int
+    decision: str  # "capturer" | "revue" | "ignorer"
+    reasons: list[str]
+
+
+class EmailsScore(TypedDict):
+    seuils: dict
+    repartition: dict  # {capturer, revue, ignorer}
+    results: list[EmailsScoreEntry]
+    sans_corps: int  # messages scorés sans corps : signaux de corps neutralisés
+
+
 class EmailsCleanupObsolete(TypedDict):
     would_archive: list[dict]
     archived_to: str

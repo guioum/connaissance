@@ -42,6 +42,42 @@ Entre les deux (ici la bande `]-1, 0[`, vide par défaut) = zone grise. Plus
 l'écart `capturer − ignorer` est large, plus on laisse de courriels en
 suspens ; plus il est serré, plus la décision est binaire.
 
+## Prêter le scoring à une boîte vivante — `emails score`
+
+`score_courriel()` est une **fonction pure** sur un dict : elle ne lit aucun
+mbox. Ses appelants habituels (`calibrate`, `senders`) la nourrissent depuis les
+archives ; `emails_cleanup` la nourrit depuis des transcriptions. `emails score`
+la prête à un appelant externe :
+
+```bash
+connaissance emails score --messages '[{"id":"a","from":"info@members.netflix.com","subject":"Promo"}]'
+connaissance emails score --messages-file /tmp/msgs.json
+```
+
+Rend `{seuils, repartition, results:[{id, score, decision, reasons}], sans_corps}`,
+`decision` valant `capturer` / `revue` / `ignorer` selon les seuils configurés.
+
+L'usage visé est le skill `capture` du plugin **minimaliste**, qui lit la boîte
+**vivante** par MCP et ne doit jamais lire les mbox — celles-ci arrivent après
+le backup, trop tard pour agir. Le skill n'a donc aucune liste à dupliquer :
+la config reste la source de vérité unique, et `reasons` rend chaque écart
+auditable — puis corrigeable par un atome typé de `config scoring-set`.
+
+Deux pièges, tous deux dans la forme des entrées :
+
+- **`from` attend une adresse nue.** C'est ce que `_parse_message` y met, via
+  `email.utils.parseaddr`. Un en-tête « Nom \<adresse\> » laisserait un `>`
+  collé au domaine et **tous** les signaux de domaine disparaîtraient en
+  silence. `emails score` normalise les quatre formes qu'un client MCP peut
+  rendre (adresse, en-tête, `{name, email}`, liste d'un élément) — mais un
+  appelant direct de `score_courriel()` doit s'en charger.
+- **Les signaux de corps exigent le vrai corps.** Un aperçu de 200 caractères
+  paraît toujours « quasi vide » et ne contient jamais de pied de page
+  d'infolettre : `corps_quasi_vide`, `corps_substantiel` et `newsletter_corps`
+  mentent tous. `sans_corps` compte les messages concernés. D'où le flux en
+  deux passes : expéditeur et sujet sur le lot entier, puis relecture des corps
+  pour la seule bande étroite entre `ignorer` et `capturer`.
+
 ## La config : `scoring-courriels.yaml`
 
 Sous `~/Connaissance/.config/`, modèle packagé dans

@@ -628,6 +628,49 @@ server.registerTool(
 );
 
 server.registerTool(
+  "connaissance_emails_score",
+  {
+    description:
+      "Score live mailbox messages with the calibrated scoring config, without " +
+      "reading any mbox. Pass the messages you already fetched from the mail " +
+      "client; returns {seuils, repartition, results:[{id, score, decision, " +
+      "reasons}], sans_corps}. `decision` is capturer/revue/ignorer per the " +
+      "configured thresholds, and `reasons` names the weight behind each. " +
+      "Body-based signals (near-empty body, newsletter footers) need the REAL " +
+      "body: a 200-char preview makes them all misfire — `sans_corps` counts " +
+      "those, re-read bodies before deciding on borderline ones.",
+    inputSchema: {
+      messages: z
+        .array(
+          z.object({
+            id: z.string().optional().describe("Caller's own id, returned as-is."),
+            from: z
+              .union([
+                z.string(),
+                z.object({ name: z.string().optional(), email: z.string().optional() }),
+                z.array(z.object({ name: z.string().optional(), email: z.string().optional() })),
+              ])
+              .optional()
+              .describe("Bare address, full header, {name,email}, or a one-item array."),
+            subject: z.string().optional(),
+            body: z.string().optional().describe("Real body if available; a preview skews body signals."),
+            folder: z.string().optional(),
+            attachments: z.array(z.object({}).passthrough()).optional(),
+            headers: z.object({}).passthrough().optional().describe("e.g. {'list-unsubscribe': '...'}"),
+            is_html_only: z.boolean().optional(),
+          })
+        )
+        .min(1)
+        .describe("Messages to score."),
+    },
+    annotations: { readOnlyHint: true },
+  },
+  async (args) => {
+    return runAndFormat("emails", "score", ["--messages", JSON.stringify(args.messages)]);
+  }
+);
+
+server.registerTool(
   "connaissance_emails_cleanup_obsolete",
   {
     description: "Re-score existing email transcriptions against current scoring rules and archive those below threshold. Reversible (moves to .archive/courriels-depublies/).",
