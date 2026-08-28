@@ -79,6 +79,42 @@ def test_les_raisons_sont_rendues_pour_calibrer():
     assert out["results"][0]["reasons"] == ["réseau social (facebookmail.com) [-3]"]
 
 
+def test_un_corps_inconnu_ne_penalise_pas(monkeypatch):
+    """Un corps VIDE est un signal ; un corps INCONNU n'en est pas un.
+
+    Mesuré sur 43 courriels le 2026-08-28 : sans cette distinction, tout
+    message de première passe encaissait « corps quasi-vide [-1] », les
+    signaux positifs du corps ne pouvaient jamais tirer, et la zone grise
+    restait vide — un artefact du biais, pas une propriété du tri.
+    """
+    scoring = dict(SCORING)
+    scoring["seuils_numeriques"] = {"corps_min": 50}
+    scoring["poids"] = dict(SCORING["poids"], corps_quasi_vide=-1)
+
+    def _fabrique(*a, **k):
+        f = filtres.Filtres(config_path=filtres.TEMPLATE_FILTRES)
+        f._scoring_config = scoring
+        return f
+    monkeypatch.setattr(emails, "Filtres", _fabrique)
+
+    sans = emails.score_messages([{"id": "x", "from": "a@exemple.org", "subject": "s"}])
+    vide = emails.score_messages([{"id": "x", "from": "a@exemple.org", "subject": "s",
+                                   "body": "   "}])
+    assert sans["results"][0]["score"] == 0
+    assert sans["results"][0]["reasons"] == []
+    assert vide["results"][0]["score"] == -1
+    assert any("quasi-vide" in r for r in vide["results"][0]["reasons"])
+
+
+def test_corps_inconnu_ne_change_rien_pour_les_appelants_existants():
+    """Les appelants mbox passent toujours un corps : leur scoring est intact."""
+    f = filtres.Filtres(config_path=filtres.TEMPLATE_FILTRES)
+    f._scoring_config = dict(SCORING, seuils_numeriques={"corps_min": 50},
+                             poids=dict(SCORING["poids"], corps_quasi_vide=-1))
+    msg = {"from": "a@exemple.org", "subject": "s", "body": ""}
+    assert f.score_courriel(msg)[0] == -1
+
+
 def test_sans_corps_compte_les_messages_scores_sur_un_apercu():
     """Un aperçu de 200 caractères fait mentir tous les signaux de corps.
 

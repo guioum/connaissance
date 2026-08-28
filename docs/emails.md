@@ -71,12 +71,19 @@ Deux pièges, tous deux dans la forme des entrées :
   silence. `emails score` normalise les quatre formes qu'un client MCP peut
   rendre (adresse, en-tête, `{name, email}`, liste d'un élément) — mais un
   appelant direct de `score_courriel()` doit s'en charger.
-- **Les signaux de corps exigent le vrai corps.** Un aperçu de 200 caractères
-  paraît toujours « quasi vide » et ne contient jamais de pied de page
-  d'infolettre : `corps_quasi_vide`, `corps_substantiel` et `newsletter_corps`
-  mentent tous. `sans_corps` compte les messages concernés. D'où le flux en
-  deux passes : expéditeur et sujet sur le lot entier, puis relecture des corps
-  pour la seule bande étroite entre `ignorer` et `capturer`.
+- **Un corps VIDE est un signal ; un corps INCONNU n'en est pas un.** Quand
+  l'appelant ne transmet aucun corps, `score_courriel(..., corps_inconnu=True)`
+  **neutralise** les signaux qui le jugent — `corps_quasi_vide`,
+  `corps_actionnable`, `newsletter_corps`, `noreply_sans_actionnable` — au lieu
+  de les appliquer à vide. `emails score` le fait automatiquement, message par
+  message, et `sans_corps` compte les concernés.
+
+  Sans cette distinction, tout message de première passe encaissait un −1, les
+  signaux positifs du corps ne pouvaient jamais tirer, et le tri glissait
+  entièrement vers `ignorer` : mesuré sur 43 courriels le 2026-08-28, zone
+  grise vide. D'où le flux en deux passes — expéditeur et sujet sur le lot
+  entier, puis relecture des corps pour la seule bande étroite entre `ignorer`
+  et `capturer`, qui existe désormais vraiment.
 
 ## La config : `scoring-courriels.yaml`
 

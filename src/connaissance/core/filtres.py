@@ -294,8 +294,19 @@ class Filtres:
         ignored = self.courriels_config.get("dossiers_ignores", [])
         return folder_name.lower() in [d.lower() for d in ignored]
 
-    def score_courriel(self, msg_dict):
-        """Scorer un courriel. Retourne (score, raisons)."""
+    def score_courriel(self, msg_dict, corps_inconnu=False):
+        """Scorer un courriel. Retourne (score, raisons).
+
+        `corps_inconnu` : l'appelant n'a PAS transmis le corps — tri de
+        première passe sur des aperçus, par exemple. Les signaux qui *jugent*
+        le corps sont alors neutralisés plutôt qu'appliqués à vide. Sans ça,
+        tout message est pénalisé pour un corps qu'on a délibérément omis, les
+        signaux positifs du corps ne peuvent jamais tirer, et le tri glisse
+        entièrement vers `ignorer` — biais mesuré sur 43 courriels le
+        2026-08-28 : −1 systématique et zone grise vide.
+
+        Un corps VIDE reste un signal ; un corps INCONNU n'en est pas un.
+        """
         cfg = self.scoring_config
         if not cfg:
             return 0, []
@@ -411,10 +422,10 @@ class Filtres:
 
         seuils_num = cfg.get("seuils_numeriques", {})
 
-        # Corps quasi-vide
+        # Corps quasi-vide — seulement si le corps a été transmis.
         body_len = len(body.strip())
         corps_min = seuils_num.get("corps_min", 50)
-        if body_len < corps_min:
+        if not corps_inconnu and body_len < corps_min:
             w = poids.get("corps_quasi_vide", -1)
             score += w
             reasons.append(f"corps quasi-vide ({body_len} chars) [{w:+d}]")
@@ -428,7 +439,7 @@ class Filtres:
                 break
 
         # Corps actionnable (montants, références, échéances)
-        corps_preview = body[:seuils_num.get("corps_preview", 1000)]
+        corps_preview = "" if corps_inconnu else body[:seuils_num.get("corps_preview", 1000)]
         corps_matches = 0
         for pattern in cfg.get("patterns_corps_actionnable", []):
             if re.search(pattern, corps_preview, re.IGNORECASE):
@@ -449,7 +460,7 @@ class Filtres:
             is_noreply = bool(re.search(noreply_patterns[0], from_addr, re.IGNORECASE))
         else:
             is_noreply = any(p in from_addr for p in noreply_patterns)
-        if is_noreply and corps_matches == 0:
+        if is_noreply and corps_matches == 0 and not corps_inconnu:
             w = poids.get("noreply_sans_actionnable", -1)
             score += w
             reasons.append(f"noreply sans actionnable [{w:+d}]")
@@ -475,7 +486,7 @@ class Filtres:
         # --- Signaux Priorité 2 (nouveaux) ---
 
         # Newsletter body (patterns unsubscribe dans le corps)
-        for pattern in cfg.get("patterns_newsletter_corps", []):
+        for pattern in ([] if corps_inconnu else cfg.get("patterns_newsletter_corps", [])):
             if re.search(pattern, corps_preview, re.IGNORECASE):
                 w = poids.get("newsletter_corps", -1)
                 score += w

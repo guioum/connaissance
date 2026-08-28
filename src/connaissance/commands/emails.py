@@ -1494,7 +1494,7 @@ def score_messages(messages: list[dict]) -> EmailsScore:
             "headers": raw.get("headers") or {},
             "is_html_only": bool(raw.get("is_html_only", False)),
         }
-        score, reasons = filtres.score_courriel(msg)
+        score, reasons = filtres.score_courriel(msg, corps_inconnu=not body)
         if score >= seuil_capturer:
             decision = "capturer"
         elif score <= seuil_ignorer:
