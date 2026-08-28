@@ -84,7 +84,7 @@ cd ..
 ./setup-claude-desktop.sh
 ```
 
-Redémarrer Claude Desktop pour activer les 82 outils
+Redémarrer Claude Desktop pour activer les 83 outils
 `mcp__connaissance__*`.
 
 ## Usage
@@ -126,13 +126,13 @@ connaissance config scoring-set --add-domain-marketing exemple.fr --dry-run
 
 ### MCP tools (via Claude Desktop / cowork)
 
-82 outils mappés 1:1 vers les sous-commandes CLI :
+83 outils mappés 1:1 vers les sous-commandes CLI :
 
 | Groupe | Outils |
 |---|---|
 | pipeline | `detect`, `costs` |
 | documents | `scan`, `register`, `register_existing`, `register_batch`, `transcribe_plan`, `category_view`, `triage`, `secrets`, `signals`, `suspects`, `verify_preserve`, `backlog_count`, `exclude`, `ocr_review` |
-| emails | `stats`, `extract`, `threads`, `calibrate`, `senders`, `cleanup_obsolete`, `backlog_count` |
+| emails | `stats`, `extract`, `threads`, `calibrate`, `senders`, `score`, `cleanup_obsolete`, `backlog_count` |
 | notes | `scan`, `copy`, `backlog_count` |
 | classify | `prepare`, `register`, `apply`, `status` |
 | organize | `plan`, `enrich`, `apply`, `resolve` |

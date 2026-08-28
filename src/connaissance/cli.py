@@ -118,6 +118,28 @@ def _cmd_documents(args) -> Any:
     raise SystemExit(f"verbe inconnu : documents {args.verb}")
 
 
+def _load_json_arg(inline: str | None, path: str | None, label: str) -> list[dict]:
+    """Lire une liste JSON depuis --messages ou --messages-file, exactement l'un des deux."""
+    if (inline is None) == (path is None):
+        raise SystemExit(f"{label} : fournir --messages OU --messages-file, pas les deux")
+    if path is not None:
+        try:
+            raw = Path(path).read_text(encoding="utf-8")
+        except OSError as exc:
+            raise SystemExit(f"{label} : fichier illisible ({exc})") from exc
+    else:
+        raw = inline or ""
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise SystemExit(f"{label} : JSON invalide ({exc})") from exc
+    if isinstance(data, dict):
+        data = data.get("messages", [])
+    if not isinstance(data, list):
+        raise SystemExit(f"{label} : attendu une liste de messages")
+    return data
+
+
 def _cmd_emails(args) -> Any:
     from connaissance.commands import emails
     since, until = _parse_date_range(args)
@@ -140,6 +162,10 @@ def _cmd_emails(args) -> Any:
     if args.verb == "senders":
         return emails.senders(sample=args.sample or 500, since=since, until=until,
                               account=args.account)
+    if args.verb == "score":
+        return emails.score_messages(_load_json_arg(args.messages,
+                                                    args.messages_file,
+                                                    "emails score"))
     if args.verb == "cleanup-obsolete":
         return emails.cleanup_obsolete(dry_run=args.dry_run,
                                        only_domain=args.only_domain,
@@ -715,7 +741,8 @@ def build_parser() -> argparse.ArgumentParser:
     # emails
     p_em = sub.add_parser("emails")
     p_em_verbs = p_em.add_subparsers(dest="verb", required=True)
-    for verb in ("stats", "backlog-count", "extract", "threads", "calibrate", "senders", "cleanup-obsolete"):
+    for verb in ("stats", "backlog-count", "extract", "threads", "calibrate",
+                 "senders", "score", "cleanup-obsolete"):
         vp = p_em_verbs.add_parser(verb)
         vp.add_argument("--account", type=str, default=None)
         vp.add_argument("--folder", type=str, default=None)
@@ -729,6 +756,14 @@ def build_parser() -> argparse.ArgumentParser:
             add_apply_flag(vp)
         if verb in ("calibrate", "senders"):
             vp.add_argument("--sample", type=int, default=None)
+        if verb == "score":
+            vp.add_argument("--messages", type=str, default=None,
+                            help="Liste JSON de messages : "
+                                 "[{id, from, subject, body?, folder?, "
+                                 "attachments?, headers?, is_html_only?}]")
+            vp.add_argument("--messages-file", dest="messages_file", type=str,
+                            default=None,
+                            help="Fichier JSON contenant cette même liste.")
         if verb == "cleanup-obsolete":
             vp.add_argument("--only-domain", type=str, default=None)
             vp.add_argument("--only-entity", type=str, default=None)

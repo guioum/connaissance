@@ -378,9 +378,9 @@ def scan_notes(since=None, until=None, db: TrackingDB | None = None):
         # Même identité, autre chemin dans l'export : la note a été renommée
         # ou déplacée dans Apple Notes → rafraîchir `source_path` (frontmatter
         # + DB) même si le corps n'a pas changé.
-        renamed = (row is not None
-                   and note_rel_from_source(row.get("source_path")) is not None
-                   and _nfc(note_rel_from_source(row.get("source_path"))) != _nfc(str(rel)))
+        prev_rel = (note_rel_from_source(row.get("source_path"))
+                    if row is not None else None)
+        renamed = prev_rel is not None and _nfc(prev_rel) != _nfc(str(rel))
 
         if row is not None:
             # Déjà ingérée : la vérité est la transcription ACTUELLE.
@@ -395,12 +395,14 @@ def scan_notes(since=None, until=None, db: TrackingDB | None = None):
                     # Ligne héritée (copie d'avant le hash) : la transcription
                     # vient peut-être d'un autre exporteur → comparer le texte
                     # nu, pas le rendu.
+                    old_body = ""
                     try:
-                        old_body = split_frontmatter(
+                        parsed_old = split_frontmatter(
                             dest.read_text(encoding="utf-8"))
-                        old_body = old_body[1] if old_body else ""
-                        same = _norm_text(old_body) == _norm_text(
-                            (split_frontmatter(content) or ("", content))[1])
+                        old_body = parsed_old[1] if parsed_old else ""
+                        parsed_new = split_frontmatter(content)
+                        new_body = parsed_new[1] if parsed_new else content
+                        same = _norm_text(old_body) == _norm_text(new_body)
                     except (OSError, UnicodeDecodeError):
                         same = False
                     if same and not renamed and body_sha256(old_body) != note_hash:
