@@ -696,7 +696,8 @@ def format_email(msg: dict) -> str:
         frontmatter["references"] = [_clean(r) for r in msg["references"]]
 
     fm_yaml = yaml.safe_dump(frontmatter, allow_unicode=True,
-                             default_flow_style=False, sort_keys=False).rstrip()
+                             default_flow_style=False, sort_keys=False,
+                             width=float("inf")).rstrip()
     lines = ["---", fm_yaml, "---", ""]
 
     # En-tête lisible

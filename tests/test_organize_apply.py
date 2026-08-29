@@ -248,3 +248,61 @@ def test_apply_aligne_entity_frontmatter_sur_le_chemin(base, tmp_path, tracking_
     assert "entity_slug: jean-dupont\n" in txt
     assert "entity_name: Jean Dupont\n" in txt
     assert txt.rstrip().endswith("Résumé.")
+
+
+def test_apply_source_replie_par_yaml_est_remplace_en_entier(base, tmp_path,
+                                                             tracking_db):
+    """Un `source:` replié par YAML sur deux lignes doit être remplacé en
+    ENTIER, continuation comprise.
+
+    Régression du 2026-08-29 : `re.sub(r'^source: .*$', …)` ne voyait que la
+    première ligne. La continuation restait derrière, collée au nouveau
+    chemin — « …hostpapa.md - Ho… » — et le lien résumé→transcription était
+    rompu pour 132 résumés d'un seul apply. Ils passaient alors pour des
+    résumés MANQUANTS alors qu'ils existaient sur disque.
+    """
+    import yaml as _yaml
+    trans = base / "Transcriptions" / "Courriels" / "abc.md"
+    trans.write_text("---\nfrom: a@b.c\n---\nCorps.\n", encoding="utf-8")
+    # Un chemin volontairement long : PyYAML le repliait au-delà de 80 colonnes.
+    long_src = ("Transcriptions/Courriels/organismes/un-organisme-au-nom-"
+                "vraiment-tres-long/2026-01-15 un titre de document lui aussi "
+                "fort long.md")
+    resume = base / "Résumés" / "Courriels" / "abc.md"
+    fm = {"source": long_src, "entity_type": "personnes",
+          "entity_name": "Jean Dupont"}
+    # Dump SANS width : reproduit fidèlement un frontmatter écrit avant le
+    # correctif, tel qu'il en reste dans la base.
+    replie = _yaml.safe_dump(fm, allow_unicode=True, sort_keys=False).strip()
+    assert "\n  " in replie, "le cas de test doit bien produire un repli"
+    resume.write_text(f"---\n{replie}\n---\nRésumé.\n", encoding="utf-8")
+    tracking_db.register_file("Transcriptions/Courriels/abc.md",
+                              "transcription", source_type="courriel")
+    tracking_db.register_file("Résumés/Courriels/abc.md", "resume",
+                              source_type="courriel")
+
+    manifest = _manifeste(tmp_path, resume)
+    result = organize._apply_manifest(manifest, dry_run=False)
+    assert result["moved"] == 1
+
+    dest = (base / "Résumés" / "Courriels" / "personnes" / "jean-dupont" /
+            "2026-01-15 sujet-test.md")
+    fm_relu = _yaml.safe_load(
+        dest.read_text(encoding="utf-8").split("---")[1])
+    attendu = ("Transcriptions/Courriels/personnes/jean-dupont/"
+               "2026-01-15 sujet-test.md")
+    # La valeur RELUE est le chemin seul — aucun résidu de l'ancienne valeur.
+    assert fm_relu["source"] == attendu
+    assert (base / fm_relu["source"]).exists()
+
+
+def test_apply_n_ecrit_plus_de_frontmatter_replie(base, tmp_path, tracking_db):
+    """Après le correctif, le frontmatter écrit ne contient aucun repli : un
+    futur éditeur ligne-à-ligne ne peut plus rencontrer le cas."""
+    resume, _ = _peupler(base, tracking_db)
+    organize._apply_manifest(_manifeste(tmp_path, resume), dry_run=False)
+    dest = (base / "Résumés" / "Courriels" / "personnes" / "jean-dupont" /
+            "2026-01-15 sujet-test.md")
+    fm_text = dest.read_text(encoding="utf-8").split("---")[1]
+    for ligne in fm_text.strip().split("\n"):
+        assert not ligne.startswith(" "), f"ligne repliée : {ligne!r}"

@@ -556,7 +556,8 @@ def _register_impl(custom_id: str, content: str,
         # le body tel quel.
         new_fm_text = yaml.safe_dump(fm_merged, sort_keys=False,
                                      allow_unicode=True, default_flow_style=False,
-                                     default_style=None).strip()
+                                     default_style=None,
+                                     width=float("inf")).strip()
         content = f"---\n{new_fm_text}\n---\n{body}"
 
     # Construire le chemin miroir du résumé
@@ -645,11 +646,23 @@ def _register_impl(custom_id: str, content: str,
         inferred = _infer_source_type_from_path(str(source_rel))
         source_type = inferred if inferred in ("courriel", "note", "document") else "document"
 
+    # L'entité du frontmatter a DÉJÀ décidé où le fichier est écrit ; elle doit
+    # donc aussi être dans l'index. Sans ça, un résumé arrivant bien rangé du
+    # premier coup gardait `entity_type NULL` : `organize` ne le voyait pas (il
+    # est à sa place sur disque) et `stale_synthesis`, qui filtre sur
+    # `entity_type IS NOT NULL`, ne le comptait pas pour périmer sa fiche — le
+    # résumé existait sans jamais atteindre la synthèse. Le slug est dérivé du
+    # nom comme partout ailleurs, jamais recopié tel quel.
+    r_eslug = str(resume_fm_after_merge.get("entity_slug") or "").strip()
+    if not r_eslug and r_ename:
+        r_eslug = slugify(r_ename)
     db.register_file(
         str(resume_rel),
         "resume",
         source_type=source_type,
         source_path=str(source_rel),
+        entity_type=r_etype or None,
+        entity_slug=r_eslug or None,
         created=propagated_fields.get("created"),
         modified=propagated_fields.get("modified"),
     )

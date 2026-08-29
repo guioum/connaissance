@@ -68,7 +68,14 @@ def dump_frontmatter(fm: dict, body: str) -> str:
     ``body`` est concaténé tel quel — utiliser le body retourné par
     :func:`split_frontmatter` pour un round-trip fidèle.
     """
-    fm_text = yaml.safe_dump(fm, allow_unicode=True, sort_keys=False).strip()
+    # `width` illimité : sans lui, PyYAML replie tout scalaire au-delà de 80
+    # colonnes sur une ligne de continuation indentée. Le round-trip YAML reste
+    # fidèle, mais tout code qui édite le frontmatter LIGNE PAR LIGNE (regex
+    # `^source: .*$`) ne voit alors que la première moitié de la valeur et
+    # laisse la seconde derrière lui, collée à ce qu'il vient d'écrire. Les
+    # chemins rangés par entité dépassent presque toujours 80 caractères.
+    fm_text = yaml.safe_dump(fm, allow_unicode=True, sort_keys=False,
+                             width=float("inf")).strip()
     return f"---\n{fm_text}\n---{body}"
 
 

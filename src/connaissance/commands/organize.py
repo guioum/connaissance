@@ -97,24 +97,53 @@ def _extract_attachment_filenames(md_path):
     return filenames
 
 
+# Une clé YAML dont la valeur a été repliée occupe PLUSIEURS lignes : la
+# première porte « clé: début », les suivantes sont indentées. Un
+# `^clé:.*$` n'en voit que la première et laisse les autres derrière lui,
+# collées à la valeur qu'on vient d'écrire. C'est ce qui a corrompu 132
+# champs `source:` le 2026-08-29 (« …hostpapa.md - Ho… »). Le repli lui-même
+# est désormais désactivé à l'écriture (`dump_frontmatter`, width=inf), mais
+# le corps de la base contient encore des frontmatters repliés d'avant : ce
+# motif doit continuer de les absorber.
+_CONTINUATIONS = r"(?:\n[ \t]+\S.*)*"
+
+
+def _set_fm_scalar(fm_text: str, key: str, value) -> str:
+    """Poser `key: value` dans un bloc de frontmatter, continuations comprises.
+
+    La ligne est produite par ``yaml.safe_dump`` plutôt que concaténée : une
+    valeur contenant « : » ou débutant par un caractère spécial doit être
+    citée, sinon on écrit un YAML invalide qui casse la lecture du fichier.
+    """
+    line = yaml.safe_dump({key: value}, allow_unicode=True, sort_keys=False,
+                          default_flow_style=False, width=float("inf")).strip()
+    pattern = rf"^{re.escape(key)}:.*$" + _CONTINUATIONS
+    if re.search(pattern, fm_text, flags=re.MULTILINE):
+        return re.sub(pattern, line.replace("\\", "\\\\"), fm_text, count=1,
+                      flags=re.MULTILINE)
+    return fm_text.rstrip("\n") + "\n" + line
+
+
 def _sync_entity_frontmatter(content: str, entity_type: str, entity_slug: str,
-                             entity_name: str | None = None) -> str:
-    """Aligner `entity_type` / `entity_slug` (/ `entity_name`) du frontmatter
-    d'un résumé sur l'entité de son chemin. Remplace la clé si présente,
-    l'ajoute avant le `---` fermant sinon ; corps intact."""
+                             entity_name: str | None = None,
+                             source: str | None = None) -> str:
+    """Aligner `entity_type` / `entity_slug` (/ `entity_name`, / `source`) du
+    frontmatter d'un résumé sur l'entité et la transcription de son chemin.
+    Remplace la clé si présente, l'ajoute avant le `---` fermant sinon ;
+    corps intact."""
     parts = content.split("\n---", 1) if content.startswith("---") else None
     if parts is None or len(parts) < 2:
         return content
     fm_text = parts[0]
-    values = {"entity_type": entity_type, "entity_slug": entity_slug}
+    values: dict[str, str] = {}
+    if source is not None:
+        values["source"] = source
+    values["entity_type"] = entity_type
+    values["entity_slug"] = entity_slug
     if entity_name:
         values["entity_name"] = entity_name
     for key, val in values.items():
-        line = f"{key}: {val}"
-        if re.search(rf"^{key}:.*$", fm_text, flags=re.MULTILINE):
-            fm_text = re.sub(rf"^{key}:.*$", line, fm_text, count=1, flags=re.MULTILINE)
-        else:
-            fm_text = fm_text.rstrip("\n") + "\n" + line
+        fm_text = _set_fm_scalar(fm_text, key, val)
     return fm_text + "\n---" + parts[1]
 
 
@@ -374,14 +403,14 @@ def _apply_manifest_impl(entries: list, dry_run: bool, db: TrackingDB) -> dict:
             try:
                 new_trans_rel = str(dest_trans.relative_to(CONNAISSANCE))
                 content = dest_resume.read_text(encoding="utf-8")
-                if "source:" in content:
-                    content = re.sub(r'^source: .*$', f'source: {new_trans_rel}',
-                                     content, count=1, flags=re.MULTILINE)
                 # Par entité partout : le frontmatter doit dire la même entité
                 # que le chemin (une entrée confirmée à la main peut différer
-                # de la proposition initiale — `inconnus/` → `organismes/`).
-                content = _sync_entity_frontmatter(content, entity_type,
-                                                   entity_slug, entry.get("entity_name"))
+                # de la proposition initiale — `inconnus/` → `organismes/`),
+                # et le même `source:` que la transcription déplacée.
+                content = _sync_entity_frontmatter(
+                    content, entity_type, entity_slug,
+                    entry.get("entity_name"),
+                    source=new_trans_rel if "source:" in content else None)
                 atomic_write_text(dest_resume, content)
             except Exception as e:
                 print(f"    ⚠ frontmatter source: non mis à jour : {e}",
