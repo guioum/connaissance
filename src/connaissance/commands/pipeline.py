@@ -10,6 +10,7 @@ Expose :
 
 from typing import cast
 
+from connaissance.core import filtres as _filtres
 from connaissance.core.frontmatter import parse_frontmatter
 from connaissance.core.paths import BASE_PATH
 from connaissance.core.schemas import (Couts, CoutsReels, MocPerimes,
@@ -23,16 +24,40 @@ RESUMES = CONNAISSANCE / "Résumés"
 SYNTHESE = CONNAISSANCE / "Synthèse"
 
 
+def _sans_exclus(rows, key: str = "source_path") -> tuple[list, int]:
+    """Écarter les lignes dont le document d'origine est exclu du payant.
+
+    Le compteur doit dire ce qui RESTE à faire, pas ce qui existe : annoncer
+    1 029 résumés manquants quand 885 sont sur la liste d'exclusion faisait
+    surestimer la facture d'un facteur 7 et `summarize prepare`, lui, en
+    préparait 144 — deux chiffres pour un même lot. Retourne (gardés, exclus).
+    """
+    exclude_set = _filtres.load_exclude_set()
+    if not exclude_set:
+        return list(rows), 0
+    gardes = [r for r in rows
+              if not _filtres.is_excluded_source(r.get(key), exclude_set)]
+    return gardes, len(rows) - len(gardes)
+
+
 def resumes_manquants(db, source_type=None, since=None,
                       until=None) -> ResumesManquants:
-    """Résumés manquants par source. ``since``/``until`` en YYYY-MM-DD."""
-    rows = db.missing_resumes(source_type, since=since, until=until)
+    """Résumés manquants par source. ``since``/``until`` en YYYY-MM-DD.
+
+    Les documents de la liste d'exclusion utilisateur ne sont pas comptés —
+    ils ne partiront jamais en résumé — mais leur nombre est rendu dans
+    ``exclus`` : un écart silencieux entre ce compteur et ce que prépare
+    `summarize` serait pire que le biais lui-même.
+    """
+    rows, exclus = _sans_exclus(
+        db.missing_resumes(source_type, since=since, until=until))
     by_source = {}
     for r in rows:
         st = r.get("source_type") or "inconnu"
         by_source.setdefault(st, []).append(r["path"])
     return {
         "total": len(rows),
+        "exclus": exclus,
         "par_source": {k: len(v) for k, v in by_source.items()},
         "fichiers": [r["path"] for r in rows],
     }
@@ -143,8 +168,10 @@ def estimer_couts(db, mode="batch", since=None, until=None) -> Couts:
     }
     facteur = 0.5 if mode == "batch" else 1.0
 
-    # Résumés manquants par source
-    manquants = db.missing_resumes(since=since, until=until)
+    # Résumés manquants par source (hors exclus du payant : les compter
+    # gonflait la facture annoncée de tout le lot mis de côté à la main).
+    manquants, _exclus_n = _sans_exclus(
+        db.missing_resumes(since=since, until=until))
     by_source = {}
     for r in manquants:
         st = r.get("source_type") or "inconnu"
@@ -190,6 +217,7 @@ def estimer_couts(db, mode="batch", since=None, until=None) -> Couts:
         "mode": mode,
         "resumes": {
             "par_source": by_source,
+            "exclus": _exclus_n,
             "facteur": facteur,
             "cout": round(cout_resumes, 2),
         },

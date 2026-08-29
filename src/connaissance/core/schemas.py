@@ -42,7 +42,8 @@ class ErrorEnvelope(TypedDict):
 # --- pipeline ---
 
 class ResumesManquants(TypedDict):
-    total: int
+    total: int                     # ce qui RESTE à résumer (hors exclus du payant)
+    exclus: NotRequired[int]       # écartés par exclude-processing.txt
     par_source: dict[str, int]
     fichiers: list[str]
 

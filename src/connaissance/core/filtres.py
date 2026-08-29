@@ -121,6 +121,28 @@ def load_exclude_set() -> set[str]:
     return out
 
 
+def is_excluded_source(source_path: str | None,
+                       exclude_set: set[str] | None = None) -> bool:
+    """Le document d'origine est-il exclu du traitement payant ?
+
+    ``source_path`` est le champ ``files.source_path`` d'une transcription,
+    de la forme « Documents/<rel> » ; la liste d'exclusion, elle, stocke le
+    ``<rel>`` seul. Normalise en NFC des deux côtés — macOS rend les deux
+    formes indiscernables à l'ouverture mais pas à la comparaison.
+
+    Passer ``exclude_set`` quand on teste une liste : la lecture du fichier
+    n'a aucune raison d'être refaite à chaque ligne.
+    """
+    if not source_path:
+        return False
+    if exclude_set is None:
+        exclude_set = load_exclude_set()
+    if not exclude_set:
+        return False
+    rel = source_path[len("Documents/"):] if source_path.startswith("Documents/") else source_path
+    return unicodedata.normalize("NFC", rel) in exclude_set
+
+
 def write_exclude_set(rels) -> Path:
     """(Ré)écrire la liste d'exclusion (chemins rel à ~/Documents/), triée NFC."""
     require_connaissance_root()

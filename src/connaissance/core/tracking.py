@@ -1604,7 +1604,7 @@ class TrackingDB:
         les rater que les compter à tort dans un budget temporel.
         """
         query = """
-            SELECT f.path, f.source_type, f.message_id
+            SELECT f.path, f.source_type, f.message_id, f.source_path
             FROM files f
             WHERE f.file_type = 'transcription'
             AND NOT EXISTS (
@@ -1679,6 +1679,7 @@ class TrackingDB:
         """
         return [dict(r) for r in self._conn.execute(
             """SELECT r.path as resume_path, r.source_path as trans_path,
+                      t.source_path as doc_path,
                       r.mtime as resume_mtime, t.mtime as trans_mtime
                FROM files r
                JOIN files t ON t.path = r.source_path
