@@ -31,7 +31,10 @@ from typing import Literal, Optional
 
 Preference = Literal["auto", "quality", "economy"]
 
-MODEL_SONNET = "claude-sonnet-4-6"
+# Sonnet 5 remplace Sonnet 4.6 : plus capable ET moins cher ($2/$10 contre
+# $3/$15 par Mtok), donc la migration n'arbitre rien — elle gagne des deux
+# côtés. Haiku 4.5 reste le palier économique (pas de Haiku plus récent).
+MODEL_SONNET = "claude-sonnet-5"
 MODEL_HAIKU = "claude-haiku-4-5"
 
 THRESHOLDS = {

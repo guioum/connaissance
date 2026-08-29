@@ -882,7 +882,7 @@ server.registerTool(
     inputSchema: {
       scope: z.string().optional().describe("Subfolder of ~/Documents to classify (relative path)."),
       from_signals: z.string().optional().describe("Path to a `documents signals --output-file` JSON (avoids re-scanning)."),
-      model: z.string().optional().describe("Batch model (default: claude-haiku-4-5-20251001)."),
+      model: z.string().optional().describe("Batch model (default: claude-haiku-4-5)."),
       limit: z.number().optional().describe("Cap the number of documents (sampling)."),
       output_file: z.string().optional().describe("Write the full requests JSON to this path (recommended)."),
     },

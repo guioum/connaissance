@@ -29,6 +29,7 @@ Usage :
 import json
 import re
 import sqlite3
+import sys
 import unicodedata
 from contextlib import contextmanager
 from datetime import datetime
@@ -380,15 +381,45 @@ CREATE INDEX IF NOT EXISTS idx_image_ocr_log_isdoc ON image_ocr_log(is_document)
 
 # Tarifs USD / million de tokens — alignés sur claude-api-mcp/src/anthropic.ts.
 # Le prompt ephemeral cached applique 1.25× au write et 0.10× au read.
+#
+# Un modèle ABSENT de cette table ne fait pas d'erreur : il retombe sur
+# `_DEFAULT_PRICING`, et le coût journalisé est alors faux en silence — c'est
+# ainsi que `claude-sonnet-5` aurait été facturé au tarif de Sonnet 4.6 (+50 %).
+# `_prevenir_tarif_inconnu()` le rend audible une fois par modèle.
 PRICING_USD_PER_MTOK: dict[str, dict[str, float]] = {
-    "claude-sonnet-4-5-20250929": {"input": 3.0, "output": 15.0},
+    # Génération courante.
+    "claude-fable-5": {"input": 10.0, "output": 50.0},
+    "claude-opus-5": {"input": 5.0, "output": 25.0},
+    "claude-opus-4-8": {"input": 5.0, "output": 25.0},
+    "claude-opus-4-7": {"input": 5.0, "output": 25.0},
+    "claude-opus-4-6": {"input": 5.0, "output": 25.0},
+    "claude-sonnet-5": {"input": 2.0, "output": 10.0},
     "claude-sonnet-4-6": {"input": 3.0, "output": 15.0},
+    "claude-haiku-4-5": {"input": 1.0, "output": 5.0},
+    "claude-haiku-4-5-20251001": {"input": 1.0, "output": 5.0},
+    # Anciens, gardés pour relire un journal d'époque — ne pas retoucher :
+    # ces lignes servent à expliquer un coût déjà facturé, pas à en prédire un.
+    "claude-sonnet-4-5-20250929": {"input": 3.0, "output": 15.0},
     "claude-sonnet-4-20250514": {"input": 3.0, "output": 15.0},
     "claude-opus-4-5-20250929": {"input": 15.0, "output": 75.0},
-    "claude-haiku-4-5-20251001": {"input": 0.8, "output": 4.0},
-    "claude-haiku-4-5": {"input": 0.8, "output": 4.0},
 }
 _DEFAULT_PRICING = {"input": 3.0, "output": 15.0}
+_TARIFS_INCONNUS_SIGNALES: set[str] = set()
+
+
+def _prevenir_tarif_inconnu(model: str) -> None:
+    """Signaler UNE fois par modèle qu'on facture au tarif par défaut.
+
+    Sans ça, un modèle plus récent que la table est chiffré au tarif de
+    Sonnet 4.6 sans que rien ne le dise, et l'écart se propage jusque dans la
+    calibration empirique de `pipeline costs`.
+    """
+    if model and model not in _TARIFS_INCONNUS_SIGNALES:
+        _TARIFS_INCONNUS_SIGNALES.add(model)
+        print(f"⚠ tarif inconnu pour « {model} » — coût estimé au tarif par "
+              f"défaut ({_DEFAULT_PRICING['input']}/{_DEFAULT_PRICING['output']} "
+              f"par Mtok). Ajouter le modèle à PRICING_USD_PER_MTOK.",
+              file=sys.stderr)
 
 
 # Prix Mistral OCR 4 (déjà tarif batch : $2 / 1000 pages ; OCR 3 était à
@@ -412,7 +443,10 @@ def compute_cost_usd(model: str | None, usage: dict,
     """
     if not usage:
         return None
-    pricing = PRICING_USD_PER_MTOK.get(model or "", _DEFAULT_PRICING)
+    pricing = PRICING_USD_PER_MTOK.get(model or "")
+    if pricing is None:
+        _prevenir_tarif_inconnu(model or "")
+        pricing = _DEFAULT_PRICING
     inp = usage.get("input_tokens") or 0
     out = usage.get("output_tokens") or 0
     cw = usage.get("cache_creation_input_tokens") or 0
@@ -1739,7 +1773,27 @@ class TrackingDB:
             "cache_read_input_tokens": usage.get("cache_read_input_tokens") or 0,
             "units": None, "cost_usd": cost})
 
-    def observed_unit_costs(self, min_samples: int = 30) -> dict:
+    @staticmethod
+    def _modele_courant_du_palier(model: str | None) -> str | None:
+        """Le modèle ACTUEL du même palier que ``model``.
+
+        Le journal porte les modèles d'époque (Sonnet 4.6, Haiku 4.5). Projeter
+        une dépense future à partir de leurs coûts, c'est chiffrer au tarif
+        d'hier : Sonnet 5 coûte $2/$10 là où Sonnet 4.6 coûtait $3/$15, soit un
+        tiers de moins. On ne reprojette pas sur UN modèle unique — le mix
+        Haiku/Sonnet est un choix délibéré de `model_selection` — mais palier
+        par palier, chacun sur son successeur.
+        """
+        from connaissance.core.model_selection import MODEL_HAIKU, MODEL_SONNET
+        m = (model or "").lower()
+        if "haiku" in m:
+            return MODEL_HAIKU
+        if "sonnet" in m:
+            return MODEL_SONNET
+        return None   # opus, ocr, inconnu : tarif d'origine conservé
+
+    def observed_unit_costs(self, min_samples: int = 30,
+                            retarifer: bool = True) -> dict:
         """Coûts unitaires OBSERVÉS ($/unité) par opération depuis ``llm_usage``.
 
         La calibration empirique de l'estimateur (``pipeline detect`` step
@@ -1753,22 +1807,53 @@ class TrackingDB:
         {source_type: {"unit_cost", "n"}}}}``. Seuls les groupes d'au moins
         ``min_samples`` lignes sont retenus (pas de calibration sur 3 points).
         """
+        # (operation, source_type) -> [n, total, n_retarifes]. `None` = tous.
+        agg: dict[tuple, list] = {}
+        for row in self._conn.execute(
+                """SELECT operation, source_type, model, mode, cost_usd,
+                          input_tokens, output_tokens,
+                          cache_creation_input_tokens, cache_read_input_tokens
+                   FROM llm_usage WHERE cost_usd IS NOT NULL"""):
+            (op, st, model, mode, cost, inp, out_t, cw, cr) = row
+            cible = self._modele_courant_du_palier(model) if retarifer else None
+            # Sans tokens (OCR à la page), il n'y a rien à re-tarifer : son coût
+            # journalisé est déjà le prix courant. On recalcule MÊME quand le
+            # modèle cible porte le nom du modèle journalisé : un tarif peut
+            # être corrigé sans que l'identifiant bouge (Haiku 4.5 était inscrit
+            # à $0,8/$4 pour un prix réel de $1/$5, soit 25 % sous le compte sur
+            # 22 575 appels). Le recalcul est idempotent si le tarif n'a pas
+            # changé, et seule la ligne dont le coût BOUGE est comptée.
+            if cible and (inp or out_t):
+                recalcule = compute_cost_usd(cible, {
+                    "input_tokens": inp or 0, "output_tokens": out_t or 0,
+                    "cache_creation_input_tokens": cw or 0,
+                    "cache_read_input_tokens": cr or 0,
+                }, batch=(mode == "batch"))
+                if recalcule is not None and recalcule != cost:
+                    cost, retarife = recalcule, 1
+                else:
+                    retarife = 0
+            else:
+                retarife = 0
+            for cle in ((op, None), (op, st) if st else None):
+                if cle is None:
+                    continue
+                slot = agg.setdefault(cle, [0, 0.0, 0])
+                slot[0] += 1
+                slot[1] += cost
+                slot[2] += retarife
+
         out: dict = {}
-        for op, n, total in self._conn.execute(
-                """SELECT operation, COUNT(*), SUM(cost_usd)
-                   FROM llm_usage WHERE cost_usd IS NOT NULL
-                   GROUP BY operation HAVING COUNT(*) >= ?""", (min_samples,)):
-            out[op] = {"unit_cost": round((total or 0) / n, 6), "n": n,
-                       "par_source": {}}
-        for op, st, n, total in self._conn.execute(
-                """SELECT operation, source_type, COUNT(*), SUM(cost_usd)
-                   FROM llm_usage
-                   WHERE cost_usd IS NOT NULL AND source_type IS NOT NULL
-                   GROUP BY operation, source_type
-                   HAVING COUNT(*) >= ?""", (min_samples,)):
-            if op in out:
-                out[op]["par_source"][st] = {
-                    "unit_cost": round((total or 0) / n, 6), "n": n}
+        for (op, st), (n, total, nr) in agg.items():
+            if st is not None or n < min_samples:
+                continue
+            out[op] = {"unit_cost": round(total / n, 6), "n": n,
+                       "retarifes": nr, "par_source": {}}
+        for (op, st), (n, total, _nr) in agg.items():
+            if st is None or op not in out or n < min_samples:
+                continue
+            out[op]["par_source"][st] = {"unit_cost": round(total / n, 6),
+                                         "n": n}
         return out
 
     def all_doc_rels(self) -> list[str]:

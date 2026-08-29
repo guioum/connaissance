@@ -36,7 +36,7 @@ RESUMES = CONNAISSANCE_ROOT / "Résumés"
 PROMPTS_DIR = Path(__file__).resolve().parent.parent / "prompts"
 
 # Configuration par défaut envoyée à claude-api-mcp.
-DEFAULT_MODEL = "claude-sonnet-4-6"
+DEFAULT_MODEL = "claude-sonnet-5"
 DEFAULT_MAX_TOKENS = 4096
 
 # Mapping source_type → clé du template prompts/resume_*.md

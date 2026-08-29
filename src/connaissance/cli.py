@@ -811,7 +811,7 @@ def build_parser() -> argparse.ArgumentParser:
                             help="Fichier JSON de `documents signals "
                                  "--output-file` (évite un re-scan).")
     p_cls_prep.add_argument("--model", type=str,
-                            default="claude-haiku-4-5-20251001",
+                            default="claude-haiku-4-5",
                             help="Modèle Batch (défaut : Haiku 4.5).")
     p_cls_prep.add_argument("--limit", type=int, default=None,
                             help="Limiter le nombre de documents (échantillon).")

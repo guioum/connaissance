@@ -72,7 +72,7 @@ def canonicalize_category(cat: str | None) -> str | None:
 _DATE_OK = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 PROMPTS_DIR = Path(__file__).resolve().parent.parent / "prompts"
-DEFAULT_MODEL = "claude-haiku-4-5-20251001"   # suffisant pour un signal court
+DEFAULT_MODEL = "claude-haiku-4-5"   # suffisant pour un signal court
 DEFAULT_MAX_TOKENS = 400
 _MAX_KNOWN_ENTITIES = 250
 
