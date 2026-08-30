@@ -1320,6 +1320,22 @@ server.registerTool(
 );
 
 server.registerTool(
+  "connaissance_audit_reunir_compagnons",
+  {
+    description: "Reunite orphaned companion files with their .md. A transcription carries an `<stem>_annotations.json` and images under `Attachments/`, all referenced by paths RELATIVE to its folder — moving the .md without them breaks the links silently, with no error and no counter. Two passes in opposite directions: from the companion left behind, and from the .md whose image is missing. The former location is recovered from the LEDGER (the DB only knows current positions). Dry-run by default.",
+    inputSchema: {
+      dry_run: z.boolean().default(true).describe("Default dry-run ; pass false to actually move files (reversible via ledger)."),
+    },
+  },
+  async (args) => {
+    const a = [];
+    // dry_run=true est le défaut argparse du CLI : on pousse --apply pour le flipper.
+    if (args.dry_run === false) a.push("--apply");
+    return runAndFormat("audit", "reunir-compagnons", a);
+  }
+);
+
+server.registerTool(
   "connaissance_audit_archive_non_documents",
   {
     description: "Archive non-document folders (code, photos, bundles) out of ~/Documents/ into ~/Documents/- Archives/. Updates filtres.yaml to remove the moved paths.",

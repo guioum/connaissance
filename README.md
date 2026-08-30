@@ -84,7 +84,7 @@ cd ..
 ./setup-claude-desktop.sh
 ```
 
-Redémarrer Claude Desktop pour activer les 83 outils
+Redémarrer Claude Desktop pour activer les 84 outils
 `mcp__connaissance__*`.
 
 ## Usage
@@ -126,7 +126,7 @@ connaissance config scoring-set --add-domain-marketing exemple.fr --dry-run
 
 ### MCP tools (via Claude Desktop / cowork)
 
-83 outils mappés 1:1 vers les sous-commandes CLI :
+84 outils mappés 1:1 vers les sous-commandes CLI :
 
 | Groupe | Outils |
 |---|---|
@@ -139,7 +139,7 @@ connaissance config scoring-set --add-domain-marketing exemple.fr --dry-run
 | optimize | `plan`, `apply` |
 | summarize | `plan`, `prepare`, `register` |
 | synthesis | `plan`, `prepare`, `register`, `aliases_candidates`, `relations_candidates`, `entity_paths`, `list_all` |
-| audit | `check`, `reindex_db`, `repair_attachments`, `archive_non_documents`, `restore_journals` |
+| audit | `check`, `reindex_db`, `repair_attachments`, `reunir_compagnons`, `archive_non_documents`, `restore_journals` |
 | actions | `list` |
 | scope | `scan`, `check`, `include`, `exclude` |
 | config | `scoring_show`, `scoring_set`, `scoring_diff`, `scoring_validate` |
@@ -151,7 +151,7 @@ connaissance config scoring-set --add-domain-marketing exemple.fr --dry-run
 | media | `plan`, `apply` |
 | entities | `candidates`, `merge`, `rename` |
 
-Total : **82 outils** sur **20 groupes**.
+Total : **84 outils** sur **20 groupes**.
 
 > Note : `documents ocr-local`/`ocr-images` (OCR Vision local, lié à la machine
 > hôte) et `entities seed`/`list` sont CLI-seulement, sans wrapper MCP.
@@ -167,7 +167,7 @@ Ce repo contient deux choses :
   `connaissance` (trouvé via `CONNAISSANCE_CLI` env ou auto-détection
   dans `~/.local/bin/`) et parse la sortie JSON.
 
-Les 82 outils MCP ne contiennent aucune logique métier : ils mappent
+Les 84 outils MCP ne contiennent aucune logique métier : ils mappent
 les sous-commandes CLI 1:1 et remontent le JSON tel quel.
 
 ## Prérequis
