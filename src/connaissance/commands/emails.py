@@ -26,6 +26,7 @@ from pathlib import Path
 from datetime import datetime, timezone
 from html.parser import HTMLParser
 
+from connaissance.core.companions import encode_link
 from connaissance.core.paths import BASE_PATH, require_paths
 from connaissance.core.schemas import (EmailsCalibrate, EmailsCleanupObsolete,
                                        EmailsExtract, EmailsScore,
@@ -725,7 +726,9 @@ def format_email(msg: dict) -> str:
         lines.append("## Pièces jointes")
         lines.append("")
         for att in msg["attachments"]:
-            path = att.get("path", "")
+            # Cible encodée (une parenthèse dans le nom fermerait le lien),
+            # libellé laissé tel quel — c'est lui que l'humain lit.
+            path = encode_link(att.get("path", ""))
             if att["content_type"].startswith("image/"):
                 lines.append(f'![{att["filename"]}]({path})')
             else:

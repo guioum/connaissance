@@ -190,3 +190,58 @@ def test_reunir_orphelins_laisse_ce_qu_il_ne_sait_pas_replacer(tmp_path,
     assert res["orphelins"] == 1 and res["reunis"] == 0
     assert res["irrecuperables"] == 1
     assert (vrac / "inconnu_annotations.json").exists()
+
+
+# --- Liens markdown et parenthèses ---
+
+def test_encode_link_protege_les_parentheses(tmp_path):
+    """Une parenthèse non échappée FERME le lien markdown : la cible devient
+    un fragment et l'image ne s'affiche nulle part, sans qu'aucun outil ne
+    signale rien. 154 liens de la base étaient dans ce cas."""
+    from connaissance.core.companions import decode_link, encode_link
+    nom = "OmniFocus-1.5-Manual(1)-img0.jpg"
+    assert encode_link(nom) == "OmniFocus-1.5-Manual%281%29-img0.jpg"
+    assert decode_link(encode_link(nom)) == nom
+    # Un nom sans parenthèse traverse inchangé, dans les deux sens.
+    assert encode_link("a-img0.jpg") == "a-img0.jpg"
+    assert decode_link("a-img0.jpg") == "a-img0.jpg"
+
+
+def test_lit_une_cible_encodee(tmp_path):
+    d = tmp_path / "doc"
+    d.mkdir()
+    (d / "Attachments").mkdir()
+    (d / "Attachments" / "Guide(1)-img0.jpg").write_bytes(b"x")
+    md = d / "t.md"
+    md.write_text("![Guide(1)-img0.jpg](./Attachments/Guide%281%29-img0.jpg)",
+                  encoding="utf-8")
+    assert referenced_attachments(md) == {"Guide(1)-img0.jpg"}
+
+
+def test_lit_une_cible_tronquee_grace_au_libelle(tmp_path):
+    """Les liens écrits AVANT l'encodage ont une cible coupée à la première
+    parenthèse. Le LIBELLÉ, lui, porte le nom entier — c'est la seule trace
+    du nom complet, et le fragment ne doit pas compter comme une référence
+    de plus (sinon un lien parfaitement réparable est compté « cassé »)."""
+    d = tmp_path / "doc"
+    d.mkdir()
+    (d / "Attachments").mkdir()
+    (d / "Attachments" / "Guide(1)-img0.jpg").write_bytes(b"x")
+    md = d / "t.md"
+    md.write_text("![Guide(1)-img0.jpg](./Attachments/Guide(1)", encoding="utf-8")
+
+    assert referenced_attachments(md) == {"Guide(1)-img0.jpg"}
+
+
+def test_un_libelle_qui_n_est_pas_un_prefixe_est_ignore(tmp_path):
+    """Le libellé n'est retenu que s'il prolonge la cible : sinon c'est une
+    légende libre, pas un nom de fichier, et l'inventer créerait une
+    référence fantôme."""
+    d = tmp_path / "doc"
+    d.mkdir()
+    (d / "Attachments").mkdir()
+    (d / "Attachments" / "reel.jpg").write_bytes(b"x")
+    md = d / "t.md"
+    md.write_text("![Figure 3 : le schéma](./Attachments/reel.jpg)",
+                  encoding="utf-8")
+    assert referenced_attachments(md) == {"reel.jpg"}

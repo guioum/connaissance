@@ -18,6 +18,7 @@ from pathlib import Path
 import json
 
 
+from connaissance.core.companions import encode_link
 from connaissance.core import filtres as _filtres
 from connaissance.core import ledger as _ledger
 from connaissance.core import ocr_local as _ocr
@@ -305,7 +306,10 @@ def extract_born_digital_images(limit: int | None = None, force: bool = False,
             if not names:
                 skipped["sans_image"] += 1
                 continue
-            links = "\n".join(f"![{n}](./Attachments/{n})" for n in names)
+            # Le NOM reste lisible dans le libellé ; seule la cible est
+            # encodée — une parenthèse non échappée y fermerait le lien.
+            links = "\n".join(
+                f"![{n}](./Attachments/{encode_link(n)})" for n in names)
             md.write_text(content.rstrip("\n") + "\n\n" + links + "\n",
                           encoding="utf-8")
             register_document(db, ab, md)

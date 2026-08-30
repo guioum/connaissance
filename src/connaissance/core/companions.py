@@ -32,8 +32,43 @@ ANNOTATIONS_SUFFIX = "_annotations.json"
 ATTACHMENTS_DIR = "Attachments"
 
 # Une référence d'attachement en markdown : `(./Attachments/x.jpg)`,
-# `(Attachments/x.jpg)`, `(/Attachments/x.jpg)`.
-_ATT_REF_PATTERN = re.compile(r"\(\.?/?Attachments/([^)]+)\)")
+# `(Attachments/x.jpg)`, `(/Attachments/x.jpg)`. Borné à la ligne : un lien
+# dont la cible a été tronquée par une parenthèse n'a pas de « ) » fermante à
+# sa place, et un motif non borné déborderait sur tout le reste du fichier.
+_ATT_REF_PATTERN = re.compile(r"\(\.?/?Attachments/([^)\n]*)\)")
+
+# Le LIBELLÉ d'une image écrite par ce dépôt est le nom du fichier lui-même
+# (`![x.jpg](./Attachments/x.jpg)`). Quand une parenthèse non échappée a
+# tronqué la cible, le libellé, lui, est intact — il reste la seule trace du
+# nom complet dans le fichier. On s'en sert pour relire les liens écrits AVANT
+# `encode_link`, sans avoir à deviner.
+_ATT_LABEL_PATTERN = re.compile(r"!\[([^\]\n]+)\]\(\.?/?Attachments/")
+
+
+def encode_link(nom: str) -> str:
+    """Nom de fichier rendu sûr dans la cible d'un lien markdown.
+
+    Une parenthèse non échappée ferme le lien : `](./Attachments/Guide(1).jpg)`
+    se lit comme la cible `./Attachments/Guide(1` suivie de texte. L'image ne
+    s'affiche nulle part, et aucun outil ne signale rien — 154 liens de la base
+    étaient dans ce cas, tous sur des documents dont le NOM porte une
+    parenthèse (« Manual(1).pdf », « Guide (Temporary Workers).pdf »).
+
+    On encode les seules parenthèses, en pourcent : `%28`/`%29` est compris de
+    tous les lecteurs markdown et laisse le motif de relecture inchangé. La
+    forme CommonMark à chevrons (`](<...>)`) marcherait aussi, mais imposerait
+    de réécrire chaque lecteur de liens du dépôt.
+    """
+    return nom.replace("(", "%28").replace(")", "%29")
+
+
+def decode_link(cible: str) -> str:
+    """Nom de fichier réel derrière une cible de lien. Inverse d'``encode_link``.
+
+    Doit rester tolérant : la base contient des liens écrits AVANT
+    l'encodage, non encodés — et un nom peut légitimement contenir « % ».
+    """
+    return cible.replace("%28", "(").replace("%29", ")")
 
 
 def annotations_path(md_path: Path) -> Path:
@@ -43,10 +78,23 @@ def annotations_path(md_path: Path) -> Path:
 
 def _from_markdown(md_path: Path) -> set[str]:
     try:
-        return set(_ATT_REF_PATTERN.findall(
-            md_path.read_text(encoding="utf-8")))
+        txt = md_path.read_text(encoding="utf-8")
     except OSError:
         return set()
+    cibles = {decode_link(c) for c in _ATT_REF_PATTERN.findall(txt) if c}
+    # Un libellé qui n'est PAS déjà couvert par une cible complète signale une
+    # cible tronquée : on retient le libellé, qui porte le nom entier, et on
+    # écarte le fragment — il ne désigne aucun fichier et ferait compter une
+    # référence « cassée » là où le nom est parfaitement connu.
+    tronquees: set[str] = set()
+    for libelle in _ATT_LABEL_PATTERN.findall(txt):
+        if libelle in cibles:
+            continue
+        prefixes = {c for c in cibles if c and libelle.startswith(c)}
+        if prefixes:
+            cibles.add(libelle)
+            tronquees |= prefixes
+    return cibles - tronquees
 
 
 def _from_annotations(json_path: Path) -> set[str]:
