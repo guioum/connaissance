@@ -368,6 +368,29 @@ def restore_journals(force: bool = False) -> dict:
         db.close()
 
 
+def reunir_compagnons(dry_run: bool = True) -> dict:
+    """Recoller les `.md` et leurs compagnons, dans les deux sens.
+
+    Les deux passes sont nécessaires et ne se recouvrent pas : la première
+    part du compagnon resté derrière (un JSON dont le `.md` est parti), la
+    seconde du `.md` dont une image manque. Une image peut rester orpheline
+    sans qu'aucun JSON ne la signale — c'est le cas de 4 840 références
+    cassées mesurées après la seule première passe.
+    """
+    from connaissance.commands import audit_attachments
+    from connaissance.core.tracking import TrackingDB
+    db = TrackingDB()
+    try:
+        return {
+            "compagnons": audit_attachments.reunir_orphelins(dry_run=dry_run,
+                                                             db=db),
+            "images": audit_attachments.rapatrier_images(dry_run=dry_run,
+                                                         db=db),
+        }
+    finally:
+        db.close()
+
+
 def repair_attachments(dry_run: bool = False) -> AuditRepairAttachments:
     """Réparer les références d'attachements cassées (wrapper audit_attachments)."""
     from connaissance.commands import audit_attachments

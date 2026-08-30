@@ -19,6 +19,7 @@ import yaml
 from connaissance.core.fsio import atomic_write_text
 from connaissance.core.paths import BASE_PATH
 from connaissance.core import ledger as _ledger
+from connaissance.core.companions import companion_moves
 from connaissance.core.manifest_io import load_entries
 from connaissance.core.schemas import (OrganizeApply, OrganizeEntry,
                                        OrganizePlan, OrganizeResolve)
@@ -80,21 +81,6 @@ def _cleanup_empty_parents(path):
         except OSError:
             break
         parent = parent.parent
-
-
-_ATT_REF_PATTERN = re.compile(r'\(\.?/?Attachments/([^)]+)\)')
-
-
-def _extract_attachment_filenames(md_path):
-    """Lire un .md et extraire les noms de fichiers Attachments/ référencés."""
-    filenames = set()
-    try:
-        content = md_path.read_text(encoding="utf-8")
-        for match in _ATT_REF_PATTERN.findall(content):
-            filenames.add(match)
-    except OSError:
-        pass
-    return filenames
 
 
 # Une clé YAML dont la valeur a été repliée occupe PLUSIEURS lignes : la
@@ -178,36 +164,18 @@ def _move_with_attachments(src, dst, source_type="documents",
     if src.exists() and not dst.exists():
         _mv(src, dst)
 
-        # Annotations (documents uniquement)
-        ann_src = src.with_name(src.stem + "_annotations.json")
-        ann_dst = dst.with_name(dst.stem + "_annotations.json")
-        if ann_src.exists() and not ann_dst.exists():
-            _mv(ann_src, ann_dst)
-
-        att_src_dir = src.parent / "Attachments"
-        att_dst_dir = dst.parent / "Attachments"
-
-        filenames = _extract_attachment_filenames(dst)
-        if filenames and att_src_dir.is_dir():
-            # Quels autres .md du dossier source référencent encore ces
-            # attachements ? Si un autre référent subsiste, on copie
-            # (attachement partagé). Sinon on déplace.
-            remaining_refs: set[str] = set()
-            for other_md in att_src_dir.parent.glob("*.md"):
-                if other_md == src or other_md == dst:
-                    continue
-                remaining_refs |= _extract_attachment_filenames(other_md)
-
-            att_dst_dir.mkdir(parents=True, exist_ok=True)
-            for fname in filenames:
-                src_file = att_src_dir / fname
-                dst_file = att_dst_dir / fname
-                if not src_file.exists() or dst_file.exists():
-                    continue
-                if fname in remaining_refs:
-                    shutil.copy2(str(src_file), str(dst_file))
-                else:
-                    _mv(src_file, dst_file)
+        # Compagnons (JSON d'annotations + images d'Attachments). La règle de
+        # « ce qui suit un .md » est définie une seule fois, dans
+        # core/companions — `relocate_document` (classify, entities) applique
+        # exactement la même : deux définitions divergentes, c'est ainsi que la
+        # moitié des chemins de déplacement avait cessé d'emmener les
+        # compagnons sans que personne ne le voie.
+        for c_src, c_dst, partage in companion_moves(src, dst):
+            c_dst.parent.mkdir(parents=True, exist_ok=True)
+            if partage:
+                shutil.copy2(str(c_src), str(c_dst))
+            else:
+                _mv(c_src, c_dst)
 
         _cleanup_empty_parents(src)
         return True

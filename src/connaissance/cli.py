@@ -344,6 +344,8 @@ def _cmd_audit(args) -> Any:
         return audit.restore_journals(force=args.force)
     if args.verb == "repair-attachments":
         return audit.repair_attachments(dry_run=args.dry_run)
+    if args.verb == "reunir-compagnons":
+        return audit.reunir_compagnons(dry_run=args.dry_run)
     if args.verb == "archive-non-documents":
         return audit.archive_non_documents(
             dry_run=args.dry_run,
@@ -982,9 +984,14 @@ def build_parser() -> argparse.ArgumentParser:
     p_aud_verbs = p_aud.add_subparsers(dest="verb", required=True)
     p_aud_check = p_aud_verbs.add_parser("check")
     p_aud_check.add_argument("--steps", type=str, default=None)
-    for verb in ("reindex-db", "repair-attachments", "archive-non-documents"):
+    for verb in ("reindex-db", "repair-attachments", "archive-non-documents",
+                 "reunir-compagnons"):
         vp = p_aud_verbs.add_parser(verb)
-        if verb == "archive-non-documents":
+        if verb == "reunir-compagnons":
+            # Déplace des fichiers (via ledger) : sûre par défaut, --apply
+            # pour agir — même contrat que les autres mutations à disque.
+            add_apply_flag(vp)
+        elif verb == "archive-non-documents":
             # mutation destructive (déplace des dossiers) : sûre par défaut.
             add_apply_flag(vp)
             vp.add_argument("--from-manifest", dest="from_manifest", default=None,

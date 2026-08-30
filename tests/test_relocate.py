@@ -161,3 +161,73 @@ def test_relocate_dry_run(tmp_path, monkeypatch, tracking_db):
                             dry_run=True)
     assert out["dry_run"] and "source" in out["moves"]
     assert (docs / "organismes" / "bn" / "a.pdf").exists()   # rien bougé
+
+
+def test_relocate_emmene_annotations_et_images(tmp_path, monkeypatch,
+                                               tracking_db):
+    """Le JSON d'annotations et les images d'`Attachments/` suivent la
+    transcription.
+
+    Régression du 2026-08-30 : `relocate_document` — la primitive de
+    `classify` et `entities` — déplaçait source + transcription + résumé et
+    laissait les compagnons sur place. Ces fichiers sont désignés par des
+    chemins RELATIFS au dossier du `.md` : rien n'échoue, les liens meurent
+    en silence. Sur la vraie base : 1 210 JSON orphelins et 5 896 images non
+    référencées, dont 848 laissés par les runs `classify`.
+    """
+    import json
+    docs, tr, res, croot = _setup(tmp_path, monkeypatch)
+    (docs / "vrac").mkdir(parents=True)
+    (docs / "vrac" / "IMG_9.jpeg").write_bytes(b"\xff\xd8source")
+    d = tr / "vrac"
+    d.mkdir(parents=True)
+    (d / "IMG_9.md").write_text(
+        "---\ntitle: t\n---\n![vue](./Attachments/img-0.jpeg)\n",
+        encoding="utf-8")
+    (d / "IMG_9_annotations.json").write_text(json.dumps(
+        [{"id": "img-0.jpeg", "path": "./Attachments/img-0.jpeg"}]),
+        encoding="utf-8")
+    (d / "Attachments").mkdir()
+    (d / "Attachments" / "img-0.jpeg").write_bytes(b"\xff\xd8image")
+
+    relocate_document(tracking_db, "vrac/IMG_9.jpeg",
+                      "organismes/hydro/2024-01-05 facture.jpeg",
+                      Lmod.new_run_id("test"))
+
+    dest = tr / "organismes" / "hydro"
+    assert (dest / "2024-01-05 facture.md").exists()
+    # Le JSON suit ET prend le nouveau stem — l'appariement se fait par le nom.
+    assert (dest / "2024-01-05 facture_annotations.json").exists()
+    assert not (d / "IMG_9_annotations.json").exists()
+    # L'image suit, à la même position relative (`./Attachments/`).
+    assert (dest / "Attachments" / "img-0.jpeg").read_bytes() == b"\xff\xd8image"
+    assert not (d / "Attachments" / "img-0.jpeg").exists()
+
+
+def test_relocate_copie_une_image_encore_citee_sur_place(tmp_path, monkeypatch,
+                                                         tracking_db):
+    """Une image citée par un autre `.md` resté dans le dossier source est
+    copiée, pas déplacée : l'arracher casserait le rendu de celui qui reste."""
+    import json
+    docs, tr, res, croot = _setup(tmp_path, monkeypatch)
+    (docs / "vrac").mkdir(parents=True)
+    (docs / "vrac" / "a.pdf").write_bytes(b"%PDF")
+    d = tr / "vrac"
+    d.mkdir(parents=True)
+    (d / "a.md").write_text("---\nt: 1\n---\n![x](./Attachments/partage.jpg)\n",
+                            encoding="utf-8")
+    (d / "a_annotations.json").write_text(json.dumps(
+        [{"id": "partage.jpg", "path": "./Attachments/partage.jpg"}]),
+        encoding="utf-8")
+    (d / "b.md").write_text("---\nt: 2\n---\n![y](./Attachments/partage.jpg)\n",
+                            encoding="utf-8")
+    (d / "Attachments").mkdir()
+    (d / "Attachments" / "partage.jpg").write_bytes(b"img")
+
+    relocate_document(tracking_db, "vrac/a.pdf", "organismes/x/a.pdf",
+                      Lmod.new_run_id("test"))
+
+    assert (tr / "organismes" / "x" / "Attachments" / "partage.jpg").exists()
+    # b.md est resté : son image aussi.
+    assert (d / "Attachments" / "partage.jpg").exists()
+    assert (d / "b.md").exists()

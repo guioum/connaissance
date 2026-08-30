@@ -16,11 +16,13 @@ sous un ancien slug, elle est récupérée et réalignée).
 """
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
 
 import yaml
 
 from connaissance.core import ledger as _ledger
+from connaissance.core.companions import companion_moves
 from connaissance.core.frontmatter import (parse_frontmatter,
                                             split_frontmatter,
                                             write_frontmatter)
@@ -121,9 +123,22 @@ def relocate_document(db, old_rel: str, new_rel: str, run_id: str,
         moves.append(("resume", res_old, res_new))
 
     if dry_run:
+        n_comp = (len(companion_moves(tr_old, tr_new))
+                  if tr_old is not None and tr_old != tr_new else 0)
         return {"dry_run": True, "old": old_rel, "new": new_rel,
                 "moves": [k for k, _, _ in moves],
+                "compagnons": n_comp,
                 "transcription_found": tr_old is not None}
+
+    # Compagnons de la transcription : le JSON d'annotations et les images
+    # d'`Attachments/`. Ils sont désignés par des chemins RELATIFS au dossier
+    # du `.md` — les laisser derrière ne casse pas le déplacement, ça casse
+    # les liens, en silence. `classify` et `entities` passent tous deux par
+    # ici : c'est leur absence de ce calcul qui a laissé 1 210 JSON orphelins
+    # et 5 896 images non référencées au 2026-08-30.
+    compagnons: list[tuple[Path, Path, bool]] = []
+    if tr_old is not None and tr_old != tr_new:
+        compagnons = companion_moves(tr_old, tr_new)
 
     done = []
     src_sha = None
@@ -134,6 +149,16 @@ def relocate_document(db, old_rel: str, new_rel: str, run_id: str,
             if key == "source":
                 src_sha = entry.get("sha256")
             done.append(key)
+        for c_src, c_dst, partage in compagnons:
+            c_dst.parent.mkdir(parents=True, exist_ok=True)
+            if partage:
+                # Un autre `.md` resté sur place cite encore cette image :
+                # la déplacer casserait SON rendu. On duplique — quelques
+                # kilo-octets valent mieux qu'un lien mort.
+                shutil.copy2(str(c_src), str(c_dst))
+            else:
+                _ledger.safe_move(db, c_src, c_dst, f"{reason} compagnon",
+                                  run_id, commit=False)
         # source du résumé → transcription (co-localisée). Mise à jour même en
         # réalignement (la transcription a bougé bien que le résumé non).
         if res_new.is_file() and tr_old is not None:

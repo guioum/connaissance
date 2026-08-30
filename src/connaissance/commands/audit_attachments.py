@@ -17,11 +17,22 @@ import re
 import shutil
 from pathlib import Path
 
+import unicodedata
+from pathlib import Path as pathlib_Path
+
+from connaissance.core import ledger as _ledger
+from connaissance.core.companions import (ANNOTATIONS_SUFFIX,
+                                          ATTACHMENTS_DIR,
+                                          companion_moves,
+                                          referenced_attachments)
 from connaissance.core.paths import BASE_PATH
 from connaissance.core.schemas import AuditRepairAttachments
+from connaissance.core.tracking import TrackingDB
 
 TRANSCRIPTIONS_DOCS = BASE_PATH / "Connaissance" / "Transcriptions" / "Documents"
 CENTRAL_ATT = TRANSCRIPTIONS_DOCS / "Attachments"
+# Les compagnons existent pour les trois sources, pas seulement les documents.
+TRANSCRIPTIONS = BASE_PATH / "Connaissance" / "Transcriptions"
 PATTERN = re.compile(r'\(\.?/?Attachments/([^)]+)\)')
 
 
@@ -95,4 +106,192 @@ def repair(dry_run: bool = False) -> AuditRepairAttachments:
     return stats
 
 
-# `repair()` ci-dessus est déjà l'API publique — rien de plus à ajouter.
+# ---------------------------------------------------------------------------
+# Réunion des compagnons orphelins (JSON d'annotations + images)
+# ---------------------------------------------------------------------------
+
+def _chaine_de_moves(db) -> dict[str, str]:
+    """``ancien chemin absolu -> nouveau``, d'après le ledger.
+
+    Un `.md` a pu être déplacé plusieurs fois (classify, puis fusion
+    d'entités, puis organize) : c'est une chaîne, pas un saut unique.
+    """
+    chaine: dict[str, str] = {}
+    for old, new in db._conn.execute(
+            """SELECT old_path, new_path FROM file_ledger
+               WHERE op='move' AND status='applied'
+                 AND old_path IS NOT NULL AND new_path IS NOT NULL
+               ORDER BY id"""):
+        chaine[unicodedata.normalize("NFC", old)] = \
+            unicodedata.normalize("NFC", new)
+    return chaine
+
+
+def _suivre(chaine: dict[str, str], depart: str) -> str:
+    """Dernier maillon de la chaîne. Borné : un cycle (A→B→A, possible après
+    un revert partiel) ferait autrement boucler la réparation à l'infini."""
+    vus: set[str] = set()
+    p = depart
+    while p in chaine and p not in vus:
+        vus.add(p)
+        p = chaine[p]
+    return p
+
+
+def reunir_orphelins(dry_run: bool = True, db=None) -> dict:
+    """Ramener chaque JSON d'annotations orphelin auprès de son `.md`.
+
+    Un JSON est orphelin quand le `.md` qui portait son nom n'est plus dans
+    son dossier — le `.md` a été déplacé sans lui (cf. la régression du
+    2026-08-30 : `relocate_document` ignorait les compagnons). Le NOM du
+    JSON encode le stem d'alors ; le **ledger**, lui, sait où ce `.md` est
+    parti. C'est la seule clé fiable : la DB, elle, ne garde que la position
+    actuelle et a perdu le lien avec l'emplacement d'origine.
+
+    Les images d'``Attachments/`` suivent via :func:`companion_moves` — la
+    même règle que celle appliquée aux déplacements normaux, pour que
+    réparer et prévenir ne puissent pas diverger.
+    """
+    owns = db is None
+    if owns:
+        db = TrackingDB()
+    out = {"orphelins": 0, "reunis": 0, "irrecuperables": 0,
+           "fichiers_deplaces": 0, "fichiers_copies": 0,
+           "dry_run": dry_run, "exemples": []}
+    try:
+        chaine = _chaine_de_moves(db)
+        run_id = _ledger.new_run_id("reunir-compagnons") if not dry_run else ""
+        for js in sorted(TRANSCRIPTIONS.rglob("*" + ANNOTATIONS_SUFFIX)):
+            base = js.name[: -len(ANNOTATIONS_SUFFIX)]
+            md_ici = js.parent / (base + ".md")
+            if md_ici.exists():
+                continue                      # compagnon déjà bien placé
+            out["orphelins"] += 1
+            md_final = pathlib_Path(_suivre(
+                chaine, unicodedata.normalize("NFC", str(md_ici))))
+            if md_final == md_ici or not md_final.is_file():
+                out["irrecuperables"] += 1
+                continue
+            moves = companion_moves(md_ici, md_final)
+            if not moves:
+                out["irrecuperables"] += 1
+                continue
+            out["reunis"] += 1
+            if len(out["exemples"]) < 5:
+                out["exemples"].append({
+                    "json": str(js.relative_to(TRANSCRIPTIONS)),
+                    "md": str(md_final.relative_to(TRANSCRIPTIONS)),
+                    "fichiers": len(moves),
+                })
+            for c_src, c_dst, partage in moves:
+                if partage:
+                    out["fichiers_copies"] += 1
+                else:
+                    out["fichiers_deplaces"] += 1
+                if dry_run:
+                    continue
+                c_dst.parent.mkdir(parents=True, exist_ok=True)
+                if partage:
+                    shutil.copy2(str(c_src), str(c_dst))
+                else:
+                    _ledger.safe_move(db, c_src, c_dst,
+                                      "réunion compagnon orphelin", run_id)
+        if not dry_run and out["reunis"]:
+            out["ledger_run"] = run_id
+    finally:
+        if owns:
+            db.close()
+    return out
+
+
+def _chaine_inverse(db) -> dict[str, list[str]]:
+    """``nouveau chemin -> anciens``. Un `.md` peut avoir plusieurs
+    emplacements antérieurs (classify puis fusion d'entités) : on les garde
+    tous, du plus récent au plus ancien."""
+    inv: dict[str, list[str]] = {}
+    for old, new in db._conn.execute(
+            """SELECT old_path, new_path FROM file_ledger
+               WHERE op='move' AND status='applied'
+                 AND old_path IS NOT NULL AND new_path IS NOT NULL
+               ORDER BY id DESC"""):
+        inv.setdefault(unicodedata.normalize("NFC", new), []).append(
+            unicodedata.normalize("NFC", old))
+    return inv
+
+
+def _anciens_dossiers(inv: dict[str, list[str]], md: pathlib_Path,
+                      max_sauts: int = 12) -> list[pathlib_Path]:
+    """Dossiers qu'un `.md` a occupés avant d'arriver là où il est."""
+    out, courant, vus = [], unicodedata.normalize("NFC", str(md)), set()
+    for _ in range(max_sauts):
+        precedents = inv.get(courant)
+        if not precedents:
+            break
+        courant = precedents[0]
+        if courant in vus:
+            break
+        vus.add(courant)
+        out.append(pathlib_Path(courant).parent)
+    return out
+
+
+def rapatrier_images(dry_run: bool = True, db=None) -> dict:
+    """Ramener les images qu'un `.md` cite sans les avoir sous la main.
+
+    Symétrique de :func:`reunir_orphelins` : là on partait du compagnon resté
+    derrière, ici on part du `.md` dont le lien est mort. Les deux sont
+    nécessaires — une image reste orpheline sans JSON pour la signaler, et
+    aucun JSON orphelin ne pointe alors vers elle.
+
+    L'image est cherchée dans les dossiers que CE `.md` a réellement occupés,
+    remontés par le ledger — pas par son nom dans tout l'arbre. Deux
+    documents scannés le même jour peuvent porter des noms d'image
+    identiques ; prendre le premier homonyme venu recollerait la mauvaise
+    image au bon document, en silence et sans rien casser de visible.
+    """
+    owns = db is None
+    if owns:
+        db = TrackingDB()
+    out = {"md_examines": 0, "refs_cassees": 0, "rapatriees": 0,
+           "introuvables": 0, "copiees": 0, "dry_run": dry_run}
+    try:
+        inv = _chaine_inverse(db)
+        run_id = _ledger.new_run_id("rapatrier-images") if not dry_run else ""
+        for md in sorted(TRANSCRIPTIONS.rglob("*.md")):
+            if ATTACHMENTS_DIR in md.parts:
+                continue
+            manquantes = {n for n in referenced_attachments(md)
+                          if not (md.parent / ATTACHMENTS_DIR / n).exists()}
+            if not manquantes:
+                continue
+            out["md_examines"] += 1
+            out["refs_cassees"] += len(manquantes)
+            dossiers = _anciens_dossiers(inv, md)
+            for nom in sorted(manquantes):
+                source = next(
+                    (d / ATTACHMENTS_DIR / nom for d in dossiers
+                     if (d / ATTACHMENTS_DIR / nom).is_file()), None)
+                if source is None:
+                    out["introuvables"] += 1
+                    continue
+                cible = md.parent / ATTACHMENTS_DIR / nom
+                # Un `.md` resté dans le dossier d'origine peut citer la même
+                # image : on duplique plutôt que de casser son rendu.
+                partage = any(
+                    autre != md and nom in referenced_attachments(autre)
+                    for autre in source.parent.parent.glob("*.md"))
+                out["copiees" if partage else "rapatriees"] += 1
+                if dry_run:
+                    continue
+                cible.parent.mkdir(parents=True, exist_ok=True)
+                if partage:
+                    shutil.copy2(str(source), str(cible))
+                else:
+                    _ledger.safe_move(db, source, cible,
+                                      "rapatriement image", run_id)
+        if not dry_run and (out["rapatriees"] or out["copiees"]):
+            out["ledger_run"] = run_id
+    finally:
+        if owns:
+            db.close()
+    return out
