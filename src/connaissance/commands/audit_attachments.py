@@ -220,19 +220,57 @@ def _chaine_inverse(db) -> dict[str, list[str]]:
 
 
 def _anciens_dossiers(inv: dict[str, list[str]], md: pathlib_Path,
-                      max_sauts: int = 12) -> list[pathlib_Path]:
-    """Dossiers qu'un `.md` a occupés avant d'arriver là où il est."""
-    out, courant, vus = [], unicodedata.normalize("NFC", str(md)), set()
-    for _ in range(max_sauts):
-        precedents = inv.get(courant)
-        if not precedents:
-            break
-        courant = precedents[0]
-        if courant in vus:
-            break
-        vus.add(courant)
-        out.append(pathlib_Path(courant).parent)
+                      max_noeuds: int = 60) -> list[pathlib_Path]:
+    """Dossiers qu'un `.md` a occupés avant d'arriver là où il est.
+
+    L'histoire remonte en ARBRE, pas en ligne : plusieurs `.md` d'origine
+    différente peuvent avoir convergé vers un même chemin (uniquification,
+    fusion d'entités — quatre cartes RAMQ distinctes sont arrivées sur
+    « carte-d-assurance-maladie.md »). Ne suivre que le prédécesseur le plus
+    récent ferait manquer les images restées dans les autres branches.
+    Parcours en largeur, borné : les branches proches d'abord.
+    """
+    out: list[pathlib_Path] = []
+    vus = {unicodedata.normalize("NFC", str(md))}
+    file: list[str] = [unicodedata.normalize("NFC", str(md))]
+    while file and len(vus) < max_noeuds:
+        courant = file.pop(0)
+        for precedent in inv.get(courant, []):
+            if precedent in vus:
+                continue
+            vus.add(precedent)
+            file.append(precedent)
+            out.append(pathlib_Path(precedent).parent)
     return out
+
+
+# Un nom de la forme `<uuid>.<ext>` est unique PAR CONSTRUCTION : le chercher
+# dans tout l'arbre ne peut pas recoller la mauvaise image. Aucun autre nom ne
+# donne cette garantie — « img0.jpg » est produit à l'identique par chaque
+# document, et un homonyme rebranché en silence serait indétectable.
+_UUID_NAME = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.", re.I)
+
+
+def _index_par_nom() -> dict[str, list[pathlib_Path]]:
+    """Tous les fichiers d'``Attachments/``, groupés par nom."""
+    idx: dict[str, list[pathlib_Path]] = {}
+    for f in TRANSCRIPTIONS.rglob("*"):
+        if f.is_file() and ATTACHMENTS_DIR in f.parts:
+            idx.setdefault(f.name, []).append(f)
+    return idx
+
+
+def _porteur_unique_si_uuid(nom: str,
+                            porteurs: dict[str, list[pathlib_Path]]
+                            ) -> pathlib_Path | None:
+    """Dernier recours, volontairement étroit : seulement pour un nom UUID, et
+    seulement s'il n'existe qu'UN porteur. Deux porteurs = ambiguïté, on
+    s'abstient plutôt que de choisir."""
+    if not _UUID_NAME.match(nom):
+        return None
+    trouves = porteurs.get(nom) or []
+    return trouves[0] if len(trouves) == 1 else None
 
 
 def rapatrier_images(dry_run: bool = True, db=None) -> dict:
@@ -253,9 +291,10 @@ def rapatrier_images(dry_run: bool = True, db=None) -> dict:
     if owns:
         db = TrackingDB()
     out = {"md_examines": 0, "refs_cassees": 0, "rapatriees": 0,
-           "introuvables": 0, "copiees": 0, "dry_run": dry_run}
+           "introuvables": 0, "copiees": 0, "par_uuid": 0, "dry_run": dry_run}
     try:
         inv = _chaine_inverse(db)
+        porteurs = _index_par_nom()
         run_id = _ledger.new_run_id("rapatrier-images") if not dry_run else ""
         for md in sorted(TRANSCRIPTIONS.rglob("*.md")):
             if ATTACHMENTS_DIR in md.parts:
@@ -271,6 +310,10 @@ def rapatrier_images(dry_run: bool = True, db=None) -> dict:
                 source = next(
                     (d / ATTACHMENTS_DIR / nom for d in dossiers
                      if (d / ATTACHMENTS_DIR / nom).is_file()), None)
+                if source is None:
+                    source = _porteur_unique_si_uuid(nom, porteurs)
+                    if source is not None:
+                        out["par_uuid"] += 1
                 if source is None:
                     out["introuvables"] += 1
                     continue
